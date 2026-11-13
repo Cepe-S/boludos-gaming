@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+
+    <!-- Border Glow Gradient -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="50%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- Controller Body Gradient -->
+    <linearGradient id="padGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+
+    <!-- Flame / Humo Gradient -->
+    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+
+    <!-- Dice Face Gradients -->
+    <linearGradient id="diceTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="diceLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#3730a3" />
+    </linearGradient>
+    <linearGradient id="diceRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+
+    <!-- Neon Glow Filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base Rounded Container with Neon Border -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="6" />
+
+  <!-- Ambient Glow Behind Elements -->
+  <circle cx="256" cy="180" r="90" fill="#6366f1" opacity="0.18" filter="url(#softGlow)" />
+  <circle cx="256" cy="330" r="110" fill="#10b981" opacity="0.15" filter="url(#softGlow)" />
+
+  <!-- TRIBUNAL DEL HUMO: Cyber Flame Background (Centered at top) -->
+  <g filter="url(#neonGlow)">
+    <!-- Back Outer Flame -->
+    <path d="M 256 60
+             C 278 105, 305 130, 298 170
+             C 292 205, 275 220, 256 225
+             C 237 220, 220 205, 214 170
+             C 207 130, 234 105, 256 60 Z"
+          fill="url(#flameGrad)" opacity="0.85" />
+
+    <!-- Left Smoke Tendril -->
+    <path d="M 230 110
+             C 205 135, 195 160, 206 185
+             C 212 165, 222 150, 230 140 Z"
+          fill="#fbbf24" opacity="0.9" />
+
+    <!-- Right Smoke Tendril -->
+    <path d="M 282 110
+             C 307 135, 317 160, 306 185
+             C 300 165, 290 150, 282 140 Z"
+          fill="#fbbf24" opacity="0.9" />
+  </g>
+
+  <!-- RULETA DEL VICIO: Isometric Neon Gaming Dice -->
+  <g transform="translate(256, 175)" filter="url(#neonGlow)">
+    <!-- Top Face -->
+    <polygon points="0,-45 42,-21 0,3 -42,-21" fill="url(#diceTop)" stroke="#a5b4fc" stroke-width="2" />
+    <!-- Left Face -->
+    <polygon points="-42,-21 0,3 0,52 -42,28" fill="url(#diceLeft)" stroke="#818cf8" stroke-width="2" />
+    <!-- Right Face -->
+    <polygon points="0,3 42,-21 42,28 0,52" fill="url(#diceRight)" stroke="#34d399" stroke-width="2" />
+
+    <!-- Top Pip (Single Center Pip) -->
+    <circle cx="0" cy="-21" r="5" fill="#ffffff" />
+
+    <!-- Left Pips (3 diagonal) -->
+    <circle cx="-25" cy="5" r="4" fill="#c7d2fe" />
+    <circle cx="-21" cy="27" r="4" fill="#c7d2fe" />
+    <circle cx="-17" cy="16" r="4" fill="#ffffff" />
+
+    <!-- Right Pips (2 pips) -->
+    <circle cx="16" cy="18" r="4" fill="#ecfdf5" />
+    <circle cx="26" cy="36" r="4" fill="#ecfdf5" />
+  </g>
+
+  <!-- GAMING CONTROLLER BODY -->
+  <g filter="url(#neonGlow)">
+    <!-- Main Controller Silhouette -->
+    <path d="M 160 250
+             C 195 240, 317 240, 352 250
+             C 390 262, 422 300, 412 360
+             C 404 405, 370 415, 342 395
+             C 318 378, 300 345, 285 345
+             L 227 345
+             C 212 345, 194 378, 170 395
+             C 142 415, 108 405, 100 360
+             C 90 300, 122 262, 160 250 Z"
+          fill="url(#padGrad)"
+          stroke="#6366f1"
+          stroke-width="5" />
+
+    <!-- Grip Highlights -->
+    <path d="M 125 310 C 120 345, 130 375, 150 385" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.6" />
+    <path d="M 387 310 C 392 345, 382 375, 362 385" stroke="#10b981" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.6" />
+
+    <!-- Center Bridge Accent -->
+    <path d="M 235 275 Q 256 280 277 275" stroke="#818cf8" stroke-width="3" stroke-linecap="round" fill="none" />
+    <circle cx="242" cy="290" r="4" fill="#94a3b8" />
+    <circle cx="270" cy="290" r="4" fill="#94a3b8" />
+
+    <!-- LEFT D-PAD (Cruz de Dirección) -->
+    <g transform="translate(165, 305)">
+      <rect x="-8" y="-26" width="16" height="52" rx="4" fill="#0f172a" stroke="#38bdf8" stroke-width="2.5" />
+      <rect x="-26" y="-8" width="52" height="16" rx="4" fill="#0f172a" stroke="#38bdf8" stroke-width="2.5" />
+      <!-- D-Pad Center Accent -->
+      <circle cx="0" cy="0" r="4" fill="#38bdf8" />
+    </g>
+
+    <!-- RIGHT ACTION BUTTONS (A, B, X, Y) -->
+    <g transform="translate(345, 305)">
+      <!-- Top: Y (Amber) -->
+      <circle cx="0" cy="-18" r="8" fill="#0f172a" stroke="#f59e0b" stroke-width="2.5" />
+      <circle cx="0" cy="-18" r="3.5" fill="#f59e0b" />
+
+      <!-- Right: B (Red / Sanction) -->
+      <circle cx="18" cy="0" r="8" fill="#0f172a" stroke="#f43f5e" stroke-width="2.5" />
+      <circle cx="18" cy="0" r="3.5" fill="#f43f5e" />
+
+      <!-- Bottom: A (Emerald / Puntual) -->
+      <circle cx="0" cy="18" r="8" fill="#0f172a" stroke="#10b981" stroke-width="2.5" />
+      <circle cx="0" cy="18" r="3.5" fill="#10b981" />
+
+      <!-- Left: X (Indigo / Vicio) -->
+      <circle cx="-18" cy="0" r="8" fill="#0f172a" stroke="#6366f1" stroke-width="2.5" />
+      <circle cx="-18" cy="0" r="3.5" fill="#6366f1" />
+    </g>
+
+    <!-- ANALOG THUMBSTICKS (Palancas con resplandor) -->
+    <!-- Left Thumbstick -->
+    <g transform="translate(210, 335)">
+      <circle cx="0" cy="0" r="20" fill="#0b0f19" stroke="#334155" stroke-width="2" />
+      <circle cx="0" cy="0" r="14" fill="#1e293b" stroke="#6366f1" stroke-width="2.5" />
+      <circle cx="0" cy="0" r="5" fill="#818cf8" />
+    </g>
+
+    <!-- Right Thumbstick -->
+    <g transform="translate(302, 335)">
+      <circle cx="0" cy="0" r="20" fill="#0b0f19" stroke="#334155" stroke-width="2" />
+      <circle cx="0" cy="0" r="14" fill="#1e293b" stroke="#10b981" stroke-width="2.5" />
+      <circle cx="0" cy="0" r="5" fill="#34d399" />
+    </g>
+  </g>
+
+  <!-- BRANDING LABEL: "BOLUDOS GAMING" -->
+  <text x="256" y="445"
+        text-anchor="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-weight="900"
+        font-size="28"
+        letter-spacing="4"
+        fill="#ffffff">
+    BOLUDOS GAMING
+  </text>
+  <text x="256" y="470"
+        text-anchor="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-weight="700"
+        font-size="14"
+        letter-spacing="6"
+        fill="#10b981">
+    RULETA &amp; TRIBUNAL
+  </text>
+</svg>

@@ -1,0 +1,51 @@
+{
+  "name": "Boludos Gaming — Organizador de Vicio & Ruleta",
+  "short_name": "Boludos Gaming",
+  "description": "Organizador de sesiones de vicio gamer con cálculo de sincronía algorítmica, ruleta ponderada de juegos, Tribunal del Humo y alertas en vivo a Discord y Web Push.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090d16",
+  "theme_color": "#6366f1",
+  "lang": "es-AR",
+  "dir": "ltr",
+  "categories": ["games", "social", "entertainment"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nueva Sesión de Vicio",
+      "short_name": "Nueva Sesión",
+      "description": "Armar una nueva sesión nocturna de vicio con los pibes",
+      "url": "./#new-session",
+      "icons": [{ "src": "./icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Tirar la Ruleta",
+      "short_name": "Ruleta",
+      "description": "Sortear qué juego sale hoy según la sincronía del grupo",
+      "url": "./#roulette",
+      "icons": [{ "src": "./icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Tribunal del Humo",
+      "short_name": "Tribunal",
+      "description": "Ver el ranking de fantasmas y multas de karma",
+      "url": "./#tribunal",
+      "icons": [{ "src": "./icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
+    }
+  ]
+}
