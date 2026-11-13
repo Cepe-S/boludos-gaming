@@ -50,6 +50,20 @@ import {
 } from '../lib/pushService';
 import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 import {
+  dbCreateSession,
+  dbDeleteParticipant,
+  dbInsertChatMessage,
+  dbInsertGame,
+  dbInsertSanction,
+  dbUpdateChatReactions,
+  dbUpdateDiscordConfig,
+  dbUpdateSessionGame,
+  dbUpsertAttendanceVote,
+  dbUpsertParticipant,
+  dbUpsertPreference,
+  fetchAllSupabaseData,
+} from '../lib/supabaseSync';
+import {
   INITIAL_CHAT_MESSAGES,
   INITIAL_DISCORD_CONFIG,
   INITIAL_DISCORD_LOGS,
@@ -168,6 +182,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Register Service Worker on initial mount
   useEffect(() => {
     registerServiceWorker().catch(() => {});
+  }, []);
+
+  // Hydrate and subscribe to Supabase Realtime when configured
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    let isMounted = true;
+
+    const hydrate = async () => {
+      const data = await fetchAllSupabaseData();
+      if (!data || !isMounted) return;
+
+      if (data.players.length > 0) setPlayers(data.players);
+      if (data.games.length > 0) setGames(data.games);
+      if (data.preferences.length > 0) setPreferences(data.preferences);
+      if (data.sessions.length > 0) {
+        setSessions(data.sessions);
+        setActiveSessionIdState((prev) =>
+          data.sessions.some((s) => s.id === prev) ? prev : data.sessions[0].id
+        );
+      }
+      setSanctions(data.sanctions);
+      if (data.chatMessages.length > 0) setChatMessages(data.chatMessages);
+      if (data.discordConfig) setDiscordConfig(data.discordConfig);
+    };
+
+    hydrate();
+
+    const channel = supabase
+      .channel('boludos-gaming-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        () => {
+          hydrate();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase?.removeChannel(channel);
+    };
   }, []);
 
   // Save changes to localStorage
@@ -332,7 +389,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await supabase.auth.signInWithOAuth({
         provider: 'discord',
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: `${window.location.origin}${window.location.pathname}`,
         },
       });
     } else {
@@ -357,14 +414,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 2. Games & Preferences (1-5★)
   const updateGamePreference = useCallback(
     (gameId: string, plays: boolean, rating: GameRating) => {
+      const nextPref = { userId: currentUserId, gameId, plays, rating };
       setPreferences((prev) => {
         const filtered = prev.filter(
           (p) => !(p.userId === currentUserId && p.gameId === gameId)
         );
-        const updated = [...filtered, { userId: currentUserId, gameId, plays, rating }];
+        const updated = [...filtered, nextPref];
         syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: updated });
         return updated;
       });
+      dbUpsertPreference(nextPref).catch(console.warn);
     },
     [currentUserId, syncChannel]
   );
@@ -382,16 +441,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_ALL', payload: { games: updated } });
         return updated;
       });
+      dbInsertGame(newGame).catch(console.warn);
 
+      const defaultPref = {
+        userId: currentUserId,
+        gameId: newGame.id,
+        plays: true,
+        rating: 4 as GameRating,
+      };
       // Add default preference for current user
       setPreferences((prev) => {
-        const updated = [
-          ...prev,
-          { userId: currentUserId, gameId: newGame.id, plays: true, rating: 4 as GameRating },
-        ];
+        const updated = [...prev, defaultPref];
         syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: updated });
         return updated;
       });
+      dbUpsertPreference(defaultPref).catch(console.warn);
 
       triggerNotificationPipeline(
         {
@@ -451,6 +515,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       });
 
+      dbCreateSession(newSession).catch(console.warn);
       setActiveSessionIdState(newSession.id);
 
       // Discord Rich Embed & Webhook
@@ -525,6 +590,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               : [...sess.participants, participantData];
 
           const updatedSession = { ...sess, participants: newParticipants };
+          dbUpsertParticipant(sessionId, participantData).catch(console.warn);
 
           // Build Discord Log
           const log = buildPlayerJoinedLog(
@@ -578,6 +644,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
         return updated;
       });
+      dbDeleteParticipant(sessionId, targetUserId).catch(console.warn);
     },
     [currentUserId, syncChannel]
   );
@@ -613,6 +680,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
         return updated;
       });
+      dbUpdateSessionGame(sessionId, winningGame.id, true).catch(console.warn);
 
       // Discord Rich Embed & Webhook
       const discordLog = buildRouletteWinnerLog(
@@ -658,6 +726,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
         return updated;
       });
+      dbUpdateSessionGame(sessionId, gameId, false).catch(console.warn);
     },
     [syncChannel]
   );
@@ -722,6 +791,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               syncChannel?.postMessage({ type: 'SYNC_SANCTIONS', payload: updatedSanc });
               return updatedSanc;
             });
+            dbInsertSanction(sanctionItem).catch(console.warn);
 
             // Discord Rich Embed & Webhook
             const discordLog = buildCheckinUpdateLog(
@@ -751,11 +821,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Update participant in session
         const updatedParticipants = targetSession.participants.map((p) => {
           if (p.userId !== targetUserId) return p;
-          return {
+          const updatedPart = {
             ...p,
             checkedInAt: currentTime,
             attendanceStatus: evaluation.status,
           };
+          dbUpsertParticipant(sessionId, {
+            ...updatedPart,
+            checkedInAt: new Date().toISOString(),
+          }).catch(console.warn);
+          return updatedPart;
         });
 
         const updatedSessions = prevSessions.map((s) =>
@@ -828,6 +903,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_SANCTIONS', payload: updated });
         return updated;
       });
+      dbInsertSanction(sanctionRecord).catch(console.warn);
 
       setPlayers((prev) => {
         const updated = prev.map((p) => {
@@ -918,6 +994,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
         return updated;
       });
+      dbUpsertAttendanceVote(sessionId, newVote).catch(console.warn);
     },
     [currentUserId, syncChannel, issueDirectSanction]
   );
@@ -987,6 +1064,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncChannel?.postMessage({ type: 'SYNC_CHAT', payload: updated });
         return updated;
       });
+      dbInsertChatMessage(newMessage).catch(console.warn);
 
       // Sound chime
       playNotificationSound('message');
@@ -1050,6 +1128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             newReactions = [...msg.reactions, { emoji, userIds: [currentUserId] }];
           }
 
+          dbUpdateChatReactions(msg.id, newReactions).catch(console.warn);
           return { ...msg, reactions: newReactions };
         });
 
@@ -1062,17 +1141,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 6. Discord Bot & Webhook Settings
   const updateDiscordConfig = useCallback((patch: Partial<DiscordIntegrationConfig>) => {
-    setDiscordConfig((prev) => ({ ...prev, ...patch }));
+    setDiscordConfig((prev) => {
+      const next = { ...prev, ...patch };
+      dbUpdateDiscordConfig(next).catch(console.warn);
+      return next;
+    });
   }, []);
 
   const toggleDiscordEvent = useCallback((eventType: DiscordEventType, enabled: boolean) => {
-    setDiscordConfig((prev) => ({
-      ...prev,
-      events: {
-        ...prev.events,
-        [eventType]: enabled,
-      },
-    }));
+    setDiscordConfig((prev) => {
+      const next = {
+        ...prev,
+        events: {
+          ...prev.events,
+          [eventType]: enabled,
+        },
+      };
+      dbUpdateDiscordConfig(next).catch(console.warn);
+      return next;
+    });
   }, []);
 
   const sendTestDiscordNotification = useCallback(async (): Promise<{

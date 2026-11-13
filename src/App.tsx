@@ -31,6 +31,7 @@ export function App() {
     discordConfig,
     discordLogs,
     pushAlerts,
+    isSupabaseConnected,
     resetDemoData,
   } = useApp();
 
@@ -102,14 +103,21 @@ export function App() {
               <span>Push ({pushAlerts.length})</span>
             </button>
 
-            <button
-              onClick={resetDemoData}
-              title="Restaurar datos de demostración originales"
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/70 transition cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span className="hidden sm:inline">Reset Demo</span>
-            </button>
+            {isSupabaseConnected ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Supabase Live</span>
+              </span>
+            ) : (
+              <button
+                onClick={resetDemoData}
+                title="Restaurar datos de demostración originales"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/70 transition cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span className="hidden sm:inline">Reset Demo</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

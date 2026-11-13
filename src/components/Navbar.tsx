@@ -210,7 +210,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="px-3.5 py-2 border-b border-indigo-950/60">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
-                        Cambiar Jugador Activo (Demo)
+                        {isSupabaseConnected ? 'Cambiar Jugador (Supabase Live)' : 'Cambiar Jugador Activo (Demo)'}
                       </span>
                       <span className="text-[10px] text-slate-400">
                         {players.length} amigos
