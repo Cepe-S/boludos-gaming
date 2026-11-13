@@ -1,22 +1,19 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { isDiscordOAuthProviderEnabled } from '../lib/supabaseClient';
 import {
   Gamepad2,
   Sparkles,
   UserPlus,
-  ShieldAlert,
   Clock,
   Flame,
   Dices,
-  CalendarCheck,
   ArrowRight,
   GraduationCap,
   CheckCircle2,
   Radio,
   Zap,
-  Scale,
   Bot,
-  ExternalLink,
   Users,
   Check,
   AlertCircle,
@@ -49,23 +46,58 @@ export const WelcomeAuthView: React.FC = () => {
   const [selectedAvatar, setSelectedAvatar] = useState(PRESET_AVATARS[0]);
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [oauthBanner, setOauthBanner] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingOAuth, setIsCheckingOAuth] = useState(false);
 
   const activeAvatar = customAvatarUrl.trim() ? customAvatarUrl.trim() : selectedAvatar;
 
-  const handleCreateProfile = (e: React.FormEvent) => {
+  const handleDiscordOAuthClick = async () => {
+    setOauthBanner(null);
+    setIsCheckingOAuth(true);
+    try {
+      const oauthEnabled = await isDiscordOAuthProviderEnabled();
+      if (!oauthEnabled) {
+        setOauthBanner(
+          '⚠️ El proveedor OAuth2 de Discord aún no fue activado en el panel de Supabase (Authentication -> Providers -> Discord). Podés ingresar ahora mismo poniendo tu Usuario de Discord y Apodo acá abajo (se guarda directo en la base de datos de Supabase), o activar el Client ID/Secret de Discord en Supabase.'
+        );
+        return;
+      }
+      await loginWithDiscord();
+    } catch (err: unknown) {
+      setOauthBanner(
+        err instanceof Error
+          ? err.message
+          : '⚠️ El proveedor OAuth2 de Discord aún no fue activado en el panel de Supabase (Authentication -> Providers -> Discord). Podés ingresar ahora mismo poniendo tu Usuario de Discord y Apodo acá abajo (se guarda directo en la base de datos de Supabase), o activar el Client ID/Secret de Discord en Supabase.'
+      );
+    } finally {
+      setIsCheckingOAuth(false);
+    }
+  };
+
+  const handleCreateOrLoginProfile = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
     const cleanName = displayName.trim();
-    const cleanDiscord = discordUsername.trim();
+    const cleanDiscord = discordUsername.trim().replace(/^@/, '');
 
     if (!cleanName) {
       setFormError('Por favor ingresá tu nombre o apodo para identificarte en el grupo.');
       return;
     }
     if (!cleanDiscord) {
-      setFormError('Ingresá tu usuario de Discord (e.g. santi.cepe) para sincronizar tu perfil.');
+      setFormError('Ingresá tu usuario de Discord (ej: santi.cepe) para sincronizar tu perfil.');
+      return;
+    }
+
+    // Check if player already exists in group (case-insensitive)
+    const existing = players.find(
+      (p) => p.discordUsername.trim().toLowerCase().replace(/^@/, '') === cleanDiscord.toLowerCase()
+    );
+
+    if (existing) {
+      loginAsProfile(existing.id);
       return;
     }
 
@@ -140,7 +172,7 @@ export const WelcomeAuthView: React.FC = () => {
                 }`}
               />
               <span className="text-slate-300">
-                {isSupabaseConnected ? 'Supabase Realtime 🟢' : 'Modo Demo / Local ⚡'}
+                {isSupabaseConnected ? 'Supabase Realtime Conectado 🟢' : 'Conectando con Supabase... 🟡'}
               </span>
             </div>
           </div>
@@ -172,7 +204,7 @@ export const WelcomeAuthView: React.FC = () => {
                 <span>Auto-Inscripción</span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Anótate una vez en tu semana y el sistema te enrola solo todos los días sin preguntar.
+                Anotate una vez en tu semana y el sistema te enrola solo todos los días sin preguntar.
               </p>
             </div>
 
@@ -217,23 +249,37 @@ export const WelcomeAuthView: React.FC = () => {
                 <UserPlus className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-white">Ingreso &amp; Nuevo Perfil</h2>
+                <h2 className="text-xl font-bold text-white">Ingresar con tu Cuenta de Discord</h2>
                 <p className="text-xs text-slate-400">
-                  Entrá con Discord o creá tu perfil de jugador en 30 segundos
+                  Entrá con tu usuario de Discord o creá tu perfil directo en Supabase
                 </p>
               </div>
             </div>
 
             {/* Discord OAuth Action */}
-            <div className="mb-8">
+            <div className="mb-6">
               <button
                 type="button"
-                onClick={() => loginWithDiscord()}
-                className="w-full flex items-center justify-center gap-3 py-3.5 px-6 rounded-xl font-bold text-sm text-white bg-[#5865F2] hover:bg-[#4752c4] active:scale-[0.99] transition-all shadow-lg shadow-[#5865F2]/25 focus:outline-none focus:ring-2 focus:ring-[#5865F2] focus:ring-offset-2 focus:ring-offset-[#131c31]"
+                onClick={handleDiscordOAuthClick}
+                disabled={isCheckingOAuth}
+                className="w-full flex items-center justify-center gap-3 py-3.5 px-6 rounded-xl font-bold text-sm text-white bg-[#5865F2] hover:bg-[#4752c4] active:scale-[0.99] transition-all shadow-lg shadow-[#5865F2]/25 focus:outline-none focus:ring-2 focus:ring-[#5865F2] focus:ring-offset-2 focus:ring-offset-[#131c31] disabled:opacity-60 cursor-pointer"
               >
                 <Bot className="w-5 h-5" />
-                <span>🔗 Entrar con Discord OAuth</span>
+                <span>🔗 Conectar con Discord OAuth2 Oficial</span>
               </button>
+
+              {oauthBanner && (
+                <div className="mt-3.5 p-3.5 rounded-xl bg-amber-950/70 border border-amber-500/40 text-amber-200 text-xs leading-relaxed animate-in fade-in duration-200">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-bold text-amber-300">Aviso de Proveedor OAuth2</p>
+                      <p className="text-amber-200/90 leading-normal">{oauthBanner}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <p className="text-[11px] text-center text-slate-400 mt-2">
                 Conexión segura oficial. Sincroniza automáticamente tu avatar y tag de Discord.
               </p>
@@ -245,13 +291,13 @@ export const WelcomeAuthView: React.FC = () => {
               </div>
               <div className="relative flex justify-center text-xs uppercase">
                 <span className="bg-[#131c31] px-3 text-slate-400 font-semibold tracking-wider">
-                  ó creá tu perfil para arrancar el tour
+                  ó ingresá directamente con tu usuario
                 </span>
               </div>
             </div>
 
-            {/* Quick Registration Form */}
-            <form onSubmit={handleCreateProfile} className="space-y-4">
+            {/* Quick Registration / Direct Profile Form */}
+            <form onSubmit={handleCreateOrLoginProfile} className="space-y-4">
               <div>
                 <span className="text-xs font-semibold text-slate-200 block mb-1">
                   Nombre o Apodo en el Grupo *
@@ -360,10 +406,10 @@ export const WelcomeAuthView: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.99] shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.99] shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-50 cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>✨ Crear Perfil y Comenzar Tour Inicial</span>
+                <span>🚀 Entrar a Boludos Gaming</span>
               </button>
             </form>
           </div>
@@ -376,25 +422,25 @@ export const WelcomeAuthView: React.FC = () => {
                   <Users className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Jugadores del Grupo</h2>
+                  <h2 className="text-xl font-bold text-white">Miembros Registrados en el Grupo</h2>
                   <p className="text-xs text-slate-400">
-                    Acceso directo para miembros ya registrados ({players.length} perfiles)
+                    Acceso directo para miembros ya registrados en Supabase ({players.length} perfiles)
                   </p>
                 </div>
               </div>
               <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-950/80 border border-indigo-500/30 text-indigo-300">
-                {players.length} Activos
+                {players.length} Registrados
               </span>
             </div>
 
             {players.length === 0 ? (
-              <div className="text-center py-12 px-4 rounded-xl border border-dashed border-slate-700/60 bg-[#0b1120]/50">
-                <Gamepad2 className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-                <p className="text-sm font-semibold text-slate-300 mb-1">
-                  Aún no hay miembros registrados
+              <div className="text-center py-12 px-4 rounded-xl border border-dashed border-slate-700/60 bg-[#0b1120]/50 space-y-3">
+                <Gamepad2 className="w-10 h-10 text-slate-500 mx-auto" />
+                <p className="text-sm font-semibold text-slate-200">
+                  Todavía no hay miembros registrados en la base de datos.
                 </p>
-                <p className="text-xs text-slate-500">
-                  Usá el formulario de la izquierda para dar de alta al primer jugador.
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  ¡Sé el primero en crear tu perfil a la izquierda para inaugurar el servidor!
                 </p>
               </div>
             ) : (
@@ -442,7 +488,7 @@ export const WelcomeAuthView: React.FC = () => {
                             </span>
                             <span>•</span>
                             <span className="text-[11px] text-indigo-300 font-medium truncate">
-                              {player.activeTitle || 'Soldado Fiel'}
+                              {player.activeTitle || '⌚ Reloj Suizo'}
                             </span>
                           </div>
                         </div>
@@ -454,7 +500,7 @@ export const WelcomeAuthView: React.FC = () => {
                           type="button"
                           onClick={() => handleSelectExistingPlayer(player.id, true)}
                           title="Entrar y abrir el Tour de Instrucciones"
-                          className="px-2.5 py-2 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
+                          className="px-2.5 py-2 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
                           <GraduationCap className="w-3.5 h-3.5" />
                           <span className="hidden sm:inline">Tour</span>
@@ -463,7 +509,7 @@ export const WelcomeAuthView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleSelectExistingPlayer(player.id, false)}
-                          className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all"
+                          className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
                         >
                           <span>Entrar</span>
                           <ArrowRight className="w-3.5 h-3.5" />
@@ -480,7 +526,7 @@ export const WelcomeAuthView: React.FC = () => {
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 Sincronización multi-pestaña instantánea
               </span>
-              <span className="text-[11px] text-slate-500">Podés cambiar de jugador en cualquier momento</span>
+              <span className="text-[11px] text-slate-500">Datos sincronizados con Supabase Live</span>
             </div>
           </div>
         </div>

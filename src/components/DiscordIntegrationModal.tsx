@@ -562,7 +562,7 @@ export const DiscordIntegrationModal: React.FC<DiscordIntegrationModalProps> = (
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-400 bg-sky-950/60 px-2 py-0.5 rounded border border-sky-500/40">
-                              Simulación Local 🖥️
+                              Guardado en Feed 📋
                             </span>
                           )}
                         </div>
@@ -641,7 +641,7 @@ export const DiscordIntegrationModal: React.FC<DiscordIntegrationModalProps> = (
                                 type="button"
                                 onClick={() => handleButtonClick(btn)}
                                 className={`px-3 py-1.5 rounded text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 ${btnStyleClass}`}
-                                title={`Simular click en Discord: ${btn.actionType}`}
+                                title={`Ejecutar botón de Discord: ${btn.actionType}`}
                               >
                                 <span>{btn.label}</span>
                               </button>

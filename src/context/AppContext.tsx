@@ -54,7 +54,7 @@ import {
   requestBrowserNotificationPermission,
   showNativeNotification,
 } from '../lib/pushService';
-import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
+import { isDiscordOAuthProviderEnabled, isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 import {
   dbCreateSession,
   dbDeleteParticipant,
@@ -71,30 +71,37 @@ import {
   fetchAllSupabaseData,
 } from '../lib/supabaseSync';
 import {
-  INITIAL_CHAT_MESSAGES,
   INITIAL_DISCORD_CONFIG,
-  INITIAL_DISCORD_LOGS,
   INITIAL_GAMES,
-  INITIAL_PLAYERS,
-  INITIAL_PREFERENCES,
-  INITIAL_SANCTIONS,
-  INITIAL_SESSIONS,
 } from '../lib/mockData';
 
 const STORAGE_KEYS = {
-  CURRENT_USER_ID: 'bg_v1_current_user_id',
-  IS_AUTHENTICATED: 'bg_v1_is_authenticated',
-  PLAYERS: 'bg_v1_players',
-  GAMES: 'bg_v1_games',
-  PREFERENCES: 'bg_v1_preferences',
-  SESSIONS: 'bg_v1_sessions',
-  ACTIVE_SESSION_ID: 'bg_v1_active_session_id',
-  SANCTIONS: 'bg_v1_sanctions',
-  CHAT_MESSAGES: 'bg_v1_chat_messages',
-  DISCORD_CONFIG: 'bg_v1_discord_config',
-  DISCORD_LOGS: 'bg_v1_discord_logs',
-  PUSH_ALERTS: 'bg_v1_push_alerts',
+  CURRENT_USER_ID: 'bg_prod_v2_current_user_id',
+  IS_AUTHENTICATED: 'bg_prod_v2_is_authenticated',
+  PLAYERS: 'bg_prod_v2_players',
+  GAMES: 'bg_prod_v2_games',
+  PREFERENCES: 'bg_prod_v2_preferences',
+  SESSIONS: 'bg_prod_v2_sessions',
+  ACTIVE_SESSION_ID: 'bg_prod_v2_active_session_id',
+  SANCTIONS: 'bg_prod_v2_sanctions',
+  CHAT_MESSAGES: 'bg_prod_v2_chat_messages',
+  DISCORD_CONFIG: 'bg_prod_v2_discord_config',
+  DISCORD_LOGS: 'bg_prod_v2_discord_logs',
+  PUSH_ALERTS: 'bg_prod_v2_push_alerts',
 } as const;
+
+// Purge stale v1 localStorage keys so no demo/mock players persist in any browser
+if (typeof window !== 'undefined') {
+  try {
+    Object.keys(localStorage).forEach((key) => {
+      if (key.startsWith('bg_v1_')) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch (error) {
+    console.warn('Error purging stale bg_v1_ localStorage keys:', error);
+  }
+}
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -117,6 +124,22 @@ function saveToStorage<T>(key: string, value: T): void {
   }
 }
 
+const DEFAULT_FALLBACK_USER: PlayerProfile = {
+  id: '',
+  discordId: '',
+  discordUsername: 'invitado',
+  displayName: 'Invitado',
+  avatarUrl: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Invitado',
+  karmaScore: 100,
+  sessionsPlayed: 0,
+  hoursPlayed: 0,
+  onTimeCount: 0,
+  lateCount: 0,
+  noShowCount: 0,
+  currentStreak: 0,
+  activeTitle: '⌚ Reloj Suizo',
+};
+
 const AppContext = createContext<AppContextValue | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -128,52 +151,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return null;
   }, []);
 
-  // Players & Auth State
+  // Players & Auth State - default to clean production state (EMPTY arrays, not mock data)
   const [players, setPlayers] = useState<PlayerProfile[]>(() =>
-    loadFromStorage(STORAGE_KEYS.PLAYERS, INITIAL_PLAYERS)
+    loadFromStorage(STORAGE_KEYS.PLAYERS, [])
   );
 
   const [currentUserId, setCurrentUserId] = useState<string>(() =>
-    loadFromStorage(STORAGE_KEYS.CURRENT_USER_ID, INITIAL_PLAYERS[0].id)
+    loadFromStorage(STORAGE_KEYS.CURRENT_USER_ID, '')
   );
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
-    Boolean(loadFromStorage(STORAGE_KEYS.IS_AUTHENTICATED, false))
-  );
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    const storedAuth = Boolean(loadFromStorage(STORAGE_KEYS.IS_AUTHENTICATED, false));
+    const storedPlayers = loadFromStorage<PlayerProfile[]>(STORAGE_KEYS.PLAYERS, []);
+    const storedUserId = loadFromStorage<string>(STORAGE_KEYS.CURRENT_USER_ID, '');
+    return storedAuth && storedPlayers.length > 0 && storedPlayers.some((p) => p.id === storedUserId);
+  });
 
   const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(false);
   const [showWeeklyScheduleModal, setShowWeeklyScheduleModal] = useState<boolean>(false);
 
   const currentUser = useMemo(() => {
-    return players.find((p) => p.id === currentUserId) || players[0] || INITIAL_PLAYERS[0];
+    return players.find((p) => p.id === currentUserId) || players[0] || DEFAULT_FALLBACK_USER;
   }, [players, currentUserId]);
 
-  // Catalog Games & User Preferences (1-5★)
+  // Ensure isAuthenticated is false whenever players.length === 0 or currentUserId does not exist in players
+  useEffect(() => {
+    if (players.length === 0 || !players.some((p) => p.id === currentUserId)) {
+      setIsAuthenticated(false);
+    }
+  }, [players, currentUserId]);
+
+  // Catalog Games & User Preferences (1-5★) - only games keeps initial catalog
   const [games, setGames] = useState<Game[]>(() =>
     loadFromStorage(STORAGE_KEYS.GAMES, INITIAL_GAMES)
   );
 
   const [preferences, setPreferences] = useState<UserGamePreference[]>(() =>
-    loadFromStorage(STORAGE_KEYS.PREFERENCES, INITIAL_PREFERENCES)
+    loadFromStorage(STORAGE_KEYS.PREFERENCES, [])
   );
 
-  // Sessions State
+  // Sessions State - default to empty array
   const [sessions, setSessions] = useState<GamingSession[]>(() =>
-    loadFromStorage(STORAGE_KEYS.SESSIONS, INITIAL_SESSIONS)
+    loadFromStorage(STORAGE_KEYS.SESSIONS, [])
   );
 
   const [activeSessionId, setActiveSessionIdState] = useState<string>(() =>
-    loadFromStorage(STORAGE_KEYS.ACTIVE_SESSION_ID, INITIAL_SESSIONS[0]?.id || '')
+    loadFromStorage(STORAGE_KEYS.ACTIVE_SESSION_ID, '')
   );
 
-  // Sanctions History
+  // Sanctions History - default to empty array
   const [sanctions, setSanctions] = useState<SanctionRecord[]>(() =>
-    loadFromStorage(STORAGE_KEYS.SANCTIONS, INITIAL_SANCTIONS)
+    loadFromStorage(STORAGE_KEYS.SANCTIONS, [])
   );
 
-  // Global Chat Messages
+  // Global Chat Messages - default to empty array
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() =>
-    loadFromStorage(STORAGE_KEYS.CHAT_MESSAGES, INITIAL_CHAT_MESSAGES)
+    loadFromStorage(STORAGE_KEYS.CHAT_MESSAGES, [])
   );
 
   // Discord Integration State
@@ -182,7 +215,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const [discordLogs, setDiscordLogs] = useState<DiscordNotificationLog[]>(() =>
-    loadFromStorage(STORAGE_KEYS.DISCORD_LOGS, INITIAL_DISCORD_LOGS)
+    loadFromStorage(STORAGE_KEYS.DISCORD_LOGS, [])
   );
 
   // Push Alerts
@@ -209,17 +242,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await fetchAllSupabaseData();
       if (!data || !isMounted) return;
 
-      if (data.players.length > 0) setPlayers(data.players);
+      // ALWAYS update state with Supabase tables, even if empty (0 items)
+      setPlayers(data.players);
       if (data.games.length > 0) setGames(data.games);
-      if (data.preferences.length > 0) setPreferences(data.preferences);
-      if (data.sessions.length > 0) {
-        setSessions(data.sessions);
-        setActiveSessionIdState((prev) =>
-          data.sessions.some((s) => s.id === prev) ? prev : data.sessions[0].id
-        );
-      }
+      setPreferences(data.preferences);
+      setSessions(data.sessions);
+      setActiveSessionIdState((prev) =>
+        data.sessions.some((s) => s.id === prev) ? prev : (data.sessions[0]?.id || '')
+      );
       setSanctions(data.sanctions);
-      if (data.chatMessages.length > 0) setChatMessages(data.chatMessages);
+      setChatMessages(data.chatMessages);
       if (data.discordConfig) setDiscordConfig(data.discordConfig);
     };
 
@@ -241,6 +273,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabase?.removeChannel(channel);
     };
   }, []);
+
+  // Listen for Supabase Discord OAuth sessions
+  useEffect(() => {
+    if (!supabase) return;
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const user = session.user;
+        const userId = user.id;
+        const meta = (user.user_metadata || {}) as Record<string, unknown>;
+        const customClaims = (meta.custom_claims as Record<string, unknown> | undefined) || {};
+        const displayName = String(
+          customClaims.global_name ||
+            meta.full_name ||
+            meta.name ||
+            user.email?.split('@')[0] ||
+            'Gamer'
+        );
+        const discordUsername = String(
+          meta.preferred_username || meta.name || displayName.toLowerCase().replace(/\s+/g, '_')
+        );
+        const discordId = String(meta.provider_id || meta.sub || '');
+        const avatarUrl = String(
+          meta.avatar_url ||
+            `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${encodeURIComponent(displayName)}`
+        );
+
+        setPlayers((prevPlayers) => {
+          const existing = prevPlayers.find((p) => p.id === userId);
+          if (existing) {
+            setCurrentUserId(userId);
+            setIsAuthenticated(true);
+            if (!existing.onboardingCompleted) {
+              setShowOnboardingModal(true);
+            }
+            return prevPlayers;
+          }
+
+          const newProfile: PlayerProfile = {
+            id: userId,
+            discordId,
+            discordUsername,
+            displayName,
+            avatarUrl,
+            karmaScore: 100,
+            sessionsPlayed: 0,
+            hoursPlayed: 0,
+            onTimeCount: 0,
+            lateCount: 0,
+            noShowCount: 0,
+            currentStreak: 0,
+            activeTitle: '⌚ Reloj Suizo',
+            isOnline: true,
+            pushEnabled: true,
+            onboardingCompleted: false,
+            weeklySchedule: createDefaultWeeklySchedule(),
+            dailyOverrides: {},
+            categoryPreferences: {
+              'Shooter Táctico': 'like',
+              'MOBA': 'neutral',
+              'Co-op Horror': 'like',
+              'Co-op Acción': 'like',
+              'Survival Sandbox': 'like',
+              'RTS': 'neutral',
+              'Party Casual': 'like',
+              'Deportes / Autos': 'neutral',
+              'RPG / Aventura': 'like',
+            },
+          };
+
+          dbUpsertProfile(newProfile).catch(console.warn);
+          setCurrentUserId(userId);
+          setIsAuthenticated(true);
+          setShowOnboardingModal(true);
+          syncChannel?.postMessage({
+            type: 'SYNC_PLAYERS',
+            payload: [...prevPlayers, newProfile],
+          });
+          return [...prevPlayers, newProfile];
+        });
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [syncChannel]);
 
   // Save changes to localStorage
   useEffect(() => {
@@ -425,18 +546,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       discordId?: string;
       avatarUrl?: string;
     }): PlayerProfile => {
+      const cleanUsername = params.discordUsername.trim().toLowerCase().replace(/^@/, '');
+      const existing = players.find(
+        (p) => p.discordUsername.trim().toLowerCase().replace(/^@/, '') === cleanUsername
+      );
+
+      // If user already exists in players, log in as them directly
+      if (existing) {
+        loginAsProfile(existing.id);
+        return existing;
+      }
+
+      const cleanDisplayName = params.displayName.trim();
       const newProfile: PlayerProfile = {
-        id: `user-${Date.now()}`,
+        id: params.discordId ? `user-${params.discordId}` : `user-${Date.now()}`,
         discordId:
-          params.discordId ||
+          params.discordId?.trim() ||
           `${Math.floor(100000000000000000 + Math.random() * 900000000000000000)}`,
-        discordUsername: params.discordUsername,
-        displayName: params.displayName,
+        discordUsername: params.discordUsername.trim().replace(/^@/, ''),
+        displayName: cleanDisplayName,
         avatarUrl:
-          params.avatarUrl ||
-          `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(
-            params.displayName
-          )}&backgroundColor=2563eb`,
+          params.avatarUrl?.trim() ||
+          `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${encodeURIComponent(
+            cleanDisplayName
+          )}`,
         karmaScore: 100,
         sessionsPlayed: 0,
         hoursPlayed: 0,
@@ -444,7 +577,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lateCount: 0,
         noShowCount: 0,
         currentStreak: 0,
-        activeTitle: '🎮 Recluta Nuevo',
+        activeTitle: '⌚ Reloj Suizo',
         isOnline: true,
         pushEnabled: true,
         onboardingCompleted: false,
@@ -491,16 +624,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return newProfile;
     },
-    [players, syncChannel]
+    [players, syncChannel, loginAsProfile]
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     setIsAuthenticated(false);
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('Error during Supabase signOut:', err);
+      }
+    }
   }, []);
 
   const loginWithDiscord = useCallback(async () => {
-    if (isSupabaseConfigured() && supabase) {
-      setIsAuthenticated(true);
+    const oauthEnabled = await isDiscordOAuthProviderEnabled();
+    if (oauthEnabled && supabase) {
       await supabase.auth.signInWithOAuth({
         provider: 'discord',
         options: {
@@ -508,27 +648,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
       });
     } else {
-      // Demo Mode: Cycle through mock profiles
-      const currentIndex = players.findIndex((p) => p.id === currentUserId);
-      const nextIndex = (currentIndex + 1) % players.length;
-      const nextUser = players[nextIndex];
-      setCurrentUserId(nextUser.id);
-      setIsAuthenticated(true);
-      if (!nextUser.onboardingCompleted) {
-        setShowOnboardingModal(true);
-      }
-
-      triggerNotificationPipeline(
-        {
-          title: '🎮 Perfil de Discord Cambiado',
-          body: `Iniciaste como ${nextUser.displayName} (${nextUser.discordUsername}). Modo Demo 100% Funcional.`,
-          tag: 'auth_switch',
-          targetUserIds: [nextUser.id],
-        },
-        'message'
+      throw new Error(
+        'El proveedor OAuth2 de Discord aún no fue activado en el panel de Supabase (Authentication -> Providers -> Discord).'
       );
     }
-  }, [players, currentUserId, triggerNotificationPipeline]);
+  }, []);
 
   const completeOnboarding = useCallback(() => {
     const updatedCurrentUser: PlayerProfile = {
@@ -1645,35 +1769,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, [currentUserId, triggerNotificationPipeline]);
 
-  // 8. Demo Utilities
+  // 8. Reset Utilities
   const resetDemoData = useCallback(() => {
     if (typeof window !== 'undefined') {
       Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
     }
-    setPlayers(INITIAL_PLAYERS);
-    setCurrentUserId(INITIAL_PLAYERS[0].id);
-    setIsAuthenticated(true);
+    setPlayers([]);
+    setCurrentUserId('');
+    setIsAuthenticated(false);
     setShowOnboardingModal(false);
     setShowWeeklyScheduleModal(false);
     setGames(INITIAL_GAMES);
-    setPreferences(INITIAL_PREFERENCES);
-    setSessions(INITIAL_SESSIONS);
-    setActiveSessionIdState(INITIAL_SESSIONS[0]?.id || '');
-    setSanctions(INITIAL_SANCTIONS);
-    setChatMessages(INITIAL_CHAT_MESSAGES);
+    setPreferences([]);
+    setSessions([]);
+    setActiveSessionIdState('');
+    setSanctions([]);
+    setChatMessages([]);
     setDiscordConfig(INITIAL_DISCORD_CONFIG);
-    setDiscordLogs(INITIAL_DISCORD_LOGS);
+    setDiscordLogs([]);
     setPushAlerts([]);
 
     syncChannel?.postMessage({
       type: 'SYNC_ALL',
       payload: {
-        players: INITIAL_PLAYERS,
-        sessions: INITIAL_SESSIONS,
-        preferences: INITIAL_PREFERENCES,
-        sanctions: INITIAL_SANCTIONS,
-        chatMessages: INITIAL_CHAT_MESSAGES,
-        discordLogs: INITIAL_DISCORD_LOGS,
+        players: [],
+        sessions: [],
+        preferences: [],
+        sanctions: [],
+        chatMessages: [],
+        discordLogs: [],
         games: INITIAL_GAMES,
       },
     });

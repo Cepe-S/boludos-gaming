@@ -56,7 +56,6 @@ export function SessionsView() {
   const {
     currentUser,
     players,
-    switchActivePlayer,
     games,
     preferences,
     sessions,
@@ -100,7 +99,7 @@ export function SessionsView() {
   const [newPrecision, setNewPrecision] = useState<PrecisionMinutes>(15);
 
   // Availability / Join Panel Form
-  const existingParticipant = useMemo(() => {
+  const currentParticipant = useMemo(() => {
     return activeSession?.participants.find((p) => p.userId === currentUser.id);
   }, [activeSession, currentUser.id]);
 
@@ -108,27 +107,21 @@ export function SessionsView() {
   const [joinUntilTime, setJoinUntilTime] = useState('02:00');
   const [joinPrecision, setJoinPrecision] = useState<PrecisionMinutes>(15);
   const [joinNote, setJoinNote] = useState('');
-  const [actingUserId, setActingUserId] = useState<string>(currentUser.id);
 
-  // Sync join form when existing participant or active player changes
+  // Sync join form when current participant or active session changes
   useEffect(() => {
-    setActingUserId(currentUser.id);
-    if (existingParticipant) {
-      setJoinFromTime(existingParticipant.availableFrom);
-      setJoinUntilTime(existingParticipant.availableUntil);
-      setJoinPrecision(existingParticipant.precisionMinutes);
-      setJoinNote(existingParticipant.note || '');
+    if (currentParticipant) {
+      setJoinFromTime(currentParticipant.availableFrom);
+      setJoinUntilTime(currentParticipant.availableUntil);
+      setJoinPrecision(currentParticipant.precisionMinutes);
+      setJoinNote(currentParticipant.note || '');
     } else {
       setJoinFromTime('22:00');
       setJoinUntilTime('02:00');
       setJoinPrecision(15);
       setJoinNote('');
     }
-  }, [existingParticipant, currentUser.id, activeSession?.id]);
-
-  // Time simulator for Check-in testing
-  const [isCustomCheckInTime, setIsCustomCheckInTime] = useState(false);
-  const [simulatedCheckInTime, setSimulatedCheckInTime] = useState('22:10');
+  }, [currentParticipant, activeSession?.id]);
 
   // Ping & Vote feedback toasts
   const [actionAlert, setActionAlert] = useState<{
@@ -298,30 +291,28 @@ export function SessionsView() {
       availableUntil: joinUntilTime,
       precisionMinutes: joinPrecision,
       note: joinNote.trim() || undefined,
-      userId: actingUserId,
+      userId: currentUser.id,
     });
-    const targetPlayer = players.find((p) => p.id === actingUserId);
     triggerAlert(
       'success',
-      `¡Horario de ${targetPlayer?.displayName || 'jugador'} guardado! Límite estricto: ${calculatedStrictDeadline}`
+      `¡Tu horario fue guardado! Límite estricto sin sanción: ${calculatedStrictDeadline}`
     );
   };
 
   // Handle Leave Session
   const handleLeaveSession = () => {
     if (!activeSession) return;
-    leaveSession(activeSession.id, actingUserId);
+    leaveSession(activeSession.id, currentUser.id);
     triggerAlert('info', 'Abandonaste la sesión.');
   };
 
-  // Handle Check-in
+  // Handle Check-in (always uses real current time)
   const handleCheckIn = () => {
     if (!activeSession) return;
-    const timeToUse = isCustomCheckInTime ? simulatedCheckInTime : undefined;
-    checkInToSession(activeSession.id, timeToUse, actingUserId);
+    checkInToSession(activeSession.id, undefined, currentUser.id);
     triggerAlert(
       'success',
-      `✅ Check-in registrado para ${actingPlayer?.displayName || 'vos'}. ¡El Tribunal del Humo evaluó tu puntualidad!`
+      '✅ Check-in registrado. ¡El Tribunal del Humo evaluó tu puntualidad!'
     );
   };
 
@@ -351,15 +342,6 @@ export function SessionsView() {
     };
     triggerAlert('info', `Voto registrado: ${voteLabels[vote]} para el Tribunal del Humo.`);
   };
-
-  // Acting player (defaults to currentUser or simulated from selector)
-  const actingPlayer = useMemo(() => {
-    return players.find((p) => p.id === actingUserId) || currentUser;
-  }, [players, actingUserId, currentUser]);
-
-  const actingParticipant = useMemo(() => {
-    return activeSession?.participants.find((p) => p.userId === actingUserId);
-  }, [activeSession, actingUserId]);
 
   // If no session exists
   if (!activeSession) {
@@ -545,22 +527,6 @@ export function SessionsView() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Quick Player Simulator Dropdown */}
-          <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1.5 rounded-xl border border-slate-700/80 text-xs">
-            <span className="text-slate-400 hidden lg:inline">Simular como:</span>
-            <select
-              value={currentUser.id}
-              onChange={(e) => switchActivePlayer(e.target.value)}
-              className="bg-transparent text-indigo-300 font-medium focus:outline-none cursor-pointer"
-            >
-              {players.map((p) => (
-                <option key={p.id} value={p.id} className="bg-slate-900 text-slate-200">
-                  {p.displayName} ({p.karmaScore}★ Karma)
-                </option>
-              ))}
-            </select>
-          </div>
-
           <button
             onClick={() => setIsNewModalOpen(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition cursor-pointer"
@@ -652,11 +618,11 @@ export function SessionsView() {
                 </span>
               </div>
 
-              {actingParticipant ? (
+              {currentParticipant ? (
                 <div className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs text-emerald-300 font-medium">
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span>
-                    Estás anotado ({actingParticipant.availableFrom} ±{actingParticipant.precisionMinutes}m)
+                    Estás anotado ({currentParticipant.availableFrom} ±{currentParticipant.precisionMinutes}m)
                   </span>
                 </div>
               ) : (
@@ -749,12 +715,12 @@ export function SessionsView() {
                 <h3 className="text-base font-bold text-white">Tu Horario y Margen de Precisión</h3>
                 <p className="text-xs text-slate-400">
                   Jugador activo:{' '}
-                  <strong className="text-indigo-300">{actingPlayer.displayName}</strong>
+                  <strong className="text-indigo-300">{currentUser.displayName}</strong>
                 </p>
               </div>
             </div>
 
-            {actingParticipant && (
+            {currentParticipant && (
               <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-medium">
                 Anotado
               </span>
@@ -893,10 +859,10 @@ export function SessionsView() {
               className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs tracking-wide shadow-lg shadow-indigo-600/30 transition cursor-pointer flex items-center justify-center gap-2"
             >
               <Check className="w-4 h-4" />
-              <span>{actingParticipant ? 'Actualizar mi Horario' : 'Anotarme a la Sesión 🚀'}</span>
+              <span>{currentParticipant ? 'Actualizar mi Horario' : 'Anotarme a la Sesión 🚀'}</span>
             </button>
 
-            {actingParticipant && (
+            {currentParticipant && (
               <button
                 onClick={handleLeaveSession}
                 className="py-2.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-medium transition cursor-pointer"
@@ -924,17 +890,17 @@ export function SessionsView() {
                 </div>
               </div>
 
-              {actingParticipant?.checkedInAt && (
+              {currentParticipant?.checkedInAt && (
                 <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
-                  En Hora ({actingParticipant.checkedInAt})
+                  En Hora ({currentParticipant.checkedInAt})
                 </span>
               )}
             </div>
           </div>
 
           {/* Check-in Status or Button */}
-          {actingParticipant?.attendanceStatus === 'on_time' ||
-          actingParticipant?.attendanceStatus === 'late' ? (
+          {currentParticipant?.attendanceStatus === 'on_time' ||
+          currentParticipant?.attendanceStatus === 'late' ? (
             <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-center space-y-2">
               <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
                 <Check className="w-6 h-6" />
@@ -943,15 +909,15 @@ export function SessionsView() {
                 ¡Check-in realizado con éxito!
               </h4>
               <p className="text-xs text-slate-300">
-                Registrado a las <strong>{actingParticipant.checkedInAt}</strong>. Estado:{' '}
+                Registrado a las <strong>{currentParticipant.checkedInAt}</strong>. Estado:{' '}
                 <strong
                   className={
-                    actingParticipant.attendanceStatus === 'on_time'
+                    currentParticipant.attendanceStatus === 'on_time'
                       ? 'text-emerald-400'
                       : 'text-amber-400'
                   }
                 >
-                  {actingParticipant.attendanceStatus === 'on_time'
+                  {currentParticipant.attendanceStatus === 'on_time'
                     ? 'Puntual (+5 Karma) ✅'
                     : 'Llegó Tarde (-10 Karma) ⚠️'}
                 </strong>
@@ -959,49 +925,24 @@ export function SessionsView() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-300">
-                    Simulador de Tiempo de Check-in:
-                  </span>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-indigo-400 font-medium">
-                    <input
-                      type="checkbox"
-                      checked={isCustomCheckInTime}
-                      onChange={(e) => setIsCustomCheckInTime(e.target.checked)}
-                      className="rounded accent-indigo-600"
-                    />
-                    <span>Elegir hora ficticia</span>
-                  </label>
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs space-y-2">
+                <div className="flex items-center gap-2 text-slate-300 font-semibold">
+                  <Clock className="w-4 h-4 text-emerald-400" />
+                  <span>Check-in en Tiempo Real</span>
                 </div>
-
-                {isCustomCheckInTime ? (
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="time"
-                      value={simulatedCheckInTime}
-                      onChange={(e) => setSimulatedCheckInTime(e.target.value)}
-                      className="bg-[#090d16] border border-indigo-500/40 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none"
-                    />
-                    <span className="text-[11px] text-slate-400">
-                      Permite probar check-in a tiempo vs check-in tarde pasados los {joinPrecision}m.
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-slate-400">
-                    Si hacés check-in ahora, se usará la hora real del sistema para calcular si llegaste dentro de tu ventana de precisión.
-                  </p>
-                )}
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Al hacer check-in se registrará la hora exacta de tu dispositivo para verificar si estás dentro de tu ventana de tolerancia ({currentParticipant?.availableFrom || joinFromTime} ±{currentParticipant?.precisionMinutes || joinPrecision}m) y el límite estricto ({calculatedStrictDeadline}).
+                </p>
               </div>
 
               <button
                 onClick={handleCheckIn}
-                disabled={!actingParticipant}
+                disabled={!currentParticipant}
                 className="w-full py-3 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 text-white font-bold text-sm shadow-xl shadow-emerald-950/60 transition cursor-pointer flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-5 h-5" />
                 <span>
-                  {actingParticipant
+                  {currentParticipant
                     ? '✅ Hacer Check-in (Ya estoy en la PC)'
                     : 'Anotate primero para hacer Check-in'}
                 </span>
