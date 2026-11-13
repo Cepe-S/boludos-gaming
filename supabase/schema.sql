@@ -169,7 +169,10 @@ CREATE TABLE IF NOT EXISTS discord_config (
 -- TRIBUNAL DEL HUMO TRIGGER: APPLY SANCTION KARMA DELTA & UPDATE TITLES
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION apply_sanction_karma_delta()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
 DECLARE
   v_current_karma INTEGER;
   v_new_karma INTEGER;
@@ -223,7 +226,22 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+-- Indexes on foreign keys for optimal query performance
+CREATE INDEX IF NOT EXISTS idx_games_added_by ON games(added_by);
+CREATE INDEX IF NOT EXISTS idx_preferences_game_id ON user_game_preferences(game_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_selected_game_id ON sessions(selected_game_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_roulette_winner_id ON sessions(roulette_winner_game_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_created_by ON sessions(created_by);
+CREATE INDEX IF NOT EXISTS idx_participants_user_id ON session_participants(user_id);
+CREATE INDEX IF NOT EXISTS idx_votes_voter_id ON attendance_votes(voter_id);
+CREATE INDEX IF NOT EXISTS idx_votes_target_user_id ON attendance_votes(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_sanctions_user_id ON sanctions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sanctions_session_id ON sanctions(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_user_id ON chat_messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_reply_to_id ON chat_messages(reply_to_id);
+CREATE INDEX IF NOT EXISTS idx_chat_linked_session_id ON chat_messages(linked_session_id);
 
 DROP TRIGGER IF EXISTS trg_apply_sanction_karma ON sanctions;
 CREATE TRIGGER trg_apply_sanction_karma
