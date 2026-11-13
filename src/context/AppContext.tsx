@@ -242,8 +242,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await fetchAllSupabaseData();
       if (!data || !isMounted) return;
 
-      // ALWAYS update state with Supabase tables, even if empty (0 items)
-      setPlayers(data.players);
+      // Update state with Supabase tables while preserving any newly created active session profile not yet flushed
+      setPlayers((prev) => {
+        if (data.players.length === 0 && prev.length > 0) {
+          return prev;
+        }
+        const merged = [...data.players];
+        for (const localP of prev) {
+          if (!merged.some((dbP) => dbP.id === localP.id)) {
+            merged.push(localP);
+          }
+        }
+        return merged;
+      });
       if (data.games.length > 0) setGames(data.games);
       setPreferences(data.preferences);
       setSessions(data.sessions);
