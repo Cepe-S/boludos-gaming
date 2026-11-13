@@ -1,15 +1,25 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Game, GameRating, UserGamePreference, PlayerProfile } from '../types/domain';
+import {
+  Game,
+  GameRating,
+  UserGamePreference,
+  PlayerProfile,
+  GAME_CATEGORIES,
+  CategoryPreferenceLevel,
+} from '../types/domain';
 import {
   AlertTriangle,
   Award,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Filter,
   Flame,
   Gamepad2,
+  Heart,
   Plus,
   RotateCcw,
   Search,
@@ -39,7 +49,8 @@ interface GameGroupMetrics {
 const PRESET_GAMES = [
   {
     name: 'Left 4 Dead 2',
-    category: 'Coop Zombies',
+    description: 'Campaña cooperativa clásica de supervivencia contra hordas masivas de infectados y tanques.',
+    category: 'Co-op Acción',
     minPlayers: 1,
     maxPlayers: 4,
     tags: 'zombies, coop, campaña, supervivencia',
@@ -49,6 +60,7 @@ const PRESET_GAMES = [
   },
   {
     name: 'Minecraft',
+    description: 'Mundo abierto infinito para craftear bases, explorar cuevas o armar servidores comunitarios.',
     category: 'Survival Sandbox',
     minPlayers: 1,
     maxPlayers: 20,
@@ -59,7 +71,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'Chained Together',
-    category: 'Coop Plataformas',
+    description: 'Cooperativo de plataformas encadenados donde una mala caída arrastra a todo el grupo al fondo.',
+    category: 'Party Casual',
     minPlayers: 1,
     maxPlayers: 4,
     tags: 'coop, caidas, risas, infierno, parkour',
@@ -69,7 +82,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'PUBG: BATTLEGROUNDS',
-    category: 'Battle Royale',
+    description: 'Battle Royale táctico de escuadrones con loot, vehículos y tiroteos tensos hasta el último círculo.',
+    category: 'Shooter Táctico',
     minPlayers: 1,
     maxPlayers: 4,
     tags: 'battleroyale, shooter, squads, tactico',
@@ -79,7 +93,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'Rust',
-    category: 'Hardcore Survival',
+    description: 'Supervivencia hardcore en servidores hostiles: construí bases, organizá incursiones y cuidá tus recursos.',
+    category: 'Survival Sandbox',
     minPlayers: 1,
     maxPlayers: 16,
     tags: 'survival, pvp, raids, bases, toxico',
@@ -89,7 +104,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'EA Sports FC 25',
-    category: 'Deportes',
+    description: 'Fútbol rápido, clubes pro con amigos y torneos cortos con rivalidad garantizada.',
+    category: 'Deportes / Autos',
     minPlayers: 1,
     maxPlayers: 22,
     tags: 'futbol, clubes pro, amigos, fulbito',
@@ -99,7 +115,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'Lethal Company',
-    category: 'Terror Coop',
+    description: 'Terror y extracción cooperativa con chat de proximidad en lunas industriales abandonadas.',
+    category: 'Co-op Horror',
     minPlayers: 1,
     maxPlayers: 4,
     tags: 'terror, risas, scrap, monstruos, voz de proximidad',
@@ -109,7 +126,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'Age of Empires II: DE',
-    category: 'Estrategia RTS',
+    description: 'Estrategia en tiempo real competitiva o en equipo: castillos, asedios y batallas de imperios.',
+    category: 'RTS',
     minPlayers: 1,
     maxPlayers: 8,
     tags: 'rts, medieval, estrategia, aldeanos, wololo',
@@ -119,7 +137,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'Valorant',
-    category: 'Tactical FPS',
+    description: 'Shooter táctico 5v5 por rondas con armas precisas, roles de agentes y utilidades coordinadas.',
+    category: 'Shooter Táctico',
     minPlayers: 1,
     maxPlayers: 5,
     tags: 'tactical fps, 5v5, competitivo, vandal, poderes',
@@ -129,7 +148,8 @@ const PRESET_GAMES = [
   },
   {
     name: 'Helldivers 2',
-    category: 'Sci-Fi Coop PVE',
+    description: 'Cooperativo frenético de disparos en tercera persona combatiendo termínidos y autómatas por la galaxia.',
+    category: 'Co-op Acción',
     minPlayers: 1,
     maxPlayers: 4,
     tags: 'coop, disparos, democracia, bichos, mechs',
@@ -168,7 +188,15 @@ const RATING_INFO: Record<GameRating, { label: string; sub: string; color: strin
 };
 
 export function GamesCatalogView() {
-  const { games, preferences, updateGamePreference, addGame, currentUser, players } = useApp();
+  const {
+    games,
+    preferences,
+    updateGamePreference,
+    addGame,
+    currentUser,
+    players,
+    updateCategoryPreferences,
+  } = useApp();
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -180,6 +208,9 @@ export function GamesCatalogView() {
     'synchrony'
   );
 
+  // Category Preferences collapsible section
+  const [isCategoriesPanelOpen, setIsCategoriesPanelOpen] = useState(true);
+
   // Hover star state for interactive selector feedback
   const [hoveredStar, setHoveredStar] = useState<{ gameId: string; star: GameRating } | null>(
     null
@@ -188,10 +219,11 @@ export function GamesCatalogView() {
   // Add Game Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addName, setAddName] = useState('');
+  const [addDescription, setAddDescription] = useState('');
   const [addCoverUrl, setAddCoverUrl] = useState('');
   const [addMinPlayers, setAddMinPlayers] = useState(1);
   const [addMaxPlayers, setAddMaxPlayers] = useState(4);
-  const [addCategory, setAddCategory] = useState('Coop');
+  const [addCategory, setAddCategory] = useState('Shooter Táctico');
   const [addTags, setAddTags] = useState('coop, accion, risas');
   const [addDuration, setAddDuration] = useState(45);
 
@@ -338,6 +370,7 @@ export function GamesCatalogView() {
   // Handle Preset Selection in Add Modal
   const handleSelectPreset = (preset: typeof PRESET_GAMES[0]) => {
     setAddName(preset.name);
+    setAddDescription(preset.description || '');
     setAddCategory(preset.category);
     setAddMinPlayers(preset.minPlayers);
     setAddMaxPlayers(preset.maxPlayers);
@@ -353,12 +386,13 @@ export function GamesCatalogView() {
 
     addGame({
       name: addName.trim(),
+      description: addDescription.trim() || undefined,
       coverUrl:
         addCoverUrl.trim() ||
         'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=600&q=80',
       minPlayers: Number(addMinPlayers) || 1,
       maxPlayers: Number(addMaxPlayers) || 4,
-      category: addCategory.trim() || 'Coop',
+      category: addCategory.trim() || 'Shooter Táctico',
       tags: addTags
         .split(',')
         .map((t) => t.trim())
@@ -367,7 +401,25 @@ export function GamesCatalogView() {
     });
 
     setIsAddModalOpen(false);
+    setAddDescription('');
     showNotification(`🎮 ¡"${addName.trim()}" fue agregado al catálogo grupal!`);
+  };
+
+  // Category Preference helper
+  const handleSetCategoryPreference = (categoryId: string, level: CategoryPreferenceLevel) => {
+    const updated = {
+      ...(currentUser.categoryPreferences || {}),
+      [categoryId]: level,
+    };
+    updateCategoryPreferences(updated);
+    const cat = GAME_CATEGORIES.find((c) => c.id === categoryId);
+    const label =
+      level === 'like'
+        ? '💚 Me gusta'
+        : level === 'dislike'
+        ? '💔 No me gusta'
+        : '😐 Me da igual';
+    showNotification(`Categoría ${cat?.emoji || ''} "${cat?.label || categoryId}": ${label}`);
   };
 
   // Update preference helper
@@ -463,6 +515,133 @@ export function GamesCatalogView() {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* 1.5. MIS GUSTOS POR CATEGORÍA DE JUEGOS */}
+      <div className="bg-[#131c31] rounded-3xl border border-indigo-500/30 p-5 sm:p-6 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+              <Heart className="w-5 h-5 fill-rose-500/20" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                <span>❤️ Mis Gustos por Categoría de Juegos</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono font-normal">
+                  {currentUser.displayName}
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                Ajustá qué géneros te motivan más o cuáles preferís evitar para calibrar mejor las sugerencias del grupo.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setIsCategoriesPanelOpen(!isCategoriesPanelOpen)}
+            className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition cursor-pointer"
+          >
+            <span>{isCategoriesPanelOpen ? 'Ocultar panel' : 'Configurar categorías'}</span>
+            {isCategoriesPanelOpen ? (
+              <ChevronUp className="w-4 h-4 text-indigo-400" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-indigo-400" />
+            )}
+          </button>
+        </div>
+
+        {isCategoriesPanelOpen && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+            {GAME_CATEGORIES.map((cat) => {
+              const currentPref: CategoryPreferenceLevel =
+                currentUser.categoryPreferences?.[cat.id] || 'neutral';
+
+              return (
+                <div
+                  key={cat.id}
+                  className={`p-3.5 rounded-2xl border transition-all duration-200 flex flex-col justify-between space-y-3 ${
+                    currentPref === 'like'
+                      ? 'bg-emerald-950/20 border-emerald-500/40 shadow-sm shadow-emerald-950/20'
+                      : currentPref === 'dislike'
+                      ? 'bg-rose-950/20 border-rose-500/40 shadow-sm shadow-rose-950/20'
+                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{cat.emoji}</span>
+                        <span className="text-xs font-bold text-white leading-tight">
+                          {cat.label}
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          currentPref === 'like'
+                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                            : currentPref === 'dislike'
+                            ? 'bg-rose-500/20 border-rose-400 text-rose-300'
+                            : 'bg-slate-800 border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        {currentPref === 'like'
+                          ? '💚 Me gusta'
+                          : currentPref === 'dislike'
+                          ? '💔 No me gusta'
+                          : '😐 Neutral'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                      {cat.description}
+                    </p>
+                  </div>
+
+                  {/* 3 Quick Pill Buttons */}
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-800/80">
+                    <button
+                      type="button"
+                      onClick={() => handleSetCategoryPreference(cat.id, 'like')}
+                      className={`px-2 py-1 rounded-xl text-[10px] font-bold transition cursor-pointer border flex items-center justify-center gap-1 ${
+                        currentPref === 'like'
+                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-600/30'
+                          : 'bg-slate-800/70 hover:bg-slate-800 text-slate-300 border-slate-700'
+                      }`}
+                    >
+                      <span>💚</span>
+                      <span>Me gusta</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSetCategoryPreference(cat.id, 'neutral')}
+                      className={`px-2 py-1 rounded-xl text-[10px] font-bold transition cursor-pointer border flex items-center justify-center gap-1 ${
+                        currentPref === 'neutral'
+                          ? 'bg-slate-700 text-white border-slate-500 shadow-md'
+                          : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      <span>😐</span>
+                      <span>Igual</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSetCategoryPreference(cat.id, 'dislike')}
+                      className={`px-2 py-1 rounded-xl text-[10px] font-bold transition cursor-pointer border flex items-center justify-center gap-1 ${
+                        currentPref === 'dislike'
+                          ? 'bg-rose-600 text-white border-rose-400 shadow-md shadow-rose-600/30'
+                          : 'bg-slate-800/70 hover:bg-slate-800 text-slate-300 border-slate-700'
+                      }`}
+                    >
+                      <span>💔</span>
+                      <span>No me va</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* 2. SEARCH, FILTER & SORT BAR */}
@@ -651,12 +830,24 @@ export function GamesCatalogView() {
                 {/* Card Body */}
                 <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
                   <div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-indigo-300 transition line-clamp-1">
-                      {game.name}
-                    </h3>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-lg font-bold text-white group-hover:text-indigo-300 transition line-clamp-1">
+                        {game.name}
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-semibold text-slate-300 border border-slate-700 shrink-0">
+                        {game.category}
+                      </span>
+                    </div>
+
+                    {/* Brief 1-2 line description */}
+                    {game.description && (
+                      <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+                        {game.description}
+                      </p>
+                    )}
 
                     {/* Tags */}
-                    <div className="flex flex-wrap gap-1 mt-1.5">
+                    <div className="flex flex-wrap gap-1 mt-2">
                       {game.tags.slice(0, 3).map((tag, idx) => (
                         <span
                           key={idx}
@@ -899,15 +1090,31 @@ export function GamesCatalogView() {
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Categoría:
                   </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej: Coop Zombie, Survival, RTS"
+                  <select
                     value={addCategory}
                     onChange={(e) => setAddCategory(e.target.value)}
-                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                  />
+                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition cursor-pointer"
+                  >
+                    {GAME_CATEGORIES.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.emoji} {cat.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Descripción breve del juego:
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Resumen de qué se trata y por qué está bueno jugarlo..."
+                  value={addDescription}
+                  onChange={(e) => setAddDescription(e.target.value)}
+                  className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition resize-none"
+                />
               </div>
 
               <div>

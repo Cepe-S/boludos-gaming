@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS profiles (
   current_streak INTEGER NOT NULL DEFAULT 0 CHECK (current_streak >= 0),
   active_title TEXT NOT NULL DEFAULT 'Puntual en Práctica',
   push_subscription JSONB,
+  onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE,
+  weekly_schedule JSONB NOT NULL DEFAULT '{}'::JSONB,
+  daily_overrides JSONB NOT NULL DEFAULT '{}'::JSONB,
+  category_preferences JSONB NOT NULL DEFAULT '{}'::JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -41,6 +45,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 CREATE TABLE IF NOT EXISTS games (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
   cover_url TEXT NOT NULL,
   min_players INTEGER NOT NULL DEFAULT 1 CHECK (min_players >= 1),
   max_players INTEGER NOT NULL DEFAULT 10 CHECK (max_players >= min_players),

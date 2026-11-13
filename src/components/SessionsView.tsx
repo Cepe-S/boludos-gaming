@@ -7,6 +7,7 @@ import {
   sortPlayersByLobbyPriority,
   formatMinutesToTime,
   parseTimeMinutes,
+  getEffectiveScheduleForDate,
 } from '../lib/matchmakingEngine';
 import {
   Game,
@@ -20,6 +21,7 @@ import {
   AlertCircle,
   AlertTriangle,
   Award,
+  Ban,
   Bell,
   Calendar,
   CalendarClock,
@@ -68,12 +70,23 @@ export function SessionsView() {
     checkInToSession,
     castAttendanceVote,
     pingLatePlayer,
+    toggleTodayNotPlaying,
+    setShowWeeklyScheduleModal,
   } = useApp();
 
   // Active session
   const activeSession = useMemo(() => {
     return sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
   }, [sessions, activeSessionId]);
+
+  // Today string & Effective Daily Schedule for current user
+  const todayStr = useMemo(() => {
+    return activeSession?.date || new Date().toISOString().split('T')[0];
+  }, [activeSession?.date]);
+
+  const effectiveToday = useMemo(() => {
+    return getEffectiveScheduleForDate(currentUser, todayStr);
+  }, [currentUser, todayStr]);
 
   // Modal: New Session
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -372,6 +385,108 @@ export function SessionsView() {
 
   return (
     <div className="space-y-8 pb-16">
+      {/* 0. PROMINENT CONTROL BANNER: ESTADO DE HOY & AUTO-INSCRIPCIÓN SEMANAL */}
+      <div
+        className={`relative overflow-hidden rounded-3xl border p-5 sm:p-6 shadow-2xl backdrop-blur-md transition-all duration-300 ${
+          effectiveToday.plays
+            ? 'bg-gradient-to-r from-[#131c31]/95 via-emerald-950/20 to-[#131c31]/95 border-emerald-500/40 shadow-emerald-950/30'
+            : 'bg-gradient-to-r from-[#131c31]/95 via-rose-950/30 to-[#131c31]/95 border-rose-500/50 shadow-rose-950/40'
+        }`}
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border shadow-lg ${
+                effectiveToday.plays
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                  : 'bg-rose-500/20 border-rose-500/50 text-rose-400'
+              }`}
+            >
+              {effectiveToday.plays ? (
+                <Zap className="w-6 h-6 animate-pulse" />
+              ) : (
+                <Ban className="w-6 h-6" />
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Estado de Hoy & Auto-Inscripción Semanal:
+                </span>
+                <span
+                  className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border ${
+                    effectiveToday.plays
+                      ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+                      : 'bg-rose-500/20 border-rose-400/50 text-rose-300'
+                  }`}
+                >
+                  {effectiveToday.plays ? '⚡ Anotado para Jugar' : '🚫 No Juego Hoy'}
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  ({todayStr})
+                </span>
+              </div>
+
+              <p className="text-sm text-slate-200">
+                {effectiveToday.plays ? (
+                  <>
+                    <strong className="text-white">
+                      ⚡ Estás anotado automáticamente hoy de {effectiveToday.availableFrom} a {effectiveToday.availableUntil} (±{effectiveToday.precisionMinutes}m)
+                    </strong>{' '}
+                    según tu {effectiveToday.source === 'weekly' ? 'horario default semanal' : 'horario personalizado de hoy'}.
+                  </>
+                ) : (
+                  <>
+                    <strong className="text-rose-300">
+                      🚫 Marcaste que hoy no jugás
+                    </strong>
+                    {effectiveToday.reason ? ` ("${effectiveToday.reason}")` : ''}. No estás anotado en el lobby de hoy y no serás sancionado por humo.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 pt-2 lg:pt-0">
+            {effectiveToday.plays ? (
+              <button
+                onClick={() => {
+                  toggleTodayNotPlaying('Avisó con el botón Hoy No Juego desde la pantalla principal');
+                  triggerAlert('info', 'Avisaste que hoy no jugás. Fuiste removido del lobby de hoy sin sanción.');
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 transition transform hover:scale-105 active:scale-95 cursor-pointer"
+                title="Avisar que hoy no podés jugar y desanotarte automáticamente sin sanción"
+              >
+                <Ban className="w-4 h-4" />
+                <span>🚫 Hoy no juego</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  toggleTodayNotPlaying();
+                  triggerAlert('success', '¡Genial! Volvés a estar disponible hoy según tu horario.');
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition transform hover:scale-105 active:scale-95 cursor-pointer"
+                title="Volver a estar disponible hoy y re-anotarte al lobby automáticamente"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>✅ Volver a estar disponible hoy</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowWeeklyScheduleModal(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 hover:border-indigo-500/50 text-slate-200 hover:text-white font-semibold text-xs transition cursor-pointer shadow-sm"
+              title="Ajustar tu rutina semanal por defecto o excepciones futuras"
+            >
+              <Calendar className="w-4 h-4 text-indigo-400" />
+              <span>📅 Rutina Semanal / Excepciones</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Action Toast Alert Banner */}
       {actionAlert && (
         <div
@@ -1063,7 +1178,7 @@ export function SessionsView() {
                         className="relative z-10 flex items-center gap-3 py-1.5 px-2 rounded-xl hover:bg-slate-900/40 transition"
                       >
                         {/* Player Left Label */}
-                        <div className="w-40 shrink-0 flex items-center gap-2.5">
+                        <div className="w-44 shrink-0 flex items-center gap-2.5">
                           <img
                             src={p.avatarUrl}
                             alt={p.displayName}
@@ -1076,6 +1191,24 @@ export function SessionsView() {
                             <span className="text-[10px] text-indigo-400 block font-mono">
                               ±{p.precisionMinutes}m • {p.karmaScore}★
                             </span>
+                            {(() => {
+                              const participant = activeSession?.participants.find((pt) => pt.userId === p.userId);
+                              return participant?.isAutoEnrolled ? (
+                                <span
+                                  className="inline-block text-[9px] px-1.5 py-0.2 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 truncate"
+                                  title="Auto-anotado (Default Semanal)"
+                                >
+                                  ⚡ Auto-anotado (Default Semanal)
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-block text-[9px] px-1.5 py-0.2 rounded bg-amber-950/80 text-amber-300 border border-amber-500/30 truncate"
+                                  title="Horario de hoy personalizado"
+                                >
+                                  ✏️ Horario de hoy personalizado
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
 
@@ -1187,11 +1320,20 @@ export function SessionsView() {
                     className="w-10 h-10 rounded-2xl border border-slate-700 object-cover"
                   />
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-bold text-white">{player?.displayName}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
                         {player?.activeTitle}
                       </span>
+                      {part.isAutoEnrolled ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 font-medium">
+                          ⚡ Auto-anotado (Default Semanal)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/30 font-medium">
+                          ✏️ Horario de hoy personalizado
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
                       <span>Llegada: {part.availableFrom}</span>

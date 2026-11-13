@@ -8,6 +8,10 @@ import {
   parseTimeMinutes,
   formatMinutesToTime,
   sortPlayersByLobbyPriority,
+  createDefaultWeeklySchedule,
+  getDayOfWeekKey,
+  getEffectiveScheduleForDate,
+  reconcileSessionParticipantsWithSchedules,
 } from '../matchmakingEngine';
 import {
   Game,
@@ -15,6 +19,9 @@ import {
   SessionParticipant,
   UserGamePreference,
   GameSynchronyResult,
+  GamingSession,
+  WeeklySchedule,
+  DailyScheduleOverride,
 } from '../../types/domain';
 
 // Fixture helpers for clean test isolation
@@ -57,6 +64,20 @@ const createTestParticipant = (overrides: Partial<SessionParticipant> = {}): Ses
   availableUntil: '01:30',
   precisionMinutes: 15,
   attendanceStatus: 'pending',
+  ...overrides,
+});
+
+const createTestSession = (overrides: Partial<GamingSession> = {}): GamingSession => ({
+  id: 'session-1',
+  title: 'Sesión Nocturna Boludos',
+  date: '2026-11-13',
+  mode: 'random',
+  status: 'open',
+  createdBy: 'player-1',
+  createdAt: '2026-11-13T18:00:00.000Z',
+  participants: [],
+  attendanceVotes: [],
+  allowSplitLobbies: true,
   ...overrides,
 });
 
@@ -645,6 +666,308 @@ describe('Matchmaking & Karma Engine (matchmakingEngine)', () => {
       expect(formatMinutesToTime(1440)).toBe('00:00');
       expect(formatMinutesToTime(1560)).toBe('02:00');
       expect(formatMinutesToTime(-15)).toBe('23:45');
+    });
+  });
+
+  describe('Automatic Weekly Schedule & Daily Overrides Engine', () => {
+    describe('createDefaultWeeklySchedule & getDayOfWeekKey', () => {
+      it('creates default weekly schedule for all 7 days with enabled: true', () => {
+        const schedule = createDefaultWeeklySchedule();
+        const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+
+        days.forEach((day) => {
+          expect(schedule[day]).toBeDefined();
+          expect(schedule[day].enabled).toBe(true);
+          expect(schedule[day].precisionMinutes).toBe(15);
+        });
+
+        // Check specific standard hours: weekday 22:00-01:00 vs weekend 22:30-02:30
+        expect(schedule.mon.availableFrom).toBe('22:00');
+        expect(schedule.mon.availableUntil).toBe('01:00');
+        expect(schedule.fri.availableFrom).toBe('22:30');
+        expect(schedule.fri.availableUntil).toBe('02:30');
+        expect(schedule.sat.availableFrom).toBe('22:30');
+        expect(schedule.sat.availableUntil).toBe('02:30');
+        expect(schedule.sun.availableFrom).toBe('22:00');
+      });
+
+      it('maps Monday through Sunday accurately for known dates with getDayOfWeekKey', () => {
+        // Known calendar dates for November 2026:
+        // 2026-11-09: Monday ('mon')
+        // 2026-11-10: Tuesday ('tue')
+        // 2026-11-11: Wednesday ('wed')
+        // 2026-11-12: Thursday ('thu')
+        // 2026-11-13: Friday ('fri')
+        // 2026-11-14: Saturday ('sat')
+        // 2026-11-15: Sunday ('sun')
+        expect(getDayOfWeekKey('2026-11-09')).toBe('mon');
+        expect(getDayOfWeekKey('2026-11-10')).toBe('tue');
+        expect(getDayOfWeekKey('2026-11-11')).toBe('wed');
+        expect(getDayOfWeekKey('2026-11-12')).toBe('thu');
+        expect(getDayOfWeekKey('2026-11-13')).toBe('fri');
+        expect(getDayOfWeekKey('2026-11-14')).toBe('sat');
+        expect(getDayOfWeekKey('2026-11-15')).toBe('sun');
+      });
+    });
+
+    describe('getEffectiveScheduleForDate', () => {
+      it("returns the player's weekly schedule for that weekday when no daily override exists (source: 'weekly', plays: true)", () => {
+        const player = createTestPlayer({
+          id: 'p-weekly',
+          weeklySchedule: createDefaultWeeklySchedule(),
+        });
+
+        // 2026-11-13 is Friday
+        const effectiveFri = getEffectiveScheduleForDate(player, '2026-11-13');
+        expect(effectiveFri.plays).toBe(true);
+        expect(effectiveFri.source).toBe('weekly');
+        expect(effectiveFri.dayKey).toBe('fri');
+        expect(effectiveFri.availableFrom).toBe('22:30');
+        expect(effectiveFri.availableUntil).toBe('02:30');
+        expect(effectiveFri.precisionMinutes).toBe(15);
+
+        // 2026-11-12 is Thursday
+        const effectiveThu = getEffectiveScheduleForDate(player, '2026-11-12');
+        expect(effectiveThu.plays).toBe(true);
+        expect(effectiveThu.source).toBe('weekly');
+        expect(effectiveThu.dayKey).toBe('thu');
+        expect(effectiveThu.availableFrom).toBe('22:00');
+        expect(effectiveThu.availableUntil).toBe('01:00');
+      });
+
+      it('falls back to default schedule when player has no weeklySchedule configured', () => {
+        const player = createTestPlayer({ id: 'p-no-sched', weeklySchedule: undefined });
+        const effective = getEffectiveScheduleForDate(player, '2026-11-13');
+        expect(effective.plays).toBe(true);
+        expect(effective.source).toBe('weekly');
+        expect(effective.dayKey).toBe('fri');
+        expect(effective.availableFrom).toBe('22:30');
+      });
+
+      it('returns plays: false when that weekday has enabled: false in weeklySchedule', () => {
+        const customWeekly = createDefaultWeeklySchedule();
+        customWeekly.thu.enabled = false; // Player does not play on Thursdays
+
+        const player = createTestPlayer({
+          id: 'p-no-thu',
+          weeklySchedule: customWeekly,
+        });
+
+        // 2026-11-12 is Thursday
+        const effectiveThu = getEffectiveScheduleForDate(player, '2026-11-12');
+        expect(effectiveThu.plays).toBe(false);
+        expect(effectiveThu.source).toBe('weekly');
+        expect(effectiveThu.dayKey).toBe('thu');
+
+        // Friday is still enabled
+        const effectiveFri = getEffectiveScheduleForDate(player, '2026-11-13');
+        expect(effectiveFri.plays).toBe(true);
+      });
+
+      it('returns plays: false (source: "override") when player set "🚫 Hoy no juego" (status: "not_playing"), even if weekday is enabled in weeklySchedule', () => {
+        const player = createTestPlayer({
+          id: 'p-hoy-no-juego',
+          weeklySchedule: createDefaultWeeklySchedule(), // Fridays are enabled
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'not_playing',
+              reason: 'Cena familiar de cumpleaños',
+              updatedAt: '2026-11-13T15:00:00Z',
+            },
+          },
+        });
+
+        // 2026-11-13 is Friday
+        const effectiveFri = getEffectiveScheduleForDate(player, '2026-11-13');
+        expect(effectiveFri.plays).toBe(false);
+        expect(effectiveFri.source).toBe('override');
+        expect(effectiveFri.dayKey).toBe('fri');
+        expect(effectiveFri.reason).toBe('Cena familiar de cumpleaños');
+
+        // Other days (e.g. Saturday 2026-11-14) remain unaffected
+        const effectiveSat = getEffectiveScheduleForDate(player, '2026-11-14');
+        expect(effectiveSat.plays).toBe(true);
+        expect(effectiveSat.source).toBe('weekly');
+      });
+
+      it('returns custom hours (source: "override", plays: true) when the player overrode just that specific day hours', () => {
+        const player = createTestPlayer({
+          id: 'p-custom-hours',
+          weeklySchedule: createDefaultWeeklySchedule(),
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'playing',
+              availableFrom: '23:30',
+              availableUntil: '02:00',
+              precisionMinutes: 30,
+              reason: 'Llego tarde de la facultad',
+              updatedAt: '2026-11-13T17:00:00Z',
+            },
+          },
+        });
+
+        const effective = getEffectiveScheduleForDate(player, '2026-11-13');
+        expect(effective.plays).toBe(true);
+        expect(effective.source).toBe('override');
+        expect(effective.dayKey).toBe('fri');
+        expect(effective.availableFrom).toBe('23:30');
+        expect(effective.availableUntil).toBe('02:00');
+        expect(effective.precisionMinutes).toBe(30);
+        expect(effective.reason).toBe('Llego tarde de la facultad');
+      });
+    });
+
+    describe('reconcileSessionParticipantsWithSchedules', () => {
+      it('automatically enrolls all players whose effective schedule for session.date has plays: true, without requiring manual signup', () => {
+        const player1 = createTestPlayer({ id: 'p1', displayName: 'Player 1' });
+        const player2 = createTestPlayer({ id: 'p2', displayName: 'Player 2' });
+        const player3 = createTestPlayer({ id: 'p3', displayName: 'Player 3' });
+
+        const session = createTestSession({
+          date: '2026-11-13', // Friday
+          participants: [], // Initially empty session!
+        });
+
+        const enrolled = reconcileSessionParticipantsWithSchedules(session, [
+          player1,
+          player2,
+          player3,
+        ]);
+
+        expect(enrolled).toHaveLength(3);
+        expect(enrolled.map((p) => p.userId)).toEqual(['p1', 'p2', 'p3']);
+        enrolled.forEach((p) => {
+          expect(p.isAutoEnrolled).toBe(true);
+          expect(p.availableFrom).toBe('22:30'); // Friday default start
+          expect(p.availableUntil).toBe('02:30'); // Friday default end
+          expect(p.precisionMinutes).toBe(15);
+          expect(p.attendanceStatus).toBe('pending');
+        });
+      });
+
+      it('automatically removes a player from session.participants when they set "Hoy no juego" (status: "not_playing") for session.date', () => {
+        const playerPlaying = createTestPlayer({ id: 'p-playing', displayName: 'Playing Player' });
+        const playerBailing = createTestPlayer({
+          id: 'p-bailing',
+          displayName: 'Bailing Player',
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'not_playing',
+              reason: 'Me quedé sin internet',
+              updatedAt: '2026-11-13T20:00:00Z',
+            },
+          },
+        });
+
+        // The session previously contained both participants
+        const session = createTestSession({
+          date: '2026-11-13',
+          participants: [
+            createTestParticipant({ userId: 'p-playing' }),
+            createTestParticipant({ userId: 'p-bailing' }),
+          ],
+        });
+
+        const updatedParticipants = reconcileSessionParticipantsWithSchedules(session, [
+          playerPlaying,
+          playerBailing,
+        ]);
+
+        expect(updatedParticipants).toHaveLength(1);
+        expect(updatedParticipants[0].userId).toBe('p-playing');
+        expect(updatedParticipants.find((p) => p.userId === 'p-bailing')).toBeUndefined();
+      });
+
+      it('automatically excludes a player when their weeklySchedule has enabled: false for the session weekday', () => {
+        const customWeekly = createDefaultWeeklySchedule();
+        customWeekly.fri.enabled = false; // Doesn't play on Fridays
+
+        const playerFriOff = createTestPlayer({
+          id: 'p-fri-off',
+          weeklySchedule: customWeekly,
+        });
+        const playerNormal = createTestPlayer({ id: 'p-normal' });
+
+        const session = createTestSession({
+          date: '2026-11-13', // Friday
+          participants: [],
+        });
+
+        const participants = reconcileSessionParticipantsWithSchedules(session, [
+          playerFriOff,
+          playerNormal,
+        ]);
+
+        expect(participants).toHaveLength(1);
+        expect(participants[0].userId).toBe('p-normal');
+      });
+
+      it('preserves checkedInAt and attendanceStatus for already checked-in participants', () => {
+        const checkedInPlayer = createTestPlayer({ id: 'p-checked-in', displayName: 'Puntual' });
+        const pendingPlayer = createTestPlayer({ id: 'p-pending', displayName: 'Dormilón' });
+
+        const existingCheckedIn = createTestParticipant({
+          userId: 'p-checked-in',
+          attendanceStatus: 'on_time',
+          checkedInAt: '22:25',
+          joinedAt: '2026-11-13T18:00:00Z',
+        });
+
+        const existingPending = createTestParticipant({
+          userId: 'p-pending',
+          attendanceStatus: 'pending',
+          checkedInAt: undefined,
+          joinedAt: '2026-11-13T19:00:00Z',
+        });
+
+        const session = createTestSession({
+          date: '2026-11-13',
+          participants: [existingCheckedIn, existingPending],
+        });
+
+        const reconciled = reconcileSessionParticipantsWithSchedules(session, [
+          checkedInPlayer,
+          pendingPlayer,
+        ]);
+
+        expect(reconciled).toHaveLength(2);
+
+        const reconciledCheckedIn = reconciled.find((p) => p.userId === 'p-checked-in')!;
+        expect(reconciledCheckedIn.attendanceStatus).toBe('on_time');
+        expect(reconciledCheckedIn.checkedInAt).toBe('22:25');
+        expect(reconciledCheckedIn.joinedAt).toBe('2026-11-13T18:00:00Z');
+
+        const reconciledPending = reconciled.find((p) => p.userId === 'p-pending')!;
+        expect(reconciledPending.attendanceStatus).toBe('pending');
+        expect(reconciledPending.checkedInAt).toBeUndefined();
+      });
+
+      it('preserves manual session edits when isAutoEnrolled is false and no daily override is present', () => {
+        const manualPlayer = createTestPlayer({ id: 'p-manual' });
+        const customParticipant = createTestParticipant({
+          userId: 'p-manual',
+          availableFrom: '23:45',
+          availableUntil: '03:15',
+          precisionMinutes: 30,
+          isAutoEnrolled: false, // Player edited session time manually in modal
+          note: 'Ajuste manual para esta sesión',
+        });
+
+        const session = createTestSession({
+          date: '2026-11-13',
+          participants: [customParticipant],
+        });
+
+        const reconciled = reconcileSessionParticipantsWithSchedules(session, [manualPlayer]);
+        expect(reconciled).toHaveLength(1);
+        expect(reconciled[0].availableFrom).toBe('23:45');
+        expect(reconciled[0].availableUntil).toBe('03:15');
+        expect(reconciled[0].precisionMinutes).toBe(30);
+        expect(reconciled[0].isAutoEnrolled).toBe(false);
+      });
     });
   });
 });

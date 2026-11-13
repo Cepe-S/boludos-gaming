@@ -6,6 +6,9 @@ import { LeaderboardSanctionsView } from './components/LeaderboardSanctionsView'
 import { DiscordIntegrationModal } from './components/DiscordIntegrationModal';
 import { GlobalChatDrawer } from './components/GlobalChatDrawer';
 import { NotificationCenterModal } from './components/NotificationCenterModal';
+import { WelcomeAuthView } from './components/WelcomeAuthView';
+import { OnboardingTourModal } from './components/OnboardingTourModal';
+import { WeeklyScheduleModal } from './components/WeeklyScheduleModal';
 import { useApp } from './context/AppContext';
 import {
   Bell,
@@ -33,12 +36,18 @@ export function App() {
     pushAlerts,
     isSupabaseConnected,
     resetDemoData,
+    isAuthenticated,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'sessions' | 'games' | 'tribunal' | 'discord'>('sessions');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isDiscordModalOpen, setIsDiscordModalOpen] = useState(false);
+
+  // If user is not authenticated, show Welcome & Profile Creation screen
+  if (!isAuthenticated) {
+    return <WelcomeAuthView />;
+  }
 
   const openSessionsCount = sessions.filter((s) => s.status !== 'finished').length;
 
@@ -159,6 +168,10 @@ export function App() {
           onClose={() => setIsDiscordModalOpen(false)}
         />
       )}
+
+      {/* Onboarding Tour & Weekly Schedule Modals */}
+      <OnboardingTourModal />
+      <WeeklyScheduleModal />
     </div>
   );
 }

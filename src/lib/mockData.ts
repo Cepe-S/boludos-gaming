@@ -39,6 +39,28 @@ export const INITIAL_PLAYERS: PlayerProfile[] = [
     activeTitle: '⌚ Reloj Suizo',
     isOnline: true,
     pushEnabled: true,
+    onboardingCompleted: true,
+    dailyOverrides: {},
+    weeklySchedule: {
+      mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 5 },
+      tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 5 },
+      wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 5 },
+      thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 5 },
+      fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 5 },
+      sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 5 },
+      sun: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 5 },
+    },
+    categoryPreferences: {
+      'Shooter Táctico': 'like',
+      'MOBA': 'neutral',
+      'Co-op Horror': 'like',
+      'Co-op Acción': 'like',
+      'Survival Sandbox': 'like',
+      'RTS': 'like',
+      'Party Casual': 'neutral',
+      'Deportes / Autos': 'neutral',
+      'RPG / Aventura': 'like',
+    },
   },
   {
     id: 'user-tincho',
@@ -56,6 +78,28 @@ export const INITIAL_PLAYERS: PlayerProfile[] = [
     activeTitle: '🫡 Soldado Fiel',
     isOnline: true,
     pushEnabled: true,
+    onboardingCompleted: true,
+    dailyOverrides: {},
+    weeklySchedule: {
+      mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:30', precisionMinutes: 15 },
+      tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:30', precisionMinutes: 15 },
+      wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:30', precisionMinutes: 15 },
+      thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:30', precisionMinutes: 15 },
+      fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
+      sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
+      sun: { enabled: true, availableFrom: '22:00', availableUntil: '01:30', precisionMinutes: 15 },
+    },
+    categoryPreferences: {
+      'Shooter Táctico': 'like',
+      'MOBA': 'like',
+      'Co-op Horror': 'neutral',
+      'Co-op Acción': 'like',
+      'Survival Sandbox': 'like',
+      'RTS': 'like',
+      'Party Casual': 'neutral',
+      'Deportes / Autos': 'like',
+      'RPG / Aventura': 'like',
+    },
   },
   {
     id: 'user-lucho',
@@ -73,6 +117,28 @@ export const INITIAL_PLAYERS: PlayerProfile[] = [
     activeTitle: '🫡 Soldado Fiel',
     isOnline: true,
     pushEnabled: true,
+    onboardingCompleted: true,
+    dailyOverrides: {},
+    weeklySchedule: {
+      mon: { enabled: true, availableFrom: '22:15', availableUntil: '02:00', precisionMinutes: 15 },
+      tue: { enabled: true, availableFrom: '22:15', availableUntil: '02:00', precisionMinutes: 15 },
+      wed: { enabled: true, availableFrom: '22:15', availableUntil: '02:00', precisionMinutes: 15 },
+      thu: { enabled: true, availableFrom: '22:15', availableUntil: '02:00', precisionMinutes: 15 },
+      fri: { enabled: true, availableFrom: '22:30', availableUntil: '03:00', precisionMinutes: 15 },
+      sat: { enabled: true, availableFrom: '22:30', availableUntil: '03:00', precisionMinutes: 15 },
+      sun: { enabled: true, availableFrom: '22:15', availableUntil: '01:30', precisionMinutes: 15 },
+    },
+    categoryPreferences: {
+      'Shooter Táctico': 'like',
+      'MOBA': 'neutral',
+      'Co-op Horror': 'like',
+      'Co-op Acción': 'like',
+      'Survival Sandbox': 'like',
+      'RTS': 'like',
+      'Party Casual': 'neutral',
+      'Deportes / Autos': 'neutral',
+      'RPG / Aventura': 'like',
+    },
   },
   {
     id: 'user-nacho',
@@ -90,6 +156,28 @@ export const INITIAL_PLAYERS: PlayerProfile[] = [
     activeTitle: '🐢 Rey del ±15m Mentiroso',
     isOnline: true,
     pushEnabled: true,
+    onboardingCompleted: true,
+    dailyOverrides: {},
+    weeklySchedule: {
+      mon: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      tue: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      wed: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      thu: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:00', precisionMinutes: 30 },
+      sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:00', precisionMinutes: 30 },
+      sun: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+    },
+    categoryPreferences: {
+      'Shooter Táctico': 'like',
+      'MOBA': 'like',
+      'Co-op Horror': 'like',
+      'Co-op Acción': 'neutral',
+      'Survival Sandbox': 'neutral',
+      'RTS': 'neutral',
+      'Party Casual': 'like',
+      'Deportes / Autos': 'like',
+      'RPG / Aventura': 'dislike',
+    },
   },
   {
     id: 'user-fede',
@@ -107,6 +195,28 @@ export const INITIAL_PLAYERS: PlayerProfile[] = [
     activeTitle: '💨 Humero Oficial',
     isOnline: false,
     pushEnabled: false,
+    onboardingCompleted: true,
+    dailyOverrides: {},
+    weeklySchedule: {
+      mon: { enabled: false, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      tue: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      wed: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      thu: { enabled: true, availableFrom: '22:30', availableUntil: '01:00', precisionMinutes: 30 },
+      fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 30 },
+      sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 30 },
+      sun: { enabled: true, availableFrom: '22:00', availableUntil: '00:30', precisionMinutes: 30 },
+    },
+    categoryPreferences: {
+      'Shooter Táctico': 'neutral',
+      'MOBA': 'dislike',
+      'Co-op Horror': 'like',
+      'Co-op Acción': 'like',
+      'Survival Sandbox': 'like',
+      'RTS': 'neutral',
+      'Party Casual': 'like',
+      'Deportes / Autos': 'neutral',
+      'RPG / Aventura': 'neutral',
+    },
   },
   {
     id: 'user-gonza',
@@ -124,6 +234,28 @@ export const INITIAL_PLAYERS: PlayerProfile[] = [
     activeTitle: '👻 Fantasma Supremo (Sin Prioridad de Cupo)',
     isOnline: false,
     pushEnabled: false,
+    onboardingCompleted: true,
+    dailyOverrides: {},
+    weeklySchedule: {
+      mon: { enabled: false, availableFrom: '23:00', availableUntil: '01:30', precisionMinutes: 60 },
+      tue: { enabled: true, availableFrom: '23:00', availableUntil: '01:30', precisionMinutes: 60 },
+      wed: { enabled: false, availableFrom: '23:00', availableUntil: '01:30', precisionMinutes: 60 },
+      thu: { enabled: true, availableFrom: '23:00', availableUntil: '01:30', precisionMinutes: 60 },
+      fri: { enabled: true, availableFrom: '23:00', availableUntil: '03:00', precisionMinutes: 60 },
+      sat: { enabled: true, availableFrom: '23:00', availableUntil: '03:00', precisionMinutes: 60 },
+      sun: { enabled: false, availableFrom: '23:00', availableUntil: '01:30', precisionMinutes: 60 },
+    },
+    categoryPreferences: {
+      'Shooter Táctico': 'neutral',
+      'MOBA': 'neutral',
+      'Co-op Horror': 'dislike',
+      'Co-op Acción': 'dislike',
+      'Survival Sandbox': 'neutral',
+      'RTS': 'neutral',
+      'Party Casual': 'like',
+      'Deportes / Autos': 'dislike',
+      'RPG / Aventura': 'dislike',
+    },
   },
 ];
 
@@ -131,6 +263,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-cs2',
     name: 'Counter-Strike 2',
+    description:
+      'El clásico eterno de tiros. Mucho calentar en Deathmatch y flashar pro, pero en overtime nos tiembla el pulso a todos.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/730/header.jpg',
     minPlayers: 1,
     maxPlayers: 5,
@@ -142,6 +276,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-lol',
     name: 'League of Legends',
+    description:
+      'La fábrica de puteadas y tilteos por excelencia. Decimos "la última y a dormir" y terminamos a las 4 AM perdiendo en promo.',
     coverUrl: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=800&q=80',
     minPlayers: 1,
     maxPlayers: 5,
@@ -153,6 +289,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-lethal',
     name: 'Lethal Company',
+    description:
+      'Comedia pura con chat de proximidad. Vas a buscar chatarra espacial y te deja tirado un bicho mientras escuchás a tu amigo gritar a lo lejos.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1966720/header.jpg',
     minPlayers: 1,
     maxPlayers: 4,
@@ -164,10 +302,12 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-peak',
     name: 'Peak (Chained Together)',
+    description:
+      'Encadenados de a cuatro tratando de trepar sin caerse al vacío. Si uno pifia el salto se caen todos y se pudre el Discord.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/2567870/header.jpg',
     minPlayers: 1,
     maxPlayers: 4,
-    category: 'Co-op Escalada',
+    category: 'Co-op Acción',
     tags: ['Física', 'Co-op', 'Casual', 'Aventura'],
     averageDurationMins: 30,
     addedBy: 'user-tincho',
@@ -175,10 +315,12 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-zomboid',
     name: 'Project Zomboid',
+    description:
+      'Simulador hiperrealista de apocalipsis zombie en Kentucky. Sobrevivís un mes comiendo latas frías y morís por rasparte con un árbol.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/108600/header.jpg',
     minPlayers: 1,
     maxPlayers: 16,
-    category: 'Survival Zombie',
+    category: 'Survival Sandbox',
     tags: ['Supervivencia', 'Hardcore', 'Sandbox', 'Zombies'],
     averageDurationMins: 90,
     addedBy: 'user-lucho',
@@ -186,6 +328,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-aoe2',
     name: 'Age of Empires II: DE',
+    description:
+      'Estrategia de la vieja escuela. Fast Castle, rush de caballitos y peleas épicas por un pedazo de oro mientras suena la música nostálgica.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/813780/header.jpg',
     minPlayers: 2,
     maxPlayers: 8,
@@ -197,6 +341,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-valorant',
     name: 'Valorant',
+    description:
+      'Tiros, humos y habilidades de fantasía. Si te cruzás una Reyna smurf te arruina la noche, pero cuando clavás un ace te sentís Dios.',
     coverUrl: 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=800&q=80',
     minPlayers: 1,
     maxPlayers: 5,
@@ -208,10 +354,12 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-amongus',
     name: 'Among Us',
+    description:
+      'El juego que destruye amistades de años en cinco minutos. "¿Por qué no reportaste el cuerpo en Eléctrica, traidor?".',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/945360/header.jpg',
     minPlayers: 4,
     maxPlayers: 15,
-    category: 'Party / Deducción',
+    category: 'Party Casual',
     tags: ['Party', 'Engaño', 'Casual', 'Misterio'],
     averageDurationMins: 20,
     addedBy: 'user-fede',
@@ -219,6 +367,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-rocketleague',
     name: 'Rocket League',
+    description:
+      'Fútbol con autitos voladores y físicas demenciales. Vas a meter un aéreo increíble y errás el arco vacío en el contraataque.',
     coverUrl: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=800&q=80',
     minPlayers: 1,
     maxPlayers: 4,
@@ -230,6 +380,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-helldivers2',
     name: 'Helldivers 2',
+    description:
+      'Repartiendo democracia galáctica a los tiros contra bichos y robots gigantes. El fuego amigo causa más bajas que el enemigo.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/553850/header.jpg',
     minPlayers: 1,
     maxPlayers: 4,
@@ -241,6 +393,8 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-golf',
     name: 'Golf With Your Friends',
+    description:
+      'Minigolf supuestamente relajante que termina en bardo total cuando te meten una colisión y te tiran la pelota al agua.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/431240/header.jpg',
     minPlayers: 2,
     maxPlayers: 12,
@@ -252,10 +406,12 @@ export const INITIAL_GAMES: Game[] = [
   {
     id: 'game-phasmophobia',
     name: 'Phasmophobia',
+    description:
+      'Cazar fantasmas en casas oscuras hablando por radio. El que entra con el crucifijo sale corriendo primero y tranca la puerta.',
     coverUrl: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/739630/header.jpg',
     minPlayers: 1,
     maxPlayers: 4,
-    category: 'Co-op Terror',
+    category: 'Co-op Horror',
     tags: ['Fantasmas', 'Investigación', 'Terror', 'Co-op'],
     averageDurationMins: 35,
     addedBy: 'user-santi',

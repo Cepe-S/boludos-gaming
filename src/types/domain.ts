@@ -8,6 +8,113 @@ export type SessionStatus = 'open' | 'in_progress' | 'finished';
 
 export type GameRating = 1 | 2 | 3 | 4 | 5;
 
+export type CategoryPreferenceLevel = 'like' | 'neutral' | 'dislike';
+
+export type DayOfWeekKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export interface GameCategoryInfo {
+  id: string;
+  label: string;
+  emoji: string;
+  description: string;
+}
+
+export const GAME_CATEGORIES: GameCategoryInfo[] = [
+  {
+    id: 'Shooter Táctico',
+    label: 'Shooter Táctico / FPS',
+    emoji: '🎯',
+    description: 'Juegos de disparos competitivos por rondas o equipos (CS2, Valorant).',
+  },
+  {
+    id: 'MOBA',
+    label: 'MOBA',
+    emoji: '⚔️',
+    description: 'Batallas estratégicas 5v5 por líneas y objetivos (LoL, Dota 2).',
+  },
+  {
+    id: 'Co-op Horror',
+    label: 'Co-op Horror & Risas',
+    emoji: '👻',
+    description: 'Terror cooperativo caótico con chat de proximidad (Lethal Company, Phasmophobia).',
+  },
+  {
+    id: 'Co-op Acción',
+    label: 'Co-op Acción / Supervivencia',
+    emoji: '🔥',
+    description: 'Misiones cooperativas intensas o aventuras en equipo (Helldivers 2, Peak).',
+  },
+  {
+    id: 'Survival Sandbox',
+    label: 'Survival / Mundo Abierto',
+    emoji: '🧟',
+    description: 'Supervivencia, crafteo, bases y exploración grupal (Project Zomboid, Rust, Minecraft).',
+  },
+  {
+    id: 'RTS',
+    label: 'RTS / Estrategia',
+    emoji: '🏰',
+    description: 'Estrategia en tiempo real, imperios y batallas masivas (Age of Empires II).',
+  },
+  {
+    id: 'Party Casual',
+    label: 'Party / Deducción Social',
+    emoji: '🎉',
+    description: 'Juegos casuales para grupos grandes y risas aseguradas (Among Us, Golf With Your Friends).',
+  },
+  {
+    id: 'Deportes / Autos',
+    label: 'Deportes & Racing',
+    emoji: '⚽',
+    description: 'Fútbol, autos y competencia arcade rápida (Rocket League, EA Sports FC).',
+  },
+  {
+    id: 'RPG / Aventura',
+    label: 'RPG / Campaña Co-op',
+    emoji: '🐉',
+    description: 'Historias largas, rol y campañas cooperativas (Baldur\'s Gate 3).',
+  },
+];
+
+export const DAYS_OF_WEEK: Array<{ key: DayOfWeekKey; label: string; shortLabel: string; jsDay: number }> = [
+  { key: 'mon', label: 'Lunes', shortLabel: 'Lun', jsDay: 1 },
+  { key: 'tue', label: 'Martes', shortLabel: 'Mar', jsDay: 2 },
+  { key: 'wed', label: 'Miércoles', shortLabel: 'Mié', jsDay: 3 },
+  { key: 'thu', label: 'Jueves', shortLabel: 'Jue', jsDay: 4 },
+  { key: 'fri', label: 'Viernes', shortLabel: 'Vie', jsDay: 5 },
+  { key: 'sat', label: 'Sábado', shortLabel: 'Sáb', jsDay: 6 },
+  { key: 'sun', label: 'Domingo', shortLabel: 'Dom', jsDay: 0 },
+];
+
+export interface DayScheduleConfig {
+  enabled: boolean; // false = Ese día no juega por defecto
+  availableFrom: string; // "22:00"
+  availableUntil: string; // "01:30"
+  precisionMinutes: PrecisionMinutes;
+}
+
+export type WeeklySchedule = Record<DayOfWeekKey, DayScheduleConfig>;
+
+export interface DailyScheduleOverride {
+  date: string; // "YYYY-MM-DD"
+  status: 'playing' | 'not_playing';
+  availableFrom?: string;
+  availableUntil?: string;
+  precisionMinutes?: PrecisionMinutes;
+  reason?: string;
+  updatedAt: string;
+}
+
+export interface EffectiveDailySchedule {
+  plays: boolean;
+  source: 'override' | 'weekly';
+  dayKey: DayOfWeekKey;
+  availableFrom: string;
+  availableUntil: string;
+  precisionMinutes: PrecisionMinutes;
+  reason?: string;
+}
+
 export interface PlayerProfile {
   id: string;
   discordId: string;
@@ -24,11 +131,16 @@ export interface PlayerProfile {
   activeTitle: string;
   isOnline?: boolean;
   pushEnabled?: boolean;
+  onboardingCompleted?: boolean;
+  weeklySchedule?: WeeklySchedule;
+  dailyOverrides?: Record<string, DailyScheduleOverride>; // keyed by YYYY-MM-DD
+  categoryPreferences?: Record<string, CategoryPreferenceLevel>; // keyed by category id
 }
 
 export interface Game {
   id: string;
   name: string;
+  description?: string;
   coverUrl: string;
   minPlayers: number;
   maxPlayers: number;
@@ -62,6 +174,7 @@ export interface SessionParticipant {
   checkedInAt?: string; // "HH:mm" or ISO string
   attendanceStatus: AttendanceStatus;
   note?: string;
+  isAutoEnrolled?: boolean;
 }
 
 export interface GamingSession {
@@ -139,7 +252,7 @@ export interface ScheduleOverlapSummary {
   guaranteedEndFormatted: string;
   probableEndFormatted: string;
   overlapDurationMinutes: number;
-   guaranteedOverlapMinutes: number;
+  guaranteedOverlapMinutes: number;
   hasValidOverlap: boolean;
   participantTimelines: ParticipantScheduleTimeline[];
 }

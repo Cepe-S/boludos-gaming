@@ -1,6 +1,8 @@
 import {
   AttendanceVote,
+  CategoryPreferenceLevel,
   ChatMessage,
+  DailyScheduleOverride,
   DiscordIntegrationConfig,
   Game,
   GameRating,
@@ -10,6 +12,7 @@ import {
   SanctionRecord,
   SessionParticipant,
   UserGamePreference,
+  WeeklySchedule,
 } from '../types/domain';
 import { supabase } from './supabaseClient';
 
@@ -43,6 +46,10 @@ function mapProfileRow(row: Record<string, unknown>): PlayerProfile {
     activeTitle: String(row.active_title || 'Puntual en Práctica'),
     isOnline: true,
     pushEnabled: Boolean(row.push_subscription),
+    onboardingCompleted: Boolean(row.onboarding_completed),
+    weeklySchedule: (row.weekly_schedule as WeeklySchedule) || undefined,
+    dailyOverrides: (row.daily_overrides as Record<string, DailyScheduleOverride>) || {},
+    categoryPreferences: (row.category_preferences as Record<string, CategoryPreferenceLevel>) || {},
   };
 }
 
@@ -50,6 +57,7 @@ function mapGameRow(row: Record<string, unknown>): Game {
   return {
     id: String(row.id),
     name: String(row.name),
+    description: String(row.description || ''),
     coverUrl: String(row.cover_url),
     minPlayers: Number(row.min_players ?? 1),
     maxPlayers: Number(row.max_players ?? 5),
@@ -85,6 +93,7 @@ function mapParticipantRow(row: Record<string, unknown>): SessionParticipant {
     checkedInAt: row.checked_in_at ? String(row.checked_in_at) : undefined,
     attendanceStatus: (row.attendance_status as SessionParticipant['attendanceStatus']) || 'pending',
     note: row.note ? String(row.note) : undefined,
+    isAutoEnrolled: Boolean(row.is_auto_enrolled),
   };
 }
 
@@ -247,11 +256,39 @@ export async function dbUpsertPreference(pref: UserGamePreference) {
   );
 }
 
+export async function dbUpsertProfile(player: PlayerProfile): Promise<void> {
+  if (!supabase) return;
+  await supabase.from('profiles').upsert(
+    {
+      id: player.id,
+      discord_id: player.discordId,
+      discord_username: player.discordUsername,
+      display_name: player.displayName,
+      avatar_url: player.avatarUrl,
+      karma_score: player.karmaScore,
+      sessions_played: player.sessionsPlayed,
+      hours_played: player.hoursPlayed,
+      on_time_count: player.onTimeCount,
+      late_count: player.lateCount,
+      no_show_count: player.noShowCount,
+      current_streak: player.currentStreak,
+      active_title: player.activeTitle,
+      onboarding_completed: Boolean(player.onboardingCompleted),
+      weekly_schedule: player.weeklySchedule || null,
+      daily_overrides: player.dailyOverrides || {},
+      category_preferences: player.categoryPreferences || {},
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' }
+  );
+}
+
 export async function dbInsertGame(game: Game) {
   if (!supabase) return;
   await supabase.from('games').upsert({
     id: game.id,
     name: game.name,
+    description: game.description || '',
     cover_url: game.coverUrl,
     min_players: game.minPlayers,
     max_players: game.maxPlayers,
@@ -276,8 +313,7 @@ export async function dbCreateSession(session: GamingSession) {
     created_by: session.createdBy,
   });
 
-  if (session.participants.length > 0) {
-    const p = session.participants[0];
+  for (const p of session.participants) {
     await dbUpsertParticipant(session.id, p);
   }
 }
@@ -294,6 +330,7 @@ export async function dbUpsertParticipant(sessionId: string, p: SessionParticipa
       checked_in_at: p.checkedInAt || null,
       attendance_status: p.attendanceStatus,
       note: p.note || null,
+      is_auto_enrolled: Boolean(p.isAutoEnrolled),
     },
     { onConflict: 'session_id,user_id' }
   );

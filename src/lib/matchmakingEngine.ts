@@ -1,7 +1,10 @@
 import {
+  DayOfWeekKey,
+  EffectiveDailySchedule,
   Game,
   GameRating,
   GameSynchronyResult,
+  GamingSession,
   LobbyCompatibilityStatus,
   ParticipantScheduleTimeline,
   PlayerGameBreakdown,
@@ -11,6 +14,7 @@ import {
   SessionParticipant,
   SubLobbyAssignment,
   UserGamePreference,
+  WeeklySchedule,
 } from '../types/domain';
 
 /**
@@ -453,4 +457,123 @@ export function sortPlayersByLobbyPriority(
     const joinTimeB = partB?.joinedAt ? new Date(partB.joinedAt).getTime() : 0;
     return joinTimeA - joinTimeB;
   });
+}
+
+/**
+ * Returns a default weekly schedule for 'mon'..'sun'.
+ * Default: enabled: true, 22:00 to 01:00, ±15m.
+ * Friday and Saturday: 22:30 to 02:30, ±15m.
+ */
+export function createDefaultWeeklySchedule(): WeeklySchedule {
+  return {
+    mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
+    tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
+    wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
+    thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
+    fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
+    sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
+    sun: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
+  };
+}
+
+/**
+ * Parses YYYY-MM-DD safely into day of week key ('mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun').
+ */
+export function getDayOfWeekKey(dateStr: string): DayOfWeekKey {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const day = new Date(y, m - 1, d).getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday
+  const dayKeys: DayOfWeekKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  return dayKeys[day] || 'mon';
+}
+
+/**
+ * Resolves the effective schedule for a player on a specific date (YYYY-MM-DD),
+ * giving precedence to daily overrides (e.g. "Hoy No Juego" or custom daily hours)
+ * over their default weekly schedule.
+ */
+export function getEffectiveScheduleForDate(
+  player: PlayerProfile,
+  dateStr: string
+): EffectiveDailySchedule {
+  const dayKey = getDayOfWeekKey(dateStr);
+  const defaultSchedule = createDefaultWeeklySchedule();
+  const weeklyDayConfig = player.weeklySchedule?.[dayKey] || defaultSchedule[dayKey];
+
+  const override = player.dailyOverrides?.[dateStr];
+  if (override) {
+    if (override.status === 'not_playing') {
+      return {
+        plays: false,
+        source: 'override',
+        dayKey,
+        availableFrom: override.availableFrom || '22:00',
+        availableUntil: override.availableUntil || '01:00',
+        precisionMinutes: override.precisionMinutes || 15,
+        reason: override.reason,
+      };
+    }
+
+    return {
+      plays: true,
+      source: 'override',
+      dayKey,
+      availableFrom: override.availableFrom || weeklyDayConfig.availableFrom,
+      availableUntil: override.availableUntil || weeklyDayConfig.availableUntil,
+      precisionMinutes: override.precisionMinutes || weeklyDayConfig.precisionMinutes,
+      reason: override.reason,
+    };
+  }
+
+  return {
+    plays: weeklyDayConfig.enabled,
+    source: 'weekly',
+    dayKey,
+    availableFrom: weeklyDayConfig.availableFrom,
+    availableUntil: weeklyDayConfig.availableUntil,
+    precisionMinutes: weeklyDayConfig.precisionMinutes,
+  };
+}
+
+/**
+ * Reconciles session participants with all player profiles based on their effective schedule.
+ * Automatically enrolls players who play on that date and removes those whose schedule is disabled
+ * or who have a 'not_playing' daily override.
+ */
+export function reconcileSessionParticipantsWithSchedules(
+  session: GamingSession,
+  players: PlayerProfile[]
+): SessionParticipant[] {
+  const result: SessionParticipant[] = [];
+
+  for (const player of players) {
+    const eff = getEffectiveScheduleForDate(player, session.date);
+    const existing = session.participants.find((p) => p.userId === player.id);
+
+    if (!eff.plays) {
+      // Do NOT include this player (automatically removed)
+      continue;
+    }
+
+    if (existing && existing.isAutoEnrolled === false && eff.source !== 'override') {
+      // Manual per-session tweak preserved
+      result.push(existing);
+    } else {
+      result.push({
+        userId: player.id,
+        joinedAt: existing?.joinedAt || new Date().toISOString(),
+        availableFrom: eff.availableFrom,
+        availableUntil: eff.availableUntil,
+        precisionMinutes: eff.precisionMinutes,
+        checkedInAt: existing?.checkedInAt,
+        attendanceStatus: existing?.attendanceStatus || 'pending',
+        note:
+          eff.source === 'override'
+            ? eff.reason || 'Horario especial del día'
+            : 'Auto-anotado por horario semanal',
+        isAutoEnrolled: eff.source === 'weekly',
+      });
+    }
+  }
+
+  return result;
 }

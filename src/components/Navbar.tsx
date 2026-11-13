@@ -18,6 +18,8 @@ import {
   Ghost,
   ShieldCheck,
   Check,
+  Calendar,
+  LogOut,
 } from 'lucide-react';
 
 export interface NavbarProps {
@@ -42,6 +44,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     players,
     switchActivePlayer,
     loginWithDiscord,
+    logout,
+    setShowWeeklyScheduleModal,
+    setShowOnboardingModal,
     isSupabaseConnected,
     notificationPermission,
     pushAlerts,
@@ -282,8 +287,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     })}
                   </div>
 
-                  {/* Discord OAuth Login trigger */}
-                  <div className="p-2 border-t border-indigo-950/60 mt-1">
+                  {/* Discord OAuth Login trigger & Logout */}
+                  <div className="p-2 border-t border-indigo-950/60 mt-1 space-y-1.5">
                     <button
                       onClick={() => {
                         loginWithDiscord();
@@ -296,10 +301,42 @@ export const Navbar: React.FC<NavbarProps> = ({
                         {isSupabaseConnected ? 'Vincular Discord OAuth' : 'Conectar Discord (Demo)'}
                       </span>
                     </button>
+
+                    <button
+                      onClick={() => {
+                        logout();
+                        setIsPlayerDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/80 hover:bg-rose-950/40 border border-slate-700/60 hover:border-rose-500/40 text-slate-300 hover:text-rose-200 transition-colors cursor-pointer"
+                      title="Cerrar sesión o cambiar a otra cuenta"
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                      <span>🚪 Ir a Bienvenida / Cambiar Cuenta</span>
+                    </button>
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Quick Access: Mi Horario */}
+            <button
+              onClick={() => setShowWeeklyScheduleModal(true)}
+              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#131c31] hover:bg-[#1a2542] border border-indigo-900/50 text-slate-300 hover:text-white text-xs font-semibold transition-all shadow-sm cursor-pointer"
+              title="Configurar rutina semanal por defecto y excepciones de días"
+            >
+              <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+              <span>📅 Mi Horario</span>
+            </button>
+
+            {/* Quick Access: Tour */}
+            <button
+              onClick={() => setShowOnboardingModal(true)}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#131c31] hover:bg-[#1a2542] border border-indigo-900/50 text-slate-300 hover:text-white text-xs font-semibold transition-all shadow-sm cursor-pointer"
+              title="Ver el tour guiado por la aplicación"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>🎓 Tour</span>
+            </button>
 
             {/* Notifications Button */}
             <button
@@ -422,6 +459,28 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Bot className="w-4 h-4 text-sky-400" />
               <span>Canal Discord</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowWeeklyScheduleModal(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 p-2.5 rounded-xl text-xs font-bold bg-[#131c31] text-slate-300 border border-indigo-900/40 hover:text-white cursor-pointer"
+            >
+              <Calendar className="w-4 h-4 text-indigo-400" />
+              <span>📅 Mi Horario</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowOnboardingModal(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 p-2.5 rounded-xl text-xs font-bold bg-[#131c31] text-slate-300 border border-indigo-900/40 hover:text-white cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>🎓 Tour Guiado</span>
             </button>
           </div>
 

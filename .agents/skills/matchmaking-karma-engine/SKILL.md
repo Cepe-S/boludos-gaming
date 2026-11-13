@@ -78,3 +78,29 @@ Each participant $p$ declares:
   - `karma >= 50 && lateCount >= 3`: `"🐢 Rey del ±15m Mentiroso"`
   - `karma < 50 || noShowCount >= 2`: `"💨 Humero Oficial"`
   - `karma < 30 || noShowCount >= 4`: `"👻 Fantasma Supremo (Sin Prioridad de Cupo)"`
+
+
+---
+
+## 4. Automatic Weekly Schedule & Daily Overrides Enrollment Engine
+
+1. **Default Weekly Schedule (`WeeklySchedule`)**:
+   - Keyed by `'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'`.
+   - Each day has `{ enabled: boolean, availableFrom: string, availableUntil: string, precisionMinutes: PrecisionMinutes }`.
+2. **Daily Overrides (`dailyOverrides[dateStr]`)**:
+   - Keyed by `'YYYY-MM-DD'`.
+   - Has `status: 'playing' | 'not_playing'`, plus optional `availableFrom`, `availableUntil`, `precisionMinutes`, `reason`.
+3. **Effective Daily Schedule Resolution (`getEffectiveScheduleForDate(player, dateStr)`)**:
+   - Determine day-of-week key (`'mon'..'sun'`) from `dateStr` (`YYYY-MM-DD` parsed in local time `new Date(y, m - 1, d)`).
+   - If `player.dailyOverrides?.[dateStr]` exists:
+     * If `override.status === 'not_playing'`, return `{ plays: false, source: 'override', dayKey, ... }`.
+     * If `override.status === 'playing'`, return `{ plays: true, source: 'override', dayKey, availableFrom: override.availableFrom || weekly.availableFrom, availableUntil: override.availableUntil || weekly.availableUntil, precisionMinutes: override.precisionMinutes || weekly.precisionMinutes }`.
+   - Otherwise, use `player.weeklySchedule?.[dayKey]` (or default `enabled: true, 22:00 - 01:00, ±15m`):
+     * Return `{ plays: weekly.enabled, source: 'weekly', dayKey, availableFrom: weekly.availableFrom, availableUntil: weekly.availableUntil, precisionMinutes: weekly.precisionMinutes }`.
+4. **100% Automatic Session Enrollment (`reconcileSessionParticipantsWithSchedules(session, players)`)**:
+   - Without asking any player, iterate over all `players`:
+     * Compute `eff = getEffectiveScheduleForDate(player, session.date)`.
+     * If `eff.plays === true`:
+       - If the player is already in `session.participants` and has `isAutoEnrolled === false` (manual custom session edit), keep their participant entry unless their schedule changed via override. Otherwise, automatically include/update them in `session.participants` with `availableFrom: eff.availableFrom`, `availableUntil: eff.availableUntil`, `precisionMinutes: eff.precisionMinutes`, `isAutoEnrolled: true`, preserving any existing `checkedInAt` and `attendanceStatus`.
+     * If `eff.plays === false` (e.g., that weekday is disabled in their weekly schedule OR they clicked `"🚫 Hoy no juego"`):
+       - Automatically remove them from `session.participants`!

@@ -8,7 +8,9 @@ import React, {
 } from 'react';
 import {
   AttendanceVote,
+  CategoryPreferenceLevel,
   ChatMessage,
+  DailyScheduleOverride,
   DiscordEventType,
   DiscordIntegrationConfig,
   DiscordNotificationLog,
@@ -19,16 +21,20 @@ import {
   PrecisionMinutes,
   PushNotificationAlert,
   SanctionRecord,
+  SessionParticipant,
   UserGamePreference,
+  WeeklySchedule,
 } from '../types/domain';
 import { AppContextValue } from '../types/context';
 import {
   calculateGameSynchrony,
   calculateScheduleOverlap,
   calculateTitleForPlayer,
+  createDefaultWeeklySchedule,
   evaluateCheckInStatus,
   formatMinutesToTime,
   parseTimeMinutes,
+  reconcileSessionParticipantsWithSchedules,
   spinWeightedRoulette,
 } from '../lib/matchmakingEngine';
 import {
@@ -61,6 +67,7 @@ import {
   dbUpsertAttendanceVote,
   dbUpsertParticipant,
   dbUpsertPreference,
+  dbUpsertProfile,
   fetchAllSupabaseData,
 } from '../lib/supabaseSync';
 import {
@@ -76,6 +83,7 @@ import {
 
 const STORAGE_KEYS = {
   CURRENT_USER_ID: 'bg_v1_current_user_id',
+  IS_AUTHENTICATED: 'bg_v1_is_authenticated',
   PLAYERS: 'bg_v1_players',
   GAMES: 'bg_v1_games',
   PREFERENCES: 'bg_v1_preferences',
@@ -128,6 +136,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUserId, setCurrentUserId] = useState<string>(() =>
     loadFromStorage(STORAGE_KEYS.CURRENT_USER_ID, INITIAL_PLAYERS[0].id)
   );
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
+    Boolean(loadFromStorage(STORAGE_KEYS.IS_AUTHENTICATED, false))
+  );
+
+  const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(false);
+  const [showWeeklyScheduleModal, setShowWeeklyScheduleModal] = useState<boolean>(false);
 
   const currentUser = useMemo(() => {
     return players.find((p) => p.id === currentUserId) || players[0] || INITIAL_PLAYERS[0];
@@ -235,6 +250,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.CURRENT_USER_ID, currentUserId);
   }, [currentUserId]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.IS_AUTHENTICATED, isAuthenticated);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.GAMES, games);
@@ -373,19 +392,115 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [discordConfig, syncChannel]
   );
 
-  // 1. Current User & Auth
+  // 1. Current User, Welcome Screen & Auth
   const switchActivePlayer = useCallback(
     (userId: string) => {
       const target = players.find((p) => p.id === userId);
       if (target) {
         setCurrentUserId(userId);
+        setIsAuthenticated(true);
       }
     },
     [players]
   );
 
+  const loginAsProfile = useCallback(
+    (userId: string) => {
+      const target = players.find((p) => p.id === userId);
+      if (target) {
+        setCurrentUserId(userId);
+        setIsAuthenticated(true);
+        if (!target.onboardingCompleted) {
+          setShowOnboardingModal(true);
+        }
+      }
+    },
+    [players]
+  );
+
+  const createAndLoginProfile = useCallback(
+    (params: {
+      displayName: string;
+      discordUsername: string;
+      discordId?: string;
+      avatarUrl?: string;
+    }): PlayerProfile => {
+      const newProfile: PlayerProfile = {
+        id: `user-${Date.now()}`,
+        discordId:
+          params.discordId ||
+          `${Math.floor(100000000000000000 + Math.random() * 900000000000000000)}`,
+        discordUsername: params.discordUsername,
+        displayName: params.displayName,
+        avatarUrl:
+          params.avatarUrl ||
+          `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(
+            params.displayName
+          )}&backgroundColor=2563eb`,
+        karmaScore: 100,
+        sessionsPlayed: 0,
+        hoursPlayed: 0,
+        onTimeCount: 0,
+        lateCount: 0,
+        noShowCount: 0,
+        currentStreak: 0,
+        activeTitle: '🎮 Recluta Nuevo',
+        isOnline: true,
+        pushEnabled: true,
+        onboardingCompleted: false,
+        weeklySchedule: createDefaultWeeklySchedule(),
+        dailyOverrides: {},
+        categoryPreferences: {
+          'Shooter Táctico': 'like',
+          'MOBA': 'neutral',
+          'Co-op Horror': 'like',
+          'Co-op Acción': 'like',
+          'Survival Sandbox': 'like',
+          'RTS': 'neutral',
+          'Party Casual': 'like',
+          'Deportes / Autos': 'neutral',
+          'RPG / Aventura': 'like',
+        },
+      };
+
+      const updatedPlayers = [...players, newProfile];
+      setPlayers(updatedPlayers);
+      syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
+      dbUpsertProfile(newProfile).catch(console.warn);
+
+      // Reconcile active sessions so they are automatically enrolled
+      setSessions((prevSessions) => {
+        const updatedSessions = prevSessions.map((sess) => {
+          if (sess.status === 'finished') return sess;
+          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
+            sess,
+            updatedPlayers
+          );
+          for (const p of reconciledParticipants) {
+            dbUpsertParticipant(sess.id, p).catch(console.warn);
+          }
+          return { ...sess, participants: reconciledParticipants };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
+        return updatedSessions;
+      });
+
+      setCurrentUserId(newProfile.id);
+      setIsAuthenticated(true);
+      setShowOnboardingModal(true);
+
+      return newProfile;
+    },
+    [players, syncChannel]
+  );
+
+  const logout = useCallback(() => {
+    setIsAuthenticated(false);
+  }, []);
+
   const loginWithDiscord = useCallback(async () => {
     if (isSupabaseConfigured() && supabase) {
+      setIsAuthenticated(true);
       await supabase.auth.signInWithOAuth({
         provider: 'discord',
         options: {
@@ -398,6 +513,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const nextIndex = (currentIndex + 1) % players.length;
       const nextUser = players[nextIndex];
       setCurrentUserId(nextUser.id);
+      setIsAuthenticated(true);
+      if (!nextUser.onboardingCompleted) {
+        setShowOnboardingModal(true);
+      }
 
       triggerNotificationPipeline(
         {
@@ -410,6 +529,241 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
   }, [players, currentUserId, triggerNotificationPipeline]);
+
+  const completeOnboarding = useCallback(() => {
+    const updatedCurrentUser: PlayerProfile = {
+      ...currentUser,
+      onboardingCompleted: true,
+    };
+
+    const updatedPlayers = players.map((p) =>
+      p.id === currentUser.id ? updatedCurrentUser : p
+    );
+
+    setPlayers(updatedPlayers);
+    syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
+    dbUpsertProfile(updatedCurrentUser).catch(console.warn);
+
+    // Reconcile all open sessions with reconcileSessionParticipantsWithSchedules
+    setSessions((prevSessions) => {
+      const updatedSessions = prevSessions.map((sess) => {
+        if (sess.status === 'finished') return sess;
+        const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
+          sess,
+          updatedPlayers
+        );
+        for (const p of reconciledParticipants) {
+          dbUpsertParticipant(sess.id, p).catch(console.warn);
+        }
+        return { ...sess, participants: reconciledParticipants };
+      });
+      syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
+      return updatedSessions;
+    });
+
+    setShowOnboardingModal(false);
+  }, [currentUser, players, syncChannel]);
+
+  // Weekly Schedule, Daily Overrides & "Hoy No Juego"
+  const updateWeeklySchedule = useCallback(
+    (schedule: WeeklySchedule, userId?: string) => {
+      const targetId = userId || currentUserId;
+      let targetUpdated: PlayerProfile | undefined;
+
+      const updatedPlayers = players.map((p) => {
+        if (p.id === targetId) {
+          targetUpdated = { ...p, weeklySchedule: schedule };
+          return targetUpdated;
+        }
+        return p;
+      });
+
+      if (!targetUpdated) return;
+
+      setPlayers(updatedPlayers);
+      syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
+      dbUpsertProfile(targetUpdated).catch(console.warn);
+
+      // Reconcile open sessions
+      setSessions((prevSessions) => {
+        const updatedSessions = prevSessions.map((sess) => {
+          if (sess.status === 'finished') return sess;
+          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
+            sess,
+            updatedPlayers
+          );
+          const currentIds = new Set(reconciledParticipants.map((p) => p.userId));
+          for (const oldP of sess.participants) {
+            if (!currentIds.has(oldP.userId)) {
+              dbDeleteParticipant(sess.id, oldP.userId).catch(console.warn);
+            }
+          }
+          for (const p of reconciledParticipants) {
+            dbUpsertParticipant(sess.id, p).catch(console.warn);
+          }
+          return { ...sess, participants: reconciledParticipants };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
+        return updatedSessions;
+      });
+    },
+    [currentUserId, players, syncChannel]
+  );
+
+  const setDailyOverride = useCallback(
+    (
+      date: string,
+      override: Omit<DailyScheduleOverride, 'date' | 'updatedAt'> | null,
+      userId?: string
+    ) => {
+      const targetId = userId || currentUserId;
+      let targetUpdated: PlayerProfile | undefined;
+
+      const updatedPlayers = players.map((p) => {
+        if (p.id !== targetId) return p;
+        const nextOverrides = { ...(p.dailyOverrides || {}) };
+        if (override === null) {
+          delete nextOverrides[date];
+        } else {
+          nextOverrides[date] = {
+            ...override,
+            date,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        targetUpdated = { ...p, dailyOverrides: nextOverrides };
+        return targetUpdated;
+      });
+
+      if (!targetUpdated) return;
+
+      setPlayers(updatedPlayers);
+      syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
+      dbUpsertProfile(targetUpdated).catch(console.warn);
+
+      // Immediately runs reconcileSessionParticipantsWithSchedules on any session matching date
+      setSessions((prevSessions) => {
+        const updatedSessions = prevSessions.map((sess) => {
+          if (sess.date !== date || sess.status === 'finished') return sess;
+          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
+            sess,
+            updatedPlayers
+          );
+          const currentIds = new Set(reconciledParticipants.map((p) => p.userId));
+          for (const oldP of sess.participants) {
+            if (!currentIds.has(oldP.userId)) {
+              dbDeleteParticipant(sess.id, oldP.userId).catch(console.warn);
+            }
+          }
+          for (const p of reconciledParticipants) {
+            dbUpsertParticipant(sess.id, p).catch(console.warn);
+          }
+          return { ...sess, participants: reconciledParticipants };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
+        return updatedSessions;
+      });
+    },
+    [currentUserId, players, syncChannel]
+  );
+
+  const toggleTodayNotPlaying = useCallback(
+    (reason?: string, userId?: string) => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const targetId = userId || currentUserId;
+      const targetPlayer = players.find((p) => p.id === targetId) || currentUser;
+      const currentOverride = targetPlayer.dailyOverrides?.[todayStr];
+      const isCurrentlyNotPlaying = currentOverride?.status === 'not_playing';
+
+      if (isCurrentlyNotPlaying) {
+        // Clear override (restores automatic enrollment)
+        setDailyOverride(todayStr, null, targetId);
+
+        triggerNotificationPipeline(
+          {
+            title: `✅ ${targetPlayer.displayName} vuelve a jugar hoy`,
+            body: 'Canceló el aviso de ausencia. Su horario habitual se reactivó automáticamente.',
+            tag: `not_playing_cancel_${todayStr}_${targetId}`,
+            targetUserIds: players.map((p) => p.id),
+          },
+          'ping'
+        );
+      } else {
+        // Set not_playing override
+        const notPlayingReason = reason || 'Avisó con el botón Hoy No Juego';
+        setDailyOverride(
+          todayStr,
+          {
+            status: 'not_playing',
+            reason: notPlayingReason,
+          },
+          targetId
+        );
+
+        triggerNotificationPipeline(
+          {
+            title: `🏳️ ${targetPlayer.displayName} avisó que hoy no juega`,
+            body: `${notPlayingReason}. Baja confirmada sin penalización de karma.`,
+            tag: `not_playing_${todayStr}_${targetId}`,
+            targetUserIds: players.map((p) => p.id),
+          },
+          'message'
+        );
+
+        const discordLog: DiscordNotificationLog = {
+          id: `log-not-playing-${Date.now()}`,
+          eventType: 'checkin_update',
+          content: `🏳️ **Baja Confirmada:** <@${targetPlayer.discordId}> (${targetPlayer.displayName}) avisó que hoy no juega.`,
+          embed: {
+            title: '🏳️ Aviso de Ausencia Anticipado',
+            description: `${targetPlayer.displayName} avisó con antelación que no podrá estar hoy. Se liberó su cupo sin restar karma.`,
+            color: 0x64748b,
+            fields: [
+              { name: 'Motivo', value: notPlayingReason, inline: true },
+              { name: 'Fecha', value: todayStr, inline: true },
+              { name: 'Karma', value: `${targetPlayer.karmaScore} (Intacto)`, inline: true },
+            ],
+            footer: { text: 'Boludos Gaming • Asistencia & Convivencia' },
+            timestamp: new Date().toISOString(),
+          },
+          buttons: [{ label: 'Ver Sesión', actionType: 'open_app', style: 'secondary' }],
+          createdAt: new Date().toISOString(),
+          deliveredToWebhook: false,
+        };
+        dispatchDiscordPipeline(discordLog);
+      }
+    },
+    [
+      currentUserId,
+      currentUser,
+      players,
+      setDailyOverride,
+      triggerNotificationPipeline,
+      dispatchDiscordPipeline,
+    ]
+  );
+
+  const updateCategoryPreferences = useCallback(
+    (prefs: Record<string, CategoryPreferenceLevel>, userId?: string) => {
+      const targetId = userId || currentUserId;
+      let targetUpdated: PlayerProfile | undefined;
+
+      const updatedPlayers = players.map((p) => {
+        if (p.id === targetId) {
+          targetUpdated = { ...p, categoryPreferences: prefs };
+          return targetUpdated;
+        }
+        return p;
+      });
+
+      if (!targetUpdated) return;
+
+      setPlayers(updatedPlayers);
+      syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
+      dbUpsertProfile(targetUpdated).catch(console.warn);
+    },
+    [currentUserId, players, syncChannel]
+  );
 
   // 2. Games & Preferences (1-5★)
   const updateGamePreference = useCallback(
@@ -429,7 +783,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const addGame = useCallback(
-    (gameData: Omit<Game, 'id' | 'addedBy'>) => {
+    (gameData: Omit<Game, 'id' | 'addedBy'>): Game => {
       const newGame: Game = {
         ...gameData,
         id: `game-${Date.now()}`,
@@ -466,6 +820,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
         'message'
       );
+
+      return newGame;
     },
     [currentUser, currentUserId, players, syncChannel, triggerNotificationPipeline]
   );
@@ -486,7 +842,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       availableUntil: string;
       precisionMinutes: PrecisionMinutes;
     }): GamingSession => {
-      const newSession: GamingSession = {
+      const baseSession: GamingSession = {
         id: `session-${Date.now()}`,
         title: params.title,
         date: params.date,
@@ -497,16 +853,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createdAt: new Date().toISOString(),
         allowSplitLobbies: params.allowSplitLobbies,
         attendanceVotes: [],
-        participants: [
-          {
-            userId: currentUserId,
-            joinedAt: new Date().toISOString(),
-            availableFrom: params.availableFrom,
-            availableUntil: params.availableUntil,
-            precisionMinutes: params.precisionMinutes,
-            attendanceStatus: 'pending',
-          },
-        ],
+        participants: [],
+      };
+
+      // Automatically populate participants using reconcileSessionParticipantsWithSchedules
+      // so ALL players whose weekly schedule (or daily override) says they play on params.date
+      // are enrolled automatically right when the session is created!
+      const autoParticipants = reconcileSessionParticipantsWithSchedules(baseSession, players);
+
+      // Ensure session creator's custom schedule parameters are preserved
+      const creatorIndex = autoParticipants.findIndex((p) => p.userId === currentUserId);
+      const creatorParticipant: SessionParticipant = {
+        userId: currentUserId,
+        joinedAt: new Date().toISOString(),
+        availableFrom: params.availableFrom,
+        availableUntil: params.availableUntil,
+        precisionMinutes: params.precisionMinutes,
+        attendanceStatus: 'pending',
+        isAutoEnrolled: false,
+      };
+
+      if (creatorIndex >= 0) {
+        autoParticipants[creatorIndex] = creatorParticipant;
+      } else {
+        autoParticipants.push(creatorParticipant);
+      }
+
+      const newSession: GamingSession = {
+        ...baseSession,
+        participants: autoParticipants,
       };
 
       setSessions((prev) => {
@@ -530,7 +905,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       triggerNotificationPipeline(
         {
           title: '🎮 Nueva Sesión Creada',
-          body: `${currentUser.displayName} convocó a "${params.title}" para las ${params.availableFrom} (±${params.precisionMinutes}m).`,
+          body: `${currentUser.displayName} convocó a "${params.title}" para las ${params.availableFrom} (±${params.precisionMinutes}m). Hay ${autoParticipants.length} jugadores convocados.`,
           tag: `session_${newSession.id}`,
           sessionId: newSession.id,
           targetUserIds: players.map((p) => p.id),
@@ -1277,6 +1652,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setPlayers(INITIAL_PLAYERS);
     setCurrentUserId(INITIAL_PLAYERS[0].id);
+    setIsAuthenticated(true);
+    setShowOnboardingModal(false);
+    setShowWeeklyScheduleModal(false);
     setGames(INITIAL_GAMES);
     setPreferences(INITIAL_PREFERENCES);
     setSessions(INITIAL_SESSIONS);
@@ -1307,9 +1685,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     () => ({
       currentUser,
       players,
+      isAuthenticated,
+      showOnboardingModal,
+      setShowOnboardingModal,
+      showWeeklyScheduleModal,
+      setShowWeeklyScheduleModal,
       switchActivePlayer,
+      loginAsProfile,
+      createAndLoginProfile,
+      logout,
       loginWithDiscord,
+      completeOnboarding,
       isSupabaseConnected: isSupabaseConfigured(),
+
+      updateWeeklySchedule,
+      setDailyOverride,
+      toggleTodayNotPlaying,
+      updateCategoryPreferences,
 
       games,
       preferences,
@@ -1352,8 +1744,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [
       currentUser,
       players,
+      isAuthenticated,
+      showOnboardingModal,
+      showWeeklyScheduleModal,
       switchActivePlayer,
+      loginAsProfile,
+      createAndLoginProfile,
+      logout,
       loginWithDiscord,
+      completeOnboarding,
+      updateWeeklySchedule,
+      setDailyOverride,
+      toggleTodayNotPlaying,
+      updateCategoryPreferences,
       games,
       preferences,
       updateGamePreference,

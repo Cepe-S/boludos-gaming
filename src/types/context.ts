@@ -1,6 +1,8 @@
 import {
   AttendanceVote,
+  CategoryPreferenceLevel,
   ChatMessage,
+  DailyScheduleOverride,
   DiscordEventType,
   DiscordIntegrationConfig,
   DiscordNotificationLog,
@@ -12,21 +14,49 @@ import {
   PushNotificationAlert,
   SanctionRecord,
   UserGamePreference,
+  WeeklySchedule,
 } from './domain';
 
 export interface AppContextValue {
-  // Current User & Auth
+  // Current User, Welcome Screen & Auth
   currentUser: PlayerProfile;
   players: PlayerProfile[];
+  isAuthenticated: boolean;
+  showOnboardingModal: boolean;
+  setShowOnboardingModal: (open: boolean) => void;
+  showWeeklyScheduleModal: boolean;
+  setShowWeeklyScheduleModal: (open: boolean) => void;
   switchActivePlayer: (userId: string) => void;
+  loginAsProfile: (userId: string) => void;
+  createAndLoginProfile: (params: {
+    displayName: string;
+    discordUsername: string;
+    discordId?: string;
+    avatarUrl?: string;
+  }) => PlayerProfile;
+  logout: () => void;
   loginWithDiscord: () => Promise<void>;
+  completeOnboarding: () => void;
   isSupabaseConnected: boolean;
+
+  // Weekly Default Schedule, Daily Overrides & "Hoy No Juego"
+  updateWeeklySchedule: (schedule: WeeklySchedule, userId?: string) => void;
+  setDailyOverride: (
+    date: string,
+    override: Omit<DailyScheduleOverride, 'date' | 'updatedAt'> | null,
+    userId?: string
+  ) => void;
+  toggleTodayNotPlaying: (reason?: string, userId?: string) => void;
+  updateCategoryPreferences: (
+    prefs: Record<string, CategoryPreferenceLevel>,
+    userId?: string
+  ) => void;
 
   // Games & Preferences (1-5 stars)
   games: Game[];
   preferences: UserGamePreference[];
   updateGamePreference: (gameId: string, plays: boolean, rating: GameRating) => void;
-  addGame: (game: Omit<Game, 'id' | 'addedBy'>) => void;
+  addGame: (game: Omit<Game, 'id' | 'addedBy'>) => Game;
 
   // Sessions & Schedule Precision (±5, ±15, ±30, ±60 min)
   sessions: GamingSession[];
