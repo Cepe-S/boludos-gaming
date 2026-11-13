@@ -16,6 +16,8 @@ import {
   AttendanceStatus,
   GameSynchronyResult,
   ParticipantScheduleTimeline,
+  PlayerProfile,
+  SessionParticipant,
 } from '../types/domain';
 import {
   AlertCircle,
@@ -34,9 +36,11 @@ import {
   Gamepad2,
   Ghost,
   Lock,
+  Megaphone,
   MessageSquare,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   Send,
   ShieldAlert,
@@ -47,6 +51,7 @@ import {
   Timer,
   Trophy,
   Unlock,
+  UserCheck,
   Users,
   X,
   Zap,
@@ -63,6 +68,9 @@ export function SessionsView() {
     setActiveSessionId,
     createSession,
     joinOrUpdateSessionSchedule,
+    confirmSessionAttendance,
+    sendSessionCallout,
+    updateSessionInvites,
     leaveSession,
     spinSessionRoulette,
     lockSessionGame,
@@ -97,6 +105,55 @@ export function SessionsView() {
   const [newFromTime, setNewFromTime] = useState('22:00');
   const [newUntilTime, setNewUntilTime] = useState('02:00');
   const [newPrecision, setNewPrecision] = useState<PrecisionMinutes>(15);
+  const [newInviteMode, setNewInviteMode] = useState<'all' | 'custom'>('all');
+  const [newSelectedInviteIds, setNewSelectedInviteIds] = useState<string[]>([]);
+
+  // Modal: Manage Existing Session Invites
+  const [isManageInvitesOpen, setIsManageInvitesOpen] = useState(false);
+  const [editInviteMode, setEditInviteMode] = useState<'all' | 'custom'>('all');
+  const [editSelectedInviteIds, setEditSelectedInviteIds] = useState<string[]>([]);
+
+  // Modal: Session Callout ("Llamado a Sesión")
+  const [isCalloutModalOpen, setIsCalloutModalOpen] = useState(false);
+  const [calloutCustomMessage, setCalloutCustomMessage] = useState(
+    '¡Che gente, confirmen si juegan hoy que estamos cerrando el quórum de la noche!'
+  );
+  const [isSendingCallout, setIsSendingCallout] = useState(false);
+
+  // Sync initial invited users when opening new session modal
+  useEffect(() => {
+    if (isNewModalOpen && newSelectedInviteIds.length === 0) {
+      setNewSelectedInviteIds(players.map((p) => p.id));
+    }
+  }, [isNewModalOpen, players, newSelectedInviteIds.length]);
+
+  // Helper: Determine if a participant is 100% confirmed
+  const isParticipantConfirmed = (participant?: SessionParticipant | null): boolean => {
+    if (!participant) return false;
+    if (participant.confirmationStatus === 'confirmed') return true;
+    if (participant.isAutoEnrolled === false && participant.confirmationStatus !== 'probable') {
+      return true;
+    }
+    return false;
+  };
+
+  // Helper: List of participants in probable (<100%) status
+  const probableParticipants = useMemo(() => {
+    if (!activeSession) return [];
+    return activeSession.participants.filter((p) => {
+      const isInvited =
+        !activeSession.invitedUserIds ||
+        activeSession.invitedUserIds.length === 0 ||
+        activeSession.invitedUserIds.includes(p.userId);
+      return isInvited && !isParticipantConfirmed(p);
+    });
+  }, [activeSession]);
+
+  // Helper: Count of confirmed participants (100%)
+  const confirmedParticipantsCount = useMemo(() => {
+    if (!activeSession) return 0;
+    return activeSession.participants.filter(isParticipantConfirmed).length;
+  }, [activeSession]);
 
   // Availability / Join Panel Form
   const currentParticipant = useMemo(() => {
@@ -262,10 +319,124 @@ export function SessionsView() {
     };
   }, []);
 
+  // Helper badge to display a player's probability for a given date
+  const renderPlayerProbabilityBadge = (player: PlayerProfile, dateStr: string) => {
+    const eff = getEffectiveScheduleForDate(player, dateStr);
+    if (!eff.plays) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-950/70 border border-rose-500/40 text-rose-300 text-[10px] font-bold shrink-0"
+          title={eff.reason ? `Motivo: ${eff.reason}` : 'No juega por defecto'}
+        >
+          <Ban className="w-2.5 h-2.5 text-rose-400" />
+          <span>Hoy no juega{eff.reason ? ` ("${eff.reason}")` : ''}</span>
+        </span>
+      );
+    }
+
+    const confidence = eff.confidencePercentage ?? 75;
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold shrink-0"
+        title={`Probabilidad: ${confidence}% (${eff.source === 'weekly' ? 'Horario default' : 'Horario especial'})`}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <span>
+          🟢 {confidence}% Probable ({eff.availableFrom}–{eff.availableUntil})
+        </span>
+      </span>
+    );
+  };
+
+  // Handle Confirm Attendance (100%)
+  const handleConfirmAttendance = (userId?: string) => {
+    if (!activeSession) return;
+    const targetUserId = userId || currentUser.id;
+    const targetPlayer = players.find((p) => p.id === targetUserId);
+
+    if (typeof confirmSessionAttendance === 'function') {
+      confirmSessionAttendance(activeSession.id, targetUserId);
+    } else {
+      const part = activeSession.participants.find((p) => p.userId === targetUserId);
+      if (part) {
+        joinOrUpdateSessionSchedule(activeSession.id, {
+          availableFrom: part.availableFrom,
+          availableUntil: part.availableUntil,
+          precisionMinutes: part.precisionMinutes,
+          note: part.note,
+          userId: targetUserId,
+          confirmAttendance: true,
+        });
+      }
+    }
+
+    triggerAlert(
+      'success',
+      `✅ ¡Asistencia 100% Confirmada para ${targetPlayer?.displayName || 'el jugador'}! Lugar asegurado en el lobby.`
+    );
+  };
+
+  // Handle Trigger Callout ("Llamado a Sesión")
+  const handleTriggerCallout = async () => {
+    if (!activeSession || isSendingCallout) return;
+    setIsSendingCallout(true);
+    try {
+      let notifiedUsers: PlayerProfile[] = [];
+      if (typeof sendSessionCallout === 'function') {
+        const result = await sendSessionCallout(activeSession.id, calloutCustomMessage.trim() || undefined);
+        notifiedUsers = result?.notifiedUsers || [];
+      }
+      const count = notifiedUsers.length > 0 ? notifiedUsers.length : probableParticipants.length;
+      setIsCalloutModalOpen(false);
+      triggerAlert(
+        'success',
+        `📣 ¡Llamado a Sesión enviado a ${count} jugadores probables por Discord (<@menciones>) y Web Push!`
+      );
+    } catch (err) {
+      triggerAlert(
+        'warning',
+        `Error al enviar el llamado: ${err instanceof Error ? err.message : 'Error inesperado'}`
+      );
+    } finally {
+      setIsSendingCallout(false);
+    }
+  };
+
+  // Handle Open Manage Invites Modal
+  const handleOpenManageInvites = () => {
+    if (!activeSession) return;
+    if (!activeSession.invitedUserIds || activeSession.invitedUserIds.length === 0) {
+      setEditInviteMode('all');
+      setEditSelectedInviteIds(players.map((p) => p.id));
+    } else {
+      setEditInviteMode('custom');
+      setEditSelectedInviteIds(activeSession.invitedUserIds);
+    }
+    setIsManageInvitesOpen(true);
+  };
+
+  // Handle Save Invites
+  const handleSaveInvites = () => {
+    if (!activeSession) return;
+    const nextInvites = editInviteMode === 'custom' ? editSelectedInviteIds : undefined;
+    if (typeof updateSessionInvites === 'function') {
+      updateSessionInvites(activeSession.id, nextInvites);
+    }
+    setIsManageInvitesOpen(false);
+    triggerAlert(
+      'success',
+      editInviteMode === 'custom'
+        ? `🎯 Invitaciones actualizadas: ${editSelectedInviteIds.length} amigos convocados.`
+        : '👥 Invitación abierta a todos los miembros del grupo.'
+    );
+  };
+
   // Handle Create Session
   const handleCreateSessionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
+
+    const invitedUserIds = newInviteMode === 'custom' ? newSelectedInviteIds : undefined;
 
     const created = createSession({
       title: newTitle.trim(),
@@ -276,6 +447,7 @@ export function SessionsView() {
       availableFrom: newFromTime,
       availableUntil: newUntilTime,
       precisionMinutes: newPrecision,
+      invitedUserIds,
     });
 
     setIsNewModalOpen(false);
@@ -469,6 +641,42 @@ export function SessionsView() {
         </div>
       </div>
 
+      {/* EXPLICIT 100% ATTENDANCE CONFIRMATION PULSING BANNER FOR CURRENT USER */}
+      {currentParticipant && !isParticipantConfirmed(currentParticipant) && (
+        <div className="relative overflow-hidden p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-emerald-950/95 via-[#162744] to-indigo-950/95 border-2 border-emerald-500/80 shadow-2xl shadow-emerald-950/50 flex flex-col sm:flex-row items-center justify-between gap-5 animate-pulse">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 shadow-lg shadow-emerald-500/20">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 border-dashed">
+                  🎲 PROBABLE {currentParticipant.confidencePercentage ?? 75}% (Auto-horario)
+                </span>
+                <span className="text-xs text-slate-300 font-bold">
+                  {currentParticipant.availableFrom} a {currentParticipant.availableUntil} (±{currentParticipant.precisionMinutes}m)
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                ¿Jugás seguro hoy en "{activeSession.title}"? ¡Confirmá tu asistencia!
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5 max-w-2xl">
+                Tu horario default semanal es una probabilidad estimada (nunca es 100% hasta confirmar). Al confirmar, tu estado pasa a <strong className="text-emerald-300">100% CONFIRMADO</strong> para asegurar quórum y fijar la ruleta.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleConfirmAttendance(currentUser.id)}
+            className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs tracking-wider uppercase shadow-xl shadow-emerald-500/30 transition transform hover:scale-105 active:scale-95 cursor-pointer shrink-0 flex items-center justify-center gap-2.5"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>✅ Confirmar Asistencia (100%)</span>
+          </button>
+        </div>
+      )}
+
       {/* Action Toast Alert Banner */}
       {actionAlert && (
         <div
@@ -600,31 +808,90 @@ export function SessionsView() {
             </div>
 
             {/* Quick Status Badges */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <div className="flex items-center gap-2 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-800 text-xs text-slate-300">
-                <Users className="w-4 h-4 text-indigo-400" />
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              {/* Invitados Button / Popover trigger */}
+              <button
+                type="button"
+                onClick={handleOpenManageInvites}
+                className="flex items-center gap-1.5 bg-slate-900/80 hover:bg-slate-800 px-3 py-1.5 rounded-xl border border-indigo-500/30 text-xs text-slate-200 transition cursor-pointer shadow-sm"
+                title="Administrar quiénes están convocados a esta sesión"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-400" />
                 <span>
-                  <strong>{activeSession.participants.length}</strong> participantes
+                  Invitados:{' '}
+                  <strong className="text-white">
+                    {!activeSession.invitedUserIds || activeSession.invitedUserIds.length === 0
+                      ? `Todos (${players.length})`
+                      : `${activeSession.invitedUserIds.length} amigos`}
+                  </strong>
+                </span>
+                <span className="text-[10px] text-indigo-400 font-bold ml-1 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/20">
+                  Editar
+                </span>
+              </button>
+
+              {/* Confirmed Participants Count */}
+              <div className="flex items-center gap-1.5 bg-emerald-950/70 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-xs text-emerald-300 font-bold shadow-sm">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>
+                  <strong>{confirmedParticipantsCount}</strong> Confirmados (100%)
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-800 text-xs text-slate-300">
-                <Swords className="w-4 h-4 text-purple-400" />
+              {/* Probable Participants Count */}
+              {probableParticipants.length > 0 && (
+                <div
+                  className="flex items-center gap-1.5 bg-amber-950/60 border border-amber-500/40 border-dashed px-3 py-1.5 rounded-xl text-xs text-amber-300 font-bold"
+                  title="Amigos con horario default semanal pendiente de confirmación 100%"
+                >
+                  <Dices className="w-3.5 h-3.5 text-amber-400" />
+                  <span>
+                    <strong>{probableParticipants.length}</strong> Probables (&lt;100%)
+                  </span>
+                </div>
+              )}
+
+              {/* Prominent Session Callout Button */}
+              {probableParticipants.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsCalloutModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs shadow-lg shadow-amber-500/30 transition transform hover:scale-105 active:scale-95 cursor-pointer animate-pulse"
+                  title="Enviar notificación Push con sonido al teléfono y <@mención> en Discord para confirmar"
+                >
+                  <Megaphone className="w-3.5 h-3.5" />
+                  <span>📣 Llamar a Probables ({probableParticipants.length})</span>
+                </button>
+              )}
+
+              {/* Sub-lobbies Status */}
+              <div className="flex items-center gap-1.5 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-800 text-xs text-slate-300">
+                <Swords className="w-3.5 h-3.5 text-purple-400" />
                 <span>
                   Sub-lobbies:{' '}
                   <strong className={activeSession.allowSplitLobbies ? 'text-emerald-400' : 'text-slate-400'}>
-                    {activeSession.allowSplitLobbies ? 'Habilitados (Titulares vs Suplentes)' : 'Deshabilitados'}
+                    {activeSession.allowSplitLobbies ? 'Habilitados' : 'Deshabilitados'}
                   </strong>
                 </span>
               </div>
 
+              {/* Current User Confirmation / Probable Badge */}
               {currentParticipant ? (
-                <div className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs text-emerald-300 font-medium">
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>
-                    Estás anotado ({currentParticipant.availableFrom} ±{currentParticipant.precisionMinutes}m)
-                  </span>
-                </div>
+                isParticipantConfirmed(currentParticipant) ? (
+                  <div className="flex items-center gap-1.5 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1.5 rounded-xl text-xs text-emerald-300 font-black shadow-sm">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>
+                      Estás 100% CONFIRMADO ✅ ({currentParticipant.availableFrom} ±{currentParticipant.precisionMinutes}m)
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-amber-950/60 border border-amber-500/50 border-dashed px-3 py-1.5 rounded-xl text-xs text-amber-300 font-bold">
+                    <Dices className="w-3.5 h-3.5 text-amber-400" />
+                    <span>
+                      Estás PROBABLE {currentParticipant.confidencePercentage ?? 75}% 🎲 (Auto-horario)
+                    </span>
+                  </div>
+                )
               ) : (
                 <div className="flex items-center gap-1.5 bg-amber-950/40 border border-amber-500/30 px-3 py-1.5 rounded-xl text-xs text-amber-300">
                   <Clock className="w-3.5 h-3.5 text-amber-400" />
@@ -632,6 +899,62 @@ export function SessionsView() {
                 </div>
               )}
             </div>
+
+            {/* Recent Callouts History Preview */}
+            {activeSession.callouts && activeSession.callouts.length > 0 && (
+              <div className="pt-2">
+                <div className="p-3 rounded-2xl bg-slate-900/80 border border-amber-500/30 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-amber-300">
+                      <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Historial de Convocatorias ({activeSession.callouts.length})</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">
+                      Último llamado:{' '}
+                      {new Date(activeSession.callouts[0].triggeredAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {activeSession.callouts.slice(0, 2).map((callout) => {
+                      const caller = players.find((p) => p.id === callout.triggeredBy);
+                      return (
+                        <div
+                          key={callout.id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 p-2 rounded-xl bg-slate-800/60 border border-slate-700/60 text-[11px]"
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <strong className="text-white">📣 {caller?.displayName || 'Alguien'}</strong>
+                            <span className="text-slate-400">convocó a {callout.notifiedUserIds.length} amigos:</span>
+                            {callout.message && (
+                              <span className="text-amber-200/90 italic truncate max-w-xs">
+                                "{callout.message}"
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {callout.notifiedUserIds.slice(0, 5).map((uid) => {
+                              const u = players.find((p) => p.id === uid);
+                              return (
+                                <img
+                                  key={uid}
+                                  src={u?.avatarUrl}
+                                  alt={u?.displayName}
+                                  title={u?.displayName}
+                                  className="w-4 h-4 rounded-full border border-slate-600 object-cover"
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Game Showcase / Roulette Banner */}
@@ -925,6 +1248,27 @@ export function SessionsView() {
             </div>
           ) : (
             <div className="space-y-4">
+              {currentParticipant && !isParticipantConfirmed(currentParticipant) && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-indigo-950/80 border border-emerald-500/40 flex items-center justify-between gap-3 shadow-md">
+                  <div>
+                    <span className="text-xs font-bold text-amber-300 block">
+                      🎲 Estado: Probable {currentParticipant.confidencePercentage ?? 75}% (Auto-horario)
+                    </span>
+                    <span className="text-[11px] text-slate-300">
+                      Confirmá tu asistencia al 100% para afianzar el quórum grupal.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmAttendance(currentUser.id)}
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs shadow-md transition transform hover:scale-105 cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirmar 100%</span>
+                  </button>
+                </div>
+              )}
+
               <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs space-y-2">
                 <div className="flex items-center gap-2 text-slate-300 font-semibold">
                   <Clock className="w-4 h-4 text-emerald-400" />
@@ -1134,19 +1478,24 @@ export function SessionsView() {
                             </span>
                             {(() => {
                               const participant = activeSession?.participants.find((pt) => pt.userId === p.userId);
-                              return participant?.isAutoEnrolled ? (
+                              const isConfirmed = isParticipantConfirmed(participant) || p.confirmationStatus === 'confirmed';
+                              const confidence = participant?.confidencePercentage ?? p.confidencePercentage ?? (isConfirmed ? 100 : 75);
+
+                              return isConfirmed ? (
                                 <span
-                                  className="inline-block text-[9px] px-1.5 py-0.2 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 truncate"
-                                  title="Auto-anotado (Default Semanal)"
+                                  className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 font-black truncate shadow-sm"
+                                  title="Asistencia 100% Confirmada"
                                 >
-                                  ⚡ Auto-anotado (Default Semanal)
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                                  100% CONFIRMADO ✅
                                 </span>
                               ) : (
                                 <span
-                                  className="inline-block text-[9px] px-1.5 py-0.2 rounded bg-amber-950/80 text-amber-300 border border-amber-500/30 truncate"
-                                  title="Horario de hoy personalizado"
+                                  className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/50 border-dashed font-bold truncate"
+                                  title="Horario default semanal: Requiere confirmación para ser 100%"
                                 >
-                                  ✏️ Horario de hoy personalizado
+                                  <Dices className="w-2.5 h-2.5 text-amber-400" />
+                                  PROBABLE {confidence}% 🎲 (Auto)
                                 </span>
                               );
                             })()}
@@ -1165,17 +1514,38 @@ export function SessionsView() {
                             title={`Margen: ${p.earliestStartFormatted} a ${p.strictDeadlineFormatted}`}
                           />
 
-                          {/* Solid Core Availability Bar */}
-                          <div
-                            className="absolute top-1.5 bottom-1.5 rounded-md bg-gradient-to-r from-indigo-600 to-purple-600 shadow-sm flex items-center justify-between px-2 text-[10px] font-bold text-white overflow-hidden"
-                            style={{
-                              left: `${coreLeft}%`,
-                              width: `${coreWidth}%`,
-                            }}
-                          >
-                            <span className="truncate">{p.availableFrom}</span>
-                            <span className="truncate opacity-80">{p.availableUntil}</span>
-                          </div>
+                          {/* Core Availability Bar (Solid if confirmed, striped/translucent if probable) */}
+                          {(() => {
+                            const participant = activeSession?.participants.find((pt) => pt.userId === p.userId);
+                            const isConfirmed = isParticipantConfirmed(participant) || p.confirmationStatus === 'confirmed';
+                            const confidence = participant?.confidencePercentage ?? p.confidencePercentage ?? (isConfirmed ? 100 : 75);
+
+                            return isConfirmed ? (
+                              <div
+                                className="absolute top-1.5 bottom-1.5 rounded-md bg-gradient-to-r from-emerald-600 via-indigo-600 to-teal-500 border border-emerald-400/50 shadow-md flex items-center justify-between px-2 text-[10px] font-bold text-white overflow-hidden"
+                                style={{
+                                  left: `${coreLeft}%`,
+                                  width: `${coreWidth}%`,
+                                }}
+                                title={`100% Confirmado: ${p.availableFrom} a ${p.availableUntil}`}
+                              >
+                                <span className="truncate">{p.availableFrom}</span>
+                                <span className="truncate opacity-90">{p.availableUntil}</span>
+                              </div>
+                            ) : (
+                              <div
+                                className="absolute top-1.5 bottom-1.5 rounded-md bg-[repeating-linear-gradient(45deg,rgba(99,102,241,0.35),rgba(99,102,241,0.35)_8px,rgba(245,158,11,0.25)_8px,rgba(245,158,11,0.25)_16px)] border-2 border-dashed border-amber-400/70 shadow-sm flex items-center justify-between px-2 text-[10px] font-bold text-amber-200 overflow-hidden"
+                                style={{
+                                  left: `${coreLeft}%`,
+                                  width: `${coreWidth}%`,
+                                }}
+                                title={`Horario Probable (${confidence}%): ${p.availableFrom} a ${p.availableUntil} (Pendiente de confirmación 100%)`}
+                              >
+                                <span className="truncate drop-shadow">{p.availableFrom}</span>
+                                <span className="truncate opacity-90 drop-shadow">{p.availableUntil}</span>
+                              </div>
+                            );
+                          })()}
 
                           {/* Strict Deadline Indicator Needle */}
                           <div
@@ -1266,13 +1636,18 @@ export function SessionsView() {
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
                         {player?.activeTitle}
                       </span>
-                      {part.isAutoEnrolled ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 font-medium">
-                          ⚡ Auto-anotado (Default Semanal)
+                      {isParticipantConfirmed(part) ? (
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 font-black flex items-center gap-1 shadow-sm">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          100% CONFIRMADO ✅
                         </span>
                       ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/30 font-medium">
-                          ✏️ Horario de hoy personalizado
+                        <span
+                          className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/40 border-dashed font-bold flex items-center gap-1"
+                          title="Auto-horario semanal estimado: Nunca es 100% hasta que el jugador confirma"
+                        >
+                          <Dices className="w-3 h-3 text-amber-400" />
+                          PROBABLE {part.confidencePercentage ?? 75}% 🎲 (Auto-horario)
                         </span>
                       )}
                     </div>
@@ -1299,8 +1674,25 @@ export function SessionsView() {
                   </div>
                 </div>
 
-                {/* Right: Actions (Ping & Vote) */}
+                {/* Right: Actions (Confirm 100%, Ping & Vote) */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Confirm Attendance Button (if not confirmed yet) */}
+                  {!isParticipantConfirmed(part) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmAttendance(part.userId)}
+                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-950/50 transition cursor-pointer flex items-center gap-1.5"
+                      title={isSelf ? 'Confirmar tu asistencia al 100%' : `Confirmar asistencia de ${player?.displayName} al 100%`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Confirmar 100%</span>
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Listo 100%</span>
+                    </span>
+                  )}
                   {/* Ping Button (only if not self and pending) */}
                   {!isSelf && part.attendanceStatus === 'pending' && (
                     <button
@@ -1843,6 +2235,123 @@ export function SessionsView() {
                 </label>
               </div>
 
+              {/* Invitar Jugadores Section */}
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-white flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-indigo-400" />
+                    <span>Invitar Jugadores:</span>
+                  </label>
+                  <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setNewInviteMode('all')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                        newInviteMode === 'all'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Todos ({players.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewInviteMode('custom');
+                        if (newSelectedInviteIds.length === 0) {
+                          setNewSelectedInviteIds(players.map((p) => p.id));
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                        newInviteMode === 'custom'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Personalizada
+                    </button>
+                  </div>
+                </div>
+
+                {newInviteMode === 'custom' ? (
+                  <div className="space-y-2.5 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-400">
+                        {newSelectedInviteIds.length} de {players.length} seleccionados
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setNewSelectedInviteIds(players.map((p) => p.id))}
+                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold transition cursor-pointer"
+                        >
+                          Seleccionar Todos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewSelectedInviteIds(
+                              players
+                                .filter((p) => getEffectiveScheduleForDate(p, newDate).plays)
+                                .map((p) => p.id)
+                            )
+                          }
+                          className="px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold transition cursor-pointer"
+                        >
+                          Solo Probables hoy
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                      {players.map((player) => {
+                        const isSelected = newSelectedInviteIds.includes(player.id);
+                        return (
+                          <label
+                            key={player.id}
+                            className={`flex items-center justify-between p-2 rounded-xl border text-xs transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-950/40 border-indigo-500/50 text-white'
+                                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setNewSelectedInviteIds((prev) => [...prev, player.id]);
+                                  } else {
+                                    setNewSelectedInviteIds((prev) =>
+                                      prev.filter((id) => id !== player.id)
+                                    );
+                                  }
+                                }}
+                                className="rounded accent-indigo-600 cursor-pointer"
+                              />
+                              <img
+                                src={player.avatarUrl}
+                                alt={player.displayName}
+                                className="w-6 h-6 rounded-full object-cover border border-slate-700 shrink-0"
+                              />
+                              <span className="font-semibold truncate text-[11px]">{player.displayName}</span>
+                            </div>
+                            <div className="shrink-0">
+                              {renderPlayerProbabilityBadge(player, newDate)}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400">
+                    Se invitará a todos los miembros registrados del grupo ({players.length} amigos) y se auto-anotarán con su probabilidad semanal para el {newDate}.
+                  </p>
+                )}
+              </div>
+
               {/* Creator's Initial Schedule */}
               <div className="pt-2 border-t border-slate-800">
                 <span className="text-xs font-bold text-slate-300 block mb-2">
@@ -1899,6 +2408,276 @@ export function SessionsView() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* 8. MODAL: EDITAR INVITACIONES DE LA SESIÓN */}
+      {isManageInvitesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#131c31] w-full max-w-xl rounded-3xl border border-indigo-500/40 p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Editar Invitaciones de la Sesión</h3>
+                  <p className="text-xs text-slate-400">
+                    Elegí quiénes están convocados a "{activeSession.title}" ({activeSession.date})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsManageInvitesOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Toggle Mode */}
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-900/80 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditInviteMode('all')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                    editInviteMode === 'all'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Todos los del grupo ({players.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditInviteMode('custom')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                    editInviteMode === 'custom'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Selección personalizada</span>
+                </button>
+              </div>
+
+              {editInviteMode === 'custom' && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-300">
+                      Seleccionados: {editSelectedInviteIds.length} de {players.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditSelectedInviteIds(players.map((p) => p.id))}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer"
+                      >
+                        Seleccionar Todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditSelectedInviteIds(
+                            players
+                              .filter((p) => getEffectiveScheduleForDate(p, activeSession.date).plays)
+                              .map((p) => p.id)
+                          )
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition cursor-pointer"
+                      >
+                        Solo Probables hoy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditSelectedInviteIds([])}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px] font-semibold transition cursor-pointer"
+                      >
+                        Desmarcar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {players.map((player) => {
+                      const isSelected = editSelectedInviteIds.includes(player.id);
+                      return (
+                        <label
+                          key={player.id}
+                          className={`flex items-center justify-between p-3 rounded-2xl border transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-indigo-950/40 border-indigo-500/50 text-white'
+                              : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEditSelectedInviteIds((prev) => [...prev, player.id]);
+                                } else {
+                                  setEditSelectedInviteIds((prev) =>
+                                    prev.filter((id) => id !== player.id)
+                                  );
+                                }
+                              }}
+                              className="rounded accent-indigo-600 cursor-pointer"
+                            />
+                            <img
+                              src={player.avatarUrl}
+                              alt={player.displayName}
+                              className="w-8 h-8 rounded-full object-cover border border-slate-700 shrink-0"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-white">{player.displayName}</span>
+                                <span className="text-[10px] text-slate-400">{player.activeTitle}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-mono block">
+                                @{player.discordUsername}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div>
+                            {renderPlayerProbabilityBadge(player, activeSession.date)}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsManageInvitesOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveInvites}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold tracking-wide shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+              >
+                Guardar Invitaciones
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. MODAL: LLAMADO A SESIÓN (PING A PROBABLES) */}
+      {isCalloutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#131c31] w-full max-w-lg rounded-3xl border border-amber-500/40 p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <Megaphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Llamado a Sesión (Ping a Probables)</h3>
+                  <p className="text-xs text-slate-400">
+                    Convocá a los amigos en horario probable para que confirmen asistencia al 100%.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCalloutModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Recipients preview */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">
+                  Destinatarios ({probableParticipants.length} amigos en horario probable):
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {probableParticipants.map((part) => {
+                    const player = players.find((p) => p.id === part.userId);
+                    return (
+                      <div
+                        key={part.userId}
+                        className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-900/80 border border-slate-800"
+                      >
+                        <img
+                          src={player?.avatarUrl}
+                          alt={player?.displayName}
+                          className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-bold text-white block truncate">
+                            {player?.displayName}
+                          </span>
+                          <span className="text-[10px] text-amber-400 font-mono block">
+                            {part.availableFrom} (±{part.precisionMinutes}m)
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Message */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Mensaje personalizado para la convocatoria:
+                </label>
+                <textarea
+                  rows={3}
+                  value={calloutCustomMessage}
+                  onChange={(e) => setCalloutCustomMessage(e.target.value)}
+                  placeholder="¡Che gente, confirmen si juegan hoy que estamos cerrando el quórum!"
+                  className="w-full bg-[#090d16] border border-slate-700 focus:border-amber-500 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none transition resize-none"
+                />
+              </div>
+
+              {/* Multi-channel alert info */}
+              <div className="p-3 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200 space-y-1">
+                <div className="flex items-center gap-2 font-bold">
+                  <Radio className="w-4 h-4 text-amber-400" />
+                  <span>Notificación Multicanal Activa:</span>
+                </div>
+                <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                  Se enviará una alerta Web Push al celular de cada uno con sonido de campanada y se publicará en Discord con mención real <strong>&lt;@discord_id&gt;</strong> con botón interactivo de confirmación.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsCalloutModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isSendingCallout || probableParticipants.length === 0}
+                onClick={handleTriggerCallout}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 text-slate-950 font-black text-xs tracking-wide shadow-lg shadow-amber-500/30 transition cursor-pointer flex items-center gap-2"
+              >
+                <Megaphone className={`w-4 h-4 ${isSendingCallout ? 'animate-spin' : ''}`} />
+                <span>{isSendingCallout ? 'Enviando llamado...' : `📣 Enviar Llamado (${probableParticipants.length})`}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

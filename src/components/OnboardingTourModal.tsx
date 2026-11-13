@@ -10,6 +10,7 @@ import {
   WeeklySchedule,
 } from '../types/domain';
 import { createDefaultWeeklySchedule } from '../lib/matchmakingEngine';
+import { WeeklyBarsScheduleEditor } from './WeeklyBarsScheduleEditor';
 import {
   X,
   Zap,
@@ -115,84 +116,6 @@ export const OnboardingTourModal: React.FC = () => {
   if (!showOnboardingModal) {
     return null;
   }
-
-  // Preset Handlers for Step 2
-  const applyPresetWeekdays = () => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-      tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-      wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-      thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    }));
-  };
-
-  const applyPresetWeekend = () => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-      sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-    }));
-  };
-
-  const applyPresetEveryDay = () => {
-    const updated = { ...draftSchedule };
-    (Object.keys(updated) as DayOfWeekKey[]).forEach((day) => {
-      updated[day] = {
-        enabled: true,
-        availableFrom: '22:00',
-        availableUntil: '01:30',
-        precisionMinutes: 15,
-      };
-    });
-    setDraftSchedule(updated);
-  };
-
-  const applyPresetOnlyWeekends = () => {
-    const updated = { ...draftSchedule };
-    updated.mon = { ...updated.mon, enabled: false };
-    updated.tue = { ...updated.tue, enabled: false };
-    updated.wed = { ...updated.wed, enabled: false };
-    updated.thu = { ...updated.thu, enabled: false };
-    updated.fri = { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 };
-    updated.sat = { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 };
-    updated.sun = { enabled: true, availableFrom: '21:30', availableUntil: '00:30', precisionMinutes: 15 };
-    setDraftSchedule(updated);
-  };
-
-  const handleDayToggle = (day: DayOfWeekKey) => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        enabled: !prev[day].enabled,
-      },
-    }));
-  };
-
-  const handleDayTimeChange = (
-    day: DayOfWeekKey,
-    field: 'availableFrom' | 'availableUntil',
-    value: string
-  ) => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleDayPrecisionChange = (day: DayOfWeekKey, precision: PrecisionMinutes) => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        precisionMinutes: precision,
-      },
-    }));
-  };
 
   // Step 3 Category Preferences Handlers
   const handleCategoryLevel = (categoryId: string, level: CategoryPreferenceLevel) => {
@@ -461,149 +384,24 @@ export const OnboardingTourModal: React.FC = () => {
             </div>
           )}
 
-          {/* STEP 2: RUTINA SEMANAL DEFAULT */}
+          {/* STEP 2: RUTINA SEMANAL DEFAULT (7 BARRAS INTERACTIVAS) */}
           {currentStep === 2 && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <CalendarCheck className="w-5 h-5 text-emerald-400" />
-                    <span>Tu Rutina Semanal (Auto-Inscripción)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    En los días habilitados el sistema te sumará automáticamente a la sesión del día.
-                  </p>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={applyPresetWeekdays}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-950 border border-indigo-500/30 text-indigo-300 hover:text-white text-[11px] font-medium transition-colors"
-                  >
-                    ⚡ Lun–Jue (22:00–01:00)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyPresetWeekend}
-                    className="px-2.5 py-1 rounded-lg bg-purple-950 border border-purple-500/30 text-purple-300 hover:text-white text-[11px] font-medium transition-colors"
-                  >
-                    🔥 Vie–Sáb (22:30–02:30)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyPresetEveryDay}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-950 border border-emerald-500/30 text-emerald-300 hover:text-white text-[11px] font-medium transition-colors"
-                  >
-                    🌙 Todos los días
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyPresetOnlyWeekends}
-                    className="px-2.5 py-1 rounded-lg bg-amber-950 border border-amber-500/30 text-amber-300 hover:text-white text-[11px] font-medium transition-colors"
-                  >
-                    🎉 Solo Finde
-                  </button>
-                </div>
+            <div className="space-y-4 animate-in fade-in">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <CalendarCheck className="w-5 h-5 text-emerald-400" />
+                  <span>Tu Rutina Semanal — Selector de 7 Barras</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Pintá tus franjas horarias arrastrando sobre cada día. Hacé clic derecho sobre una franja para elegir la probabilidad (máx 95% en default).
+                </p>
               </div>
 
-              {/* 7 Days List */}
-              <div className="space-y-3">
-                {DAYS_OF_WEEK.map((day) => {
-                  const cfg = draftSchedule[day.key];
-                  const isEnabled = cfg.enabled;
-
-                  return (
-                    <div
-                      key={day.key}
-                      className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        isEnabled
-                          ? 'bg-[#0b1120] border-indigo-500/30 shadow-sm'
-                          : 'bg-[#070b14]/60 border-slate-800/80 opacity-60'
-                      }`}
-                    >
-                      {/* Day Label & Toggle */}
-                      <div className="flex items-center gap-3 sm:w-48 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleDayToggle(day.key)}
-                          className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors shrink-0 ${
-                            isEnabled ? 'bg-indigo-600 justify-end' : 'bg-slate-700 justify-start'
-                          }`}
-                        >
-                          <div className="bg-white w-4 h-4 rounded-full shadow-md" />
-                        </button>
-
-                        <div>
-                          <span className="font-bold text-sm text-white block">{day.label}</span>
-                          <span
-                            className={`text-[10px] font-semibold ${
-                              isEnabled ? 'text-emerald-400' : 'text-slate-500'
-                            }`}
-                          >
-                            {isEnabled ? 'Juego normalmente' : 'Descanso / No juego'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Time Controls & Precision Pill */}
-                      {isEnabled ? (
-                        <div className="flex flex-wrap items-center gap-3 flex-1 sm:justify-end">
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-slate-400">Desde:</span>
-                            <input
-                              type="time"
-                              value={cfg.availableFrom}
-                              onChange={(e) =>
-                                handleDayTimeChange(day.key, 'availableFrom', e.target.value)
-                              }
-                              className="px-2 py-1 rounded bg-[#131c31] border border-indigo-500/20 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
-                            />
-                          </div>
-
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-slate-400">Hasta:</span>
-                            <input
-                              type="time"
-                              value={cfg.availableUntil}
-                              onChange={(e) =>
-                                handleDayTimeChange(day.key, 'availableUntil', e.target.value)
-                              }
-                              className="px-2 py-1 rounded bg-[#131c31] border border-indigo-500/20 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
-                            />
-                          </div>
-
-                          {/* Precision Selector */}
-                          <div className="flex items-center gap-1">
-                            <span className="text-[11px] text-slate-400 hidden sm:inline mr-1">
-                              Precisión:
-                            </span>
-                            {PRECISION_OPTIONS.map((prec) => (
-                              <button
-                                key={prec}
-                                type="button"
-                                onClick={() => handleDayPrecisionChange(day.key, prec)}
-                                className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
-                                  cfg.precisionMinutes === prec
-                                    ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300'
-                                    : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                                }`}
-                              >
-                                ±{prec}m
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-xs text-slate-500 italic sm:text-right flex-1">
-                          No se te enrolará automáticamente este día
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <WeeklyBarsScheduleEditor
+                schedule={draftSchedule}
+                onChange={setDraftSchedule}
+                compact
+              />
             </div>
           )}
 

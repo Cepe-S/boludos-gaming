@@ -527,6 +527,7 @@ export const INITIAL_SESSIONS: GamingSession[] = [
     createdAt: new Date(Date.now() - 4 * 3600000).toISOString(),
     allowSplitLobbies: true,
     attendanceVotes: [],
+    callouts: [],
     participants: [
       {
         userId: 'user-santi',
@@ -537,6 +538,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         attendanceStatus: 'on_time',
         checkedInAt: '22:01',
         note: 'Listo con mates y auriculares',
+        isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       },
       {
         userId: 'user-tincho',
@@ -546,6 +550,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         precisionMinutes: 15,
         attendanceStatus: 'pending',
         note: 'Puntual como siempre',
+        isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       },
       {
         userId: 'user-lucho',
@@ -555,6 +562,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         precisionMinutes: 15,
         attendanceStatus: 'pending',
         note: 'Ceno a las 21:45',
+        isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       },
       {
         userId: 'user-nacho',
@@ -564,6 +574,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         precisionMinutes: 30,
         attendanceStatus: 'pending',
         note: 'Si el bondi no tarda llego 22:30',
+        isAutoEnrolled: true,
+        confirmationStatus: 'probable',
+        confidencePercentage: 65,
       },
       {
         userId: 'user-fede',
@@ -573,6 +586,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         precisionMinutes: 30,
         attendanceStatus: 'pending',
         note: 'Capaz se me complica un toque',
+        isAutoEnrolled: true,
+        confirmationStatus: 'probable',
+        confidencePercentage: 50,
       },
     ],
   },
@@ -587,6 +603,7 @@ export const INITIAL_SESSIONS: GamingSession[] = [
     createdAt: new Date(Date.now() - 1 * 3600000).toISOString(),
     allowSplitLobbies: false,
     attendanceVotes: [],
+    callouts: [],
     participants: [
       {
         userId: 'user-tincho',
@@ -595,6 +612,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         availableUntil: '01:30',
         precisionMinutes: 15,
         attendanceStatus: 'pending',
+        isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       },
       {
         userId: 'user-santi',
@@ -603,6 +623,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         availableUntil: '01:30',
         precisionMinutes: 5,
         attendanceStatus: 'pending',
+        isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       },
       {
         userId: 'user-lucho',
@@ -611,6 +634,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         availableUntil: '01:30',
         precisionMinutes: 15,
         attendanceStatus: 'pending',
+        isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       },
       {
         userId: 'user-nacho',
@@ -619,6 +645,9 @@ export const INITIAL_SESSIONS: GamingSession[] = [
         availableUntil: '01:00',
         precisionMinutes: 30,
         attendanceStatus: 'pending',
+        isAutoEnrolled: true,
+        confirmationStatus: 'probable',
+        confidencePercentage: 65,
       },
     ],
   },
@@ -762,6 +791,7 @@ export const INITIAL_DISCORD_CONFIG: DiscordIntegrationConfig = {
     sanction_issued: true,
     chat_broadcast: true,
     checkin_update: true,
+    session_callout: true,
   },
 };
 

@@ -21,6 +21,7 @@ import {
   PrecisionMinutes,
   PushNotificationAlert,
   SanctionRecord,
+  SessionCalloutRecord,
   SessionParticipant,
   UserGamePreference,
   WeeklySchedule,
@@ -33,7 +34,10 @@ import {
   createDefaultWeeklySchedule,
   evaluateCheckInStatus,
   formatMinutesToTime,
+  getEffectiveDailySchedule,
+  getProbableAvailablePlayersForSession,
   parseTimeMinutes,
+  reconcileAutoParticipantsForSession,
   reconcileSessionParticipantsWithSchedules,
   spinWeightedRoulette,
 } from '../lib/matchmakingEngine';
@@ -44,6 +48,7 @@ import {
   buildPlayerJoinedLog,
   buildRouletteWinnerLog,
   buildSanctionIssuedLog,
+  buildSessionCalloutDiscordPayload,
   buildSessionCreatedLog,
   dispatchDiscordWebhook,
 } from '../lib/discordService';
@@ -64,6 +69,7 @@ import {
   dbUpdateChatReactions,
   dbUpdateDiscordConfig,
   dbUpdateSessionGame,
+  dbUpdateSessionInvitesAndCallouts,
   dbUpsertAttendanceVote,
   dbUpsertParticipant,
   dbUpsertPreference,
@@ -976,7 +982,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       availableFrom: string;
       availableUntil: string;
       precisionMinutes: PrecisionMinutes;
+      invitedUserIds?: string[];
     }): GamingSession => {
+      const invitedUserIds =
+        params.invitedUserIds && params.invitedUserIds.length > 0
+          ? Array.from(new Set([...params.invitedUserIds, currentUserId]))
+          : undefined;
+
       const baseSession: GamingSession = {
         id: `session-${Date.now()}`,
         title: params.title,
@@ -989,14 +1001,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         allowSplitLobbies: params.allowSplitLobbies,
         attendanceVotes: [],
         participants: [],
+        invitedUserIds,
+        callouts: [],
       };
 
-      // Automatically populate participants using reconcileSessionParticipantsWithSchedules
-      // so ALL players whose weekly schedule (or daily override) says they play on params.date
-      // are enrolled automatically right when the session is created!
-      const autoParticipants = reconcileSessionParticipantsWithSchedules(baseSession, players);
+      // Automatically enroll only invited players with compatible schedules
+      const reconciled = reconcileAutoParticipantsForSession(baseSession, players);
+      const autoParticipants = [...reconciled.participants];
 
-      // Ensure session creator's custom schedule parameters are preserved
+      // Ensure session creator's custom schedule parameters are preserved with 100% confirmed status
       const creatorIndex = autoParticipants.findIndex((p) => p.userId === currentUserId);
       const creatorParticipant: SessionParticipant = {
         userId: currentUserId,
@@ -1006,12 +1019,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         precisionMinutes: params.precisionMinutes,
         attendanceStatus: 'pending',
         isAutoEnrolled: false,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
       };
 
       if (creatorIndex >= 0) {
         autoParticipants[creatorIndex] = creatorParticipant;
       } else {
-        autoParticipants.push(creatorParticipant);
+        autoParticipants.unshift(creatorParticipant);
       }
 
       const newSession: GamingSession = {
@@ -1070,28 +1085,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         precisionMinutes: PrecisionMinutes;
         note?: string;
         userId?: string;
+        confirmAttendance?: boolean;
       }
     ) => {
       const targetUserId = params.userId || currentUserId;
       const targetPlayer = players.find((p) => p.id === targetUserId) || currentUser;
+      const isConfirmed = params.confirmAttendance !== false;
 
       setSessions((prev) => {
         const updated = prev.map((sess) => {
           if (sess.id !== sessionId) return sess;
 
           const existingIndex = sess.participants.findIndex((p) => p.userId === targetUserId);
-          const participantData = {
+          const participantData: SessionParticipant = {
             userId: targetUserId,
             joinedAt:
-              existingIndex >= 0 ? sess.participants[existingIndex].joinedAt : new Date().toISOString(),
+              existingIndex >= 0
+                ? sess.participants[existingIndex].joinedAt
+                : new Date().toISOString(),
             availableFrom: params.availableFrom,
             availableUntil: params.availableUntil,
             precisionMinutes: params.precisionMinutes,
             attendanceStatus:
-              existingIndex >= 0 ? sess.participants[existingIndex].attendanceStatus : ('pending' as const),
+              existingIndex >= 0
+                ? sess.participants[existingIndex].attendanceStatus
+                : ('pending' as const),
             checkedInAt:
               existingIndex >= 0 ? sess.participants[existingIndex].checkedInAt : undefined,
             note: params.note,
+            isAutoEnrolled: false,
+            confirmationStatus: isConfirmed ? 'confirmed' : 'probable',
+            confidencePercentage: isConfirmed ? 100 : 75,
           };
 
           const newParticipants =
@@ -1137,6 +1161,240 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
     ]
+  );
+
+  const confirmSessionAttendance = useCallback(
+    (sessionId: string, userId?: string) => {
+      const targetUserId = userId || currentUserId;
+      const targetPlayer = players.find((p) => p.id === targetUserId) || currentUser;
+
+      setSessions((prev) => {
+        let updatedParticipant: SessionParticipant | undefined;
+
+        const updated = prev.map((sess) => {
+          if (sess.id !== sessionId) return sess;
+
+          const existingIndex = sess.participants.findIndex((p) => p.userId === targetUserId);
+          if (existingIndex >= 0) {
+            const existing = sess.participants[existingIndex];
+            updatedParticipant = {
+              ...existing,
+              isAutoEnrolled: false,
+              confirmationStatus: 'confirmed',
+              confidencePercentage: 100,
+              note: existing.note ? `${existing.note} · Confirmado 100% ✅` : 'Confirmado 100% ✅',
+            };
+            const newParticipants = sess.participants.map((p, idx) =>
+              idx === existingIndex ? updatedParticipant! : p
+            );
+            return { ...sess, participants: newParticipants };
+          } else {
+            // Player was not in participants yet; add them using their effective schedule
+            const eff = getEffectiveDailySchedule(targetPlayer, sess.date);
+            updatedParticipant = {
+              userId: targetUserId,
+              joinedAt: new Date().toISOString(),
+              availableFrom: eff.availableFrom,
+              availableUntil: eff.availableUntil,
+              precisionMinutes: eff.precisionMinutes,
+              attendanceStatus: 'pending' as const,
+              isAutoEnrolled: false,
+              confirmationStatus: 'confirmed',
+              confidencePercentage: 100,
+              note: 'Confirmado 100% ✅',
+            };
+            return {
+              ...sess,
+              participants: [...sess.participants, updatedParticipant],
+            };
+          }
+        });
+
+        if (updatedParticipant) {
+          dbUpsertParticipant(sessionId, updatedParticipant).catch(console.warn);
+          const targetSession = updated.find((s) => s.id === sessionId);
+          if (targetSession) {
+            const log = buildPlayerJoinedLog(
+              targetSession,
+              targetPlayer,
+              updatedParticipant.precisionMinutes,
+              updatedParticipant.availableFrom
+            );
+            dispatchDiscordPipeline(log);
+          }
+        }
+
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
+        return updated;
+      });
+
+      triggerNotificationPipeline(
+        {
+          title: '✅ Asistencia Confirmada 100%',
+          body: `${targetPlayer.displayName} confirmó asistencia al 100% para la sesión.`,
+          tag: `session_confirm_${sessionId}`,
+          sessionId,
+          targetUserIds: players.map((p) => p.id),
+        },
+        'ping'
+      );
+    },
+    [
+      currentUserId,
+      currentUser,
+      players,
+      syncChannel,
+      dispatchDiscordPipeline,
+      triggerNotificationPipeline,
+    ]
+  );
+
+  const sendSessionCallout = useCallback(
+    async (
+      sessionId: string,
+      customMessage?: string
+    ): Promise<{ notifiedUsers: PlayerProfile[] }> => {
+      const session = sessions.find((s) => s.id === sessionId);
+      if (!session) {
+        return { notifiedUsers: [] };
+      }
+
+      // Find probable available players for this session
+      const probableData = getProbableAvailablePlayersForSession(session, players);
+      const probableMap = new Map<string, { player: PlayerProfile; confidencePercentage: number }>();
+
+      for (const item of probableData) {
+        if (item.player.id !== currentUserId) {
+          probableMap.set(item.player.id, {
+            player: item.player,
+            confidencePercentage: item.effective.confidencePercentage,
+          });
+        }
+      }
+
+      // Plus any participant in session.participants whose confirmationStatus !== 'confirmed'
+      for (const p of session.participants) {
+        if (p.userId !== currentUserId && p.confirmationStatus !== 'confirmed') {
+          const foundPlayer = players.find((pl) => pl.id === p.userId);
+          if (foundPlayer && !probableMap.has(p.userId)) {
+            probableMap.set(p.userId, {
+              player: foundPlayer,
+              confidencePercentage: p.confidencePercentage ?? 75,
+            });
+          }
+        }
+      }
+
+      const probableList = Array.from(probableMap.values());
+      const notifiedUsers = probableList.map((item) => item.player);
+
+      const calloutRecord: SessionCalloutRecord = {
+        id: `callout-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        triggeredBy: currentUserId,
+        triggeredAt: new Date().toISOString(),
+        message: customMessage,
+        notifiedUserIds: notifiedUsers.map((u) => u.id),
+      };
+
+      const updatedCallouts = [...(session.callouts || []), calloutRecord];
+      const updatedSession: GamingSession = {
+        ...session,
+        callouts: updatedCallouts,
+      };
+
+      setSessions((prev) => {
+        const updated = prev.map((s) => (s.id === sessionId ? updatedSession : s));
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
+        return updated;
+      });
+
+      dbUpdateSessionInvitesAndCallouts(
+        sessionId,
+        session.invitedUserIds,
+        updatedCallouts
+      ).catch(console.warn);
+
+      // Discord Rich Embed & Webhook
+      const discordLog = buildSessionCalloutDiscordPayload(
+        updatedSession,
+        currentUser,
+        probableList,
+        customMessage,
+        discordConfig
+      );
+      dispatchDiscordPipeline(discordLog);
+
+      // Push Notification
+      triggerNotificationPipeline(
+        {
+          title: `📣 ¡Llamado a Sesión: ${session.title}!`,
+          body: customMessage
+            ? `${currentUser.displayName}: "${customMessage}" — ¡Confirmá tu asistencia al 100%!`
+            : `${currentUser.displayName} te está llamando a confirmar tu presencia para jugar hoy. ¡Entrá y confirmá al 100%!`,
+          tag: `callout_${sessionId}`,
+          sessionId,
+          targetUserIds: notifiedUsers.map((u) => u.id),
+        },
+        'ping'
+      );
+
+      return { notifiedUsers };
+    },
+    [
+      sessions,
+      players,
+      currentUserId,
+      currentUser,
+      discordConfig,
+      syncChannel,
+      dispatchDiscordPipeline,
+      triggerNotificationPipeline,
+    ]
+  );
+
+  const updateSessionInvites = useCallback(
+    (sessionId: string, invitedUserIds?: string[]) => {
+      setSessions((prev) => {
+        const updated = prev.map((sess) => {
+          if (sess.id !== sessionId) return sess;
+
+          const cleanedInvites =
+            invitedUserIds && invitedUserIds.length > 0
+              ? Array.from(new Set([...invitedUserIds, sess.createdBy]))
+              : undefined;
+
+          const withUpdatedInvites: GamingSession = {
+            ...sess,
+            invitedUserIds: cleanedInvites,
+          };
+
+          const reconciled = reconcileAutoParticipantsForSession(withUpdatedInvites, players);
+
+          // Delete any participants that were removed
+          const currentIds = new Set(reconciled.participants.map((p) => p.userId));
+          for (const oldP of sess.participants) {
+            if (!currentIds.has(oldP.userId)) {
+              dbDeleteParticipant(sessionId, oldP.userId).catch(console.warn);
+            }
+          }
+
+          // Upsert all reconciled participants
+          for (const p of reconciled.participants) {
+            dbUpsertParticipant(sessionId, p).catch(console.warn);
+          }
+
+          dbUpdateSessionInvitesAndCallouts(sessionId, cleanedInvites, sess.callouts).catch(
+            console.warn
+          );
+
+          return reconciled;
+        });
+
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
+        return updated;
+      });
+    },
+    [players, syncChannel]
   );
 
   const leaveSession = useCallback(
@@ -1848,6 +2106,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveSessionId,
       createSession,
       joinOrUpdateSessionSchedule,
+      confirmSessionAttendance,
+      sendSessionCallout,
+      updateSessionInvites,
       leaveSession,
       spinSessionRoulette,
       lockSessionGame,
@@ -1901,6 +2162,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveSessionId,
       createSession,
       joinOrUpdateSessionSchedule,
+      confirmSessionAttendance,
+      sendSessionCallout,
+      updateSessionInvites,
       leaveSession,
       spinSessionRoulette,
       lockSessionGame,

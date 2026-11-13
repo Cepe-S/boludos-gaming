@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'finished')) DEFAULT 'open',
   allow_split_lobbies BOOLEAN NOT NULL DEFAULT FALSE,
   discord_message_id TEXT,
+  invited_user_ids TEXT[] DEFAULT NULL,
+  callouts JSONB NOT NULL DEFAULT '[]'::JSONB,
   created_by TEXT REFERENCES profiles(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -97,6 +99,9 @@ CREATE TABLE IF NOT EXISTS session_participants (
   checked_in_at TIMESTAMPTZ,
   attendance_status TEXT NOT NULL CHECK (attendance_status IN ('pending', 'on_time', 'late', 'no_show')) DEFAULT 'pending',
   note TEXT,
+  is_auto_enrolled BOOLEAN NOT NULL DEFAULT FALSE,
+  confidence_percentage INTEGER NOT NULL DEFAULT 75 CHECK (confidence_percentage >= 10 AND confidence_percentage <= 100),
+  confirmation_status TEXT NOT NULL DEFAULT 'probable' CHECK (confirmation_status IN ('probable', 'confirmed')),
   joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (session_id, user_id)
 );
@@ -355,7 +360,8 @@ VALUES (
     "late_ping": true,
     "sanction_issued": true,
     "chat_broadcast": true,
-    "checkin_update": true
+    "checkin_update": true,
+    "session_callout": true
   }'::JSONB
 ) ON CONFLICT (id) DO NOTHING;
 

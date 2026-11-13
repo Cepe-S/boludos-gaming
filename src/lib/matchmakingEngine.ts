@@ -1,5 +1,7 @@
 import {
+  DAYS_OF_WEEK,
   DayOfWeekKey,
+  DayScheduleConfig,
   EffectiveDailySchedule,
   Game,
   GameRating,
@@ -13,6 +15,7 @@ import {
   ScheduleOverlapSummary,
   SessionParticipant,
   SubLobbyAssignment,
+  TimeSlotBlock,
   UserGamePreference,
   WeeklySchedule,
 } from '../types/domain';
@@ -46,6 +49,18 @@ export function formatMinutesToTime(totalMins: number): string {
   const hours = Math.floor(normalized / 60);
   const mins = normalized % 60;
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+/**
+ * Clamps default/probabilistic confidence percentages between 10% and 95% (default 75%).
+ * In default/auto mode, confidence is NEVER 100%!
+ * The ONLY time confidence is 100% is when confirmationStatus === 'confirmed' on a session participant.
+ */
+export function clampDefaultConfidence(pct?: number): number {
+  if (pct === undefined || pct === null || isNaN(pct)) {
+    return 75;
+  }
+  return Math.min(95, Math.max(10, Math.round(pct)));
 }
 
 /**
@@ -295,6 +310,13 @@ export function calculateScheduleOverlap(
     const earliestStartMinutes = startMins - p.precisionMinutes;
     const strictDeadlineMinutes = startMins + p.precisionMinutes;
 
+    const confirmationStatus =
+      p.confirmationStatus ?? (p.isAutoEnrolled ? 'probable' : 'confirmed');
+    const confidencePercentage =
+      confirmationStatus === 'confirmed' || (!p.isAutoEnrolled && p.confirmationStatus !== 'probable')
+        ? 100
+        : clampDefaultConfidence(p.confidencePercentage);
+
     return {
       userId: p.userId,
       displayName: player?.displayName || 'Jugador',
@@ -311,6 +333,8 @@ export function calculateScheduleOverlap(
       strictDeadlineFormatted: formatMinutesToTime(strictDeadlineMinutes),
       attendanceStatus: p.attendanceStatus,
       checkedInAt: p.checkedInAt,
+      confidencePercentage,
+      confirmationStatus,
     };
   });
 
@@ -461,19 +485,77 @@ export function sortPlayersByLobbyPriority(
 
 /**
  * Returns a default weekly schedule for 'mon'..'sun'.
- * Default: enabled: true, 22:00 to 01:00, ±15m.
- * Friday and Saturday: 22:30 to 02:30, ±15m.
+ * Default hours: 22:00 to 01:30, ±15m, confidence: 75% (clamped <= 95%).
+ * Weekends (Fri/Sat) default to 22:30 to 02:30 when called without explicit hour arguments.
  */
-export function createDefaultWeeklySchedule(): WeeklySchedule {
-  return {
-    mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-    sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-    sun: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-  };
+export function createDefaultWeeklySchedule(
+  from = '22:00',
+  until = '01:30',
+  precision: PrecisionMinutes = 15,
+  confidencePercentage = 75
+): WeeklySchedule {
+  const clampedConfidence = clampDefaultConfidence(confidencePercentage);
+  const hasExplicitParams = arguments.length > 0;
+  const schedule = {} as WeeklySchedule;
+
+  for (const day of DAYS_OF_WEEK) {
+    const isWeekend = day.key === 'fri' || day.key === 'sat';
+    const dayFrom = !hasExplicitParams && isWeekend ? '22:30' : from;
+    const dayUntil = !hasExplicitParams ? (isWeekend ? '02:30' : '01:00') : until;
+
+    schedule[day.key] = {
+      enabled: true,
+      availableFrom: dayFrom,
+      availableUntil: dayUntil,
+      precisionMinutes: precision,
+      confidencePercentage: clampedConfidence,
+      slots: [
+        {
+          id: `slot-${day.key}-1`,
+          from: dayFrom,
+          until: dayUntil,
+          confidencePercentage: clampedConfidence,
+          precisionMinutes: precision,
+        },
+      ],
+    };
+  }
+
+  return schedule;
+}
+
+/**
+ * Normalizes day schedule slots into an array of TimeSlotBlock.
+ * If day is not enabled, returns empty array [].
+ * Clamps all slot confidence percentages between 10% and 95%.
+ */
+export function normalizeDaySlots(
+  dayConfig: DayScheduleConfig,
+  dayKey: DayOfWeekKey
+): TimeSlotBlock[] {
+  if (!dayConfig.enabled) {
+    return [];
+  }
+  if (dayConfig.slots && dayConfig.slots.length > 0) {
+    return dayConfig.slots.map((s) => ({
+      ...s,
+      confidencePercentage: clampDefaultConfidence(s.confidencePercentage),
+    }));
+  }
+  const from = dayConfig.availableFrom || '22:00';
+  const until = dayConfig.availableUntil || '01:30';
+  const precision = dayConfig.precisionMinutes || 15;
+  const conf = clampDefaultConfidence(dayConfig.confidencePercentage);
+
+  return [
+    {
+      id: `slot-${dayKey}-1`,
+      from,
+      until,
+      confidencePercentage: conf,
+      precisionMinutes: precision,
+    },
+  ];
 }
 
 /**
@@ -487,17 +569,17 @@ export function getDayOfWeekKey(dateStr: string): DayOfWeekKey {
 }
 
 /**
- * Resolves the effective schedule for a player on a specific date (YYYY-MM-DD),
- * giving precedence to daily overrides (e.g. "Hoy No Juego" or custom daily hours)
- * over their default weekly schedule.
+ * Resolves the effective daily schedule for a player on a specific date (YYYY-MM-DD).
+ * Gives precedence to daily overrides (e.g. "Hoy No Juego" or custom daily slots)
+ * over their default weekly schedule. In default/auto mode, confidence is never 100%.
  */
-export function getEffectiveScheduleForDate(
+export function getEffectiveDailySchedule(
   player: PlayerProfile,
   dateStr: string
 ): EffectiveDailySchedule {
   const dayKey = getDayOfWeekKey(dateStr);
   const defaultSchedule = createDefaultWeeklySchedule();
-  const weeklyDayConfig = player.weeklySchedule?.[dayKey] || defaultSchedule[dayKey];
+  const dayConfig = player.weeklySchedule?.[dayKey] || defaultSchedule[dayKey];
 
   const override = player.dailyOverrides?.[dateStr];
   if (override) {
@@ -506,74 +588,245 @@ export function getEffectiveScheduleForDate(
         plays: false,
         source: 'override',
         dayKey,
-        availableFrom: override.availableFrom || '22:00',
-        availableUntil: override.availableUntil || '01:00',
-        precisionMinutes: override.precisionMinutes || 15,
+        availableFrom: override.availableFrom || dayConfig?.availableFrom || '22:00',
+        availableUntil: override.availableUntil || dayConfig?.availableUntil || '01:30',
+        precisionMinutes: override.precisionMinutes || dayConfig?.precisionMinutes || 15,
+        confidencePercentage: 0,
+        slots: [],
         reason: override.reason,
       };
     }
 
+    const conf = clampDefaultConfidence(
+      override.confidencePercentage ?? dayConfig?.confidencePercentage ?? 75
+    );
+    const overrideFrom = override.availableFrom || dayConfig?.availableFrom || '22:00';
+    const overrideUntil = override.availableUntil || dayConfig?.availableUntil || '01:30';
+    const overridePrec = override.precisionMinutes || dayConfig?.precisionMinutes || 15;
+
+    let slots: TimeSlotBlock[];
+    if (override.slots && override.slots.length > 0) {
+      slots = override.slots.map((s) => ({
+        ...s,
+        confidencePercentage: clampDefaultConfidence(s.confidencePercentage),
+      }));
+    } else {
+      slots = [
+        {
+          id: `slot-override-${dateStr}-1`,
+          from: overrideFrom,
+          until: overrideUntil,
+          confidencePercentage: conf,
+          precisionMinutes: overridePrec,
+        },
+      ];
+    }
+
+    const maxConf = Math.max(...slots.map((s) => s.confidencePercentage));
     return {
       plays: true,
       source: 'override',
       dayKey,
-      availableFrom: override.availableFrom || weeklyDayConfig.availableFrom,
-      availableUntil: override.availableUntil || weeklyDayConfig.availableUntil,
-      precisionMinutes: override.precisionMinutes || weeklyDayConfig.precisionMinutes,
+      availableFrom: slots[0]?.from || overrideFrom,
+      availableUntil: slots[slots.length - 1]?.until || overrideUntil,
+      precisionMinutes: slots[0]?.precisionMinutes || overridePrec,
+      confidencePercentage: maxConf,
+      slots,
       reason: override.reason,
     };
   }
 
+  const slots = normalizeDaySlots(dayConfig, dayKey);
+  if (!dayConfig.enabled || slots.length === 0) {
+    return {
+      plays: false,
+      source: 'weekly',
+      dayKey,
+      availableFrom: dayConfig.availableFrom || '22:00',
+      availableUntil: dayConfig.availableUntil || '01:30',
+      precisionMinutes: dayConfig.precisionMinutes || 15,
+      confidencePercentage: 0,
+      slots: [],
+    };
+  }
+
+  const maxConf = Math.max(...slots.map((s) => s.confidencePercentage));
   return {
-    plays: weeklyDayConfig.enabled,
+    plays: true,
     source: 'weekly',
     dayKey,
-    availableFrom: weeklyDayConfig.availableFrom,
-    availableUntil: weeklyDayConfig.availableUntil,
-    precisionMinutes: weeklyDayConfig.precisionMinutes,
+    availableFrom: slots[0].from,
+    availableUntil: slots[slots.length - 1].until,
+    precisionMinutes: slots[0].precisionMinutes,
+    confidencePercentage: maxConf,
+    slots,
   };
 }
 
 /**
+ * Backward compatibility alias for getEffectiveDailySchedule.
+ */
+export const getEffectiveScheduleForDate = getEffectiveDailySchedule;
+
+/**
+ * Returns true if the player is invited to the session or is the creator.
+ * When invitedUserIds is undefined or empty, everyone in the group is invited by default.
+ */
+export function isPlayerInvitedToSession(
+  session: Pick<GamingSession, 'createdBy' | 'invitedUserIds'>,
+  userId: string
+): boolean {
+  if (!session.invitedUserIds || session.invitedUserIds.length === 0) {
+    return true;
+  }
+  return session.invitedUserIds.includes(userId) || session.createdBy === userId;
+}
+
+/**
+ * Filters players who are invited to the session, have an effective schedule declaring they play
+ * with confidence > 0%, and are NOT already confirmed at 100%.
+ */
+export function getProbableAvailablePlayersForSession(
+  session: GamingSession,
+  players: PlayerProfile[]
+): Array<{
+  player: PlayerProfile;
+  effective: EffectiveDailySchedule;
+  matchedSlot: TimeSlotBlock;
+  participant?: SessionParticipant;
+}> {
+  const results: Array<{
+    player: PlayerProfile;
+    effective: EffectiveDailySchedule;
+    matchedSlot: TimeSlotBlock;
+    participant?: SessionParticipant;
+  }> = [];
+
+  for (const player of players) {
+    if (!isPlayerInvitedToSession(session, player.id)) {
+      continue;
+    }
+
+    const effective = getEffectiveDailySchedule(player, session.date);
+    if (!effective.plays || effective.confidencePercentage <= 0) {
+      continue;
+    }
+
+    const participant = session.participants?.find((p) => p.userId === player.id);
+    if (participant?.confirmationStatus === 'confirmed') {
+      continue;
+    }
+
+    const matchedSlot =
+      effective.slots && effective.slots.length > 0
+        ? (participant?.availableFrom
+            ? effective.slots.find((s) => s.from === participant.availableFrom) || effective.slots[0]
+            : effective.slots[0])
+        : {
+            id: `slot-${player.id}-auto`,
+            from: effective.availableFrom,
+            until: effective.availableUntil,
+            confidencePercentage: clampDefaultConfidence(effective.confidencePercentage),
+            precisionMinutes: effective.precisionMinutes,
+          };
+
+    results.push({
+      player,
+      effective,
+      matchedSlot,
+      participant,
+    });
+  }
+
+  return results;
+}
+
+/**
  * Reconciles session participants with all player profiles based on their effective schedule.
- * Automatically enrolls players who play on that date and removes those whose schedule is disabled
- * or who have a 'not_playing' daily override.
+ * Only auto-enrolls players where isPlayerInvitedToSession is true.
+ * Sets isAutoEnrolled: true, confirmationStatus: 'probable', confidencePercentage: <100%.
+ * Preserves 100% confirmed participants unless they explicitly mark 'not_playing'.
+ */
+export function reconcileAutoParticipantsForSession(
+  session: GamingSession,
+  players: PlayerProfile[],
+  nowIso?: string
+): GamingSession {
+  const timestamp = nowIso || new Date().toISOString();
+  const updatedParticipants: SessionParticipant[] = [];
+
+  for (const player of players) {
+    // 1. Must be invited or creator
+    if (!isPlayerInvitedToSession(session, player.id)) {
+      continue;
+    }
+
+    const eff = getEffectiveDailySchedule(player, session.date);
+    const existing = session.participants?.find((p) => p.userId === player.id);
+    const override = player.dailyOverrides?.[session.date];
+
+    // If player explicitly marked "Hoy no juego" (not_playing) on this date, exclude them completely
+    if (override?.status === 'not_playing' || (!eff.plays && eff.source === 'override')) {
+      continue;
+    }
+
+    // If participant has confirmationStatus === 'confirmed'
+    if (existing && existing.confirmationStatus === 'confirmed') {
+      updatedParticipants.push({
+        ...existing,
+        confirmationStatus: 'confirmed',
+        confidencePercentage: 100,
+      });
+      continue;
+    }
+
+    // If participant was manually added (not auto-enrolled)
+    if (existing && existing.isAutoEnrolled === false) {
+      const isConfirmed = existing.confirmationStatus !== 'probable';
+      updatedParticipants.push({
+        ...existing,
+        confirmationStatus: isConfirmed ? 'confirmed' : 'probable',
+        confidencePercentage: isConfirmed
+          ? 100
+          : clampDefaultConfidence(existing.confidencePercentage ?? eff.confidencePercentage),
+      });
+      continue;
+    }
+
+    // If weekly schedule says they don't play on this weekday, do not enroll
+    if (!eff.plays || eff.confidencePercentage <= 0) {
+      continue;
+    }
+
+    // Auto-enrolled / probable participant (<100%)
+    const clampedConf = clampDefaultConfidence(eff.confidencePercentage);
+    updatedParticipants.push({
+      userId: player.id,
+      joinedAt: existing?.joinedAt || timestamp,
+      availableFrom: eff.availableFrom,
+      availableUntil: eff.availableUntil,
+      precisionMinutes: eff.precisionMinutes,
+      checkedInAt: existing?.checkedInAt,
+      attendanceStatus: existing?.attendanceStatus || 'pending',
+      note: `Probable (${clampedConf}%) · Auto-horario`,
+      isAutoEnrolled: true,
+      confirmationStatus: 'probable',
+      confidencePercentage: clampedConf,
+    });
+  }
+
+  return {
+    ...session,
+    participants: updatedParticipants,
+  };
+}
+
+/**
+ * Backward-compatible helper returning SessionParticipant[] from reconcileAutoParticipantsForSession.
  */
 export function reconcileSessionParticipantsWithSchedules(
   session: GamingSession,
   players: PlayerProfile[]
 ): SessionParticipant[] {
-  const result: SessionParticipant[] = [];
-
-  for (const player of players) {
-    const eff = getEffectiveScheduleForDate(player, session.date);
-    const existing = session.participants.find((p) => p.userId === player.id);
-
-    if (!eff.plays) {
-      // Do NOT include this player (automatically removed)
-      continue;
-    }
-
-    if (existing && existing.isAutoEnrolled === false && eff.source !== 'override') {
-      // Manual per-session tweak preserved
-      result.push(existing);
-    } else {
-      result.push({
-        userId: player.id,
-        joinedAt: existing?.joinedAt || new Date().toISOString(),
-        availableFrom: eff.availableFrom,
-        availableUntil: eff.availableUntil,
-        precisionMinutes: eff.precisionMinutes,
-        checkedInAt: existing?.checkedInAt,
-        attendanceStatus: existing?.attendanceStatus || 'pending',
-        note:
-          eff.source === 'override'
-            ? eff.reason || 'Horario especial del día'
-            : 'Auto-anotado por horario semanal',
-        isAutoEnrolled: eff.source === 'weekly',
-      });
-    }
-  }
-
-  return result;
+  return reconcileAutoParticipantsForSession(session, players).participants;
 }

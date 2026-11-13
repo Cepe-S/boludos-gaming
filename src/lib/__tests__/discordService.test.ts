@@ -8,6 +8,7 @@ import {
   buildSanctionIssuedLog,
   buildChatBroadcastLog,
   buildCheckinUpdateLog,
+  buildSessionCalloutDiscordPayload,
   dispatchDiscordWebhook,
 } from '../discordService';
 import {
@@ -112,6 +113,7 @@ describe('Discord Service & Rich Embeds (discordService)', () => {
       expect(DISCORD_EMBED_COLORS.chat_broadcast).toBe(0x38bdf8);
       expect(DISCORD_EMBED_COLORS.checkin_update_on_time).toBe(0x10b981);
       expect(DISCORD_EMBED_COLORS.checkin_update_late).toBe(0xf59e0b);
+      expect(DISCORD_EMBED_COLORS.session_callout).toBe(0xec4899);
     });
   });
 
@@ -429,6 +431,127 @@ describe('Discord Service & Rich Embeds (discordService)', () => {
     });
   });
 
+  describe('buildSessionCalloutDiscordPayload', () => {
+    const sessionWithConfirmed: GamingSession = {
+      ...mockSession,
+      participants: [
+        {
+          userId: mockCreator.id,
+          joinedAt: '2026-11-13T18:00:00.000Z',
+          availableFrom: '22:00',
+          availableUntil: '01:30',
+          precisionMinutes: 5,
+          attendanceStatus: 'on_time',
+          confirmationStatus: 'confirmed',
+          confidencePercentage: 100,
+        },
+      ],
+    };
+
+    it('builds rich embed session callout with <@discord_id> mentions for probable players and eventType "session_callout"', () => {
+      const probableList = [
+        { player: mockTargetPlayer, confidencePercentage: 75 },
+        { player: mockGhostPlayer, confidencePercentage: 60 },
+      ];
+
+      const log = buildSessionCalloutDiscordPayload(
+        sessionWithConfirmed,
+        mockCreator,
+        probableList,
+        '¡Anotense que somos 4 y falta uno para el CS2!'
+      );
+
+      // Verify eventType and id prefix
+      expect(log.eventType).toBe('session_callout');
+      expect(log.id).toMatch(/^call-/);
+      expect(log.deliveredToWebhook).toBe(false);
+
+      // Content must mention all probable players with <@discord_id> and caller
+      expect(log.content).toContain(`📣🚨 **¡LLAMADO A SESIÓN!**`);
+      expect(log.content).toContain(`<@${mockTargetPlayer.discordId}>`);
+      expect(log.content).toContain(`<@${mockGhostPlayer.discordId}>`);
+      expect(log.content).toContain(`<@${mockCreator.discordId}>`);
+      expect(log.content).toContain(mockCreator.displayName);
+      expect(log.content).toContain(sessionWithConfirmed.title);
+
+      // Embed properties
+      expect(log.embed.title).toBe(`📣 ¡LLAMADO A SESIÓN! — ${sessionWithConfirmed.title}`);
+      expect(log.embed.color).toBe(DISCORD_EMBED_COLORS.session_callout);
+      expect(log.embed.footer?.text).toContain('Boludos Gaming');
+      expect(log.embed.footer?.text).toContain('Llamado a Sesión & Confirmación Anti-Humo');
+
+      // Embed description must include custom quote and formatted bullet list
+      expect(log.embed.description).toContain(`💬 *"¡Anotense que somos 4 y falta uno para el CS2!"*`);
+      expect(log.embed.description).toContain(`• **${mockTargetPlayer.displayName}** (<@${mockTargetPlayer.discordId}>) — **75% probable**`);
+      expect(log.embed.description).toContain(`• **${mockGhostPlayer.displayName}** (<@${mockGhostPlayer.discordId}>) — **60% probable**`);
+      expect(log.embed.description).toContain('¡Entrá y confirmá tu asistencia al 100% para arrancar puntual!');
+
+      // Embed fields
+      const dateField = log.embed.fields.find((f) => f.name === '📅 Fecha');
+      expect(dateField?.value).toBe(sessionWithConfirmed.date);
+
+      const callerField = log.embed.fields.find((f) => f.name === '👑 Invocador');
+      expect(callerField?.value).toBe(mockCreator.displayName);
+
+      const modeField = log.embed.fields.find((f) => f.name === '🎯 Modo');
+      expect(modeField?.value).toBe('🎲 Ruleta Ponderada');
+
+      const probField = log.embed.fields.find((f) => f.name === '👥 Convocados Probables');
+      expect(probField?.value).toBe('2 jugadores');
+
+      const confField = log.embed.fields.find((f) => f.name === '✅ Confirmados Actuales');
+      expect(confField?.value).toBe('1 listos');
+
+      // Action buttons
+      expect(log.buttons).toHaveLength(2);
+      expect(log.buttons[0]).toEqual({
+        label: 'Confirmar Asistencia 100% ✅',
+        actionType: 'join_session',
+        sessionId: sessionWithConfirmed.id,
+        style: 'success',
+      });
+      expect(log.buttons[1]).toEqual({
+        label: 'Abrir App 🚀',
+        actionType: 'open_app',
+        sessionId: sessionWithConfirmed.id,
+        style: 'primary',
+      });
+    });
+
+    it('falls back to default description text when custom message is omitted', () => {
+      const probableList = [{ player: mockTargetPlayer, confidencePercentage: 80 }];
+      const log = buildSessionCalloutDiscordPayload(sessionWithConfirmed, mockCreator, probableList);
+
+      expect(log.embed.description).toContain('Se activó un llamado de presencia grupal');
+      expect(log.embed.description).not.toContain('💬');
+      expect(log.embed.description).toContain(`• **${mockTargetPlayer.displayName}** (<@${mockTargetPlayer.discordId}>) — **80% probable**`);
+    });
+
+    it('handles empty probable players list with @everyone fallback mention', () => {
+      const log = buildSessionCalloutDiscordPayload(sessionWithConfirmed, mockCreator, []);
+
+      // Mention falls back to @everyone
+      expect(log.content).toContain('@everyone');
+      expect(log.embed.description).toContain('No hay jugadores con horario probable pendiente de confirmación.');
+
+      const probField = log.embed.fields.find((f) => f.name === '👥 Convocados Probables');
+      expect(probField?.value).toBe('0 jugadores');
+    });
+
+    it('sets mode field to "🎯 Juego Fijo" when session mode is fixed', () => {
+      const fixedSession: GamingSession = {
+        ...sessionWithConfirmed,
+        mode: 'fixed',
+      };
+      const log = buildSessionCalloutDiscordPayload(fixedSession, mockCreator, [
+        { player: mockTargetPlayer, confidencePercentage: 90 },
+      ]);
+
+      const modeField = log.embed.fields.find((f) => f.name === '🎯 Modo');
+      expect(modeField?.value).toBe('🎯 Juego Fijo');
+    });
+  });
+
   describe('dispatchDiscordWebhook', () => {
     beforeEach(() => {
       vi.restoreAllMocks();
@@ -482,6 +605,32 @@ describe('Discord Service & Rich Embeds (discordService)', () => {
       expect(payload.embeds).toHaveLength(1);
       expect(payload.embeds[0].title).toBe(log.embed.title);
       expect(payload.embeds[0].color).toBe(log.embed.color);
+    });
+
+    it('successfully dispatches session_callout payload with probable players mentions and action embed', async () => {
+      const calloutLog = buildSessionCalloutDiscordPayload(
+        mockSession,
+        mockCreator,
+        [{ player: mockTargetPlayer, confidencePercentage: 85 }],
+        '¡Anotense que arranca!'
+      );
+
+      let capturedOptions: RequestInit | undefined;
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+        capturedOptions = options;
+        return {
+          ok: true,
+          status: 204,
+        } as unknown as Response;
+      }));
+
+      const res = await dispatchDiscordWebhook('https://discord.com/api/webhooks/123/callout', calloutLog);
+      expect(res.ok).toBe(true);
+
+      const payload = JSON.parse(capturedOptions?.body as string);
+      expect(payload.content).toContain(`<@${mockTargetPlayer.discordId}>`);
+      expect(payload.embeds[0].title).toContain('¡LLAMADO A SESIÓN!');
+      expect(payload.embeds[0].color).toBe(DISCORD_EMBED_COLORS.session_callout);
     });
 
     it('returns formatted error when Discord responds with an HTTP error status', async () => {

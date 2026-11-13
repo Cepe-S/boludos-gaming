@@ -7,12 +7,14 @@ import {
   WeeklySchedule,
   EffectiveDailySchedule,
   PlayerProfile,
+  DayScheduleConfig,
 } from '../types/domain';
 import {
   createDefaultWeeklySchedule,
   getDayOfWeekKey,
   getEffectiveScheduleForDate,
 } from '../lib/matchmakingEngine';
+import { WeeklyBarsScheduleEditor, getConfidenceStyle } from './WeeklyBarsScheduleEditor';
 import {
   X,
   CalendarCheck,
@@ -28,10 +30,18 @@ import {
   Save,
   HelpCircle,
   AlertTriangle,
-  ChevronRight,
+  ShieldAlert,
 } from 'lucide-react';
 
 const PRECISION_OPTIONS: PrecisionMinutes[] = [5, 15, 30, 60];
+
+const CONFIDENCE_OPTIONS = [
+  { value: 25, label: '25% · Dudoso' },
+  { value: 50, label: '50% · Mitad y mitad' },
+  { value: 75, label: '75% · Probable' },
+  { value: 90, label: '90% · Muy probable' },
+  { value: 95, label: '95% · Casi seguro' },
+];
 
 const REASON_PRESETS = [
   'Baja programada',
@@ -53,20 +63,21 @@ function getSafeInitialSchedule(userSchedule?: WeeklySchedule): WeeklySchedule {
     }
   }
   return {
-    mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:00', precisionMinutes: 15 },
-    sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-    sun: { enabled: true, availableFrom: '21:30', availableUntil: '00:30', precisionMinutes: 15 },
+    mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15, confidencePercentage: 75 },
+    tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15, confidencePercentage: 75 },
+    wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15, confidencePercentage: 75 },
+    thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15, confidencePercentage: 75 },
+    fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:00', precisionMinutes: 15, confidencePercentage: 90 },
+    sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15, confidencePercentage: 90 },
+    sun: { enabled: true, availableFrom: '21:30', availableUntil: '00:30', precisionMinutes: 15, confidencePercentage: 75 },
   };
 }
 
 function resolveEffectiveSchedule(player: PlayerProfile, dateStr: string): EffectiveDailySchedule {
+  let eff: Partial<EffectiveDailySchedule> = {};
   if (typeof getEffectiveScheduleForDate === 'function') {
     try {
-      return getEffectiveScheduleForDate(player, dateStr);
+      eff = getEffectiveScheduleForDate(player, dateStr);
     } catch {
       // safe fallback below
     }
@@ -94,11 +105,13 @@ function resolveEffectiveSchedule(player: PlayerProfile, dateStr: string): Effec
     dayKey = map[d.getDay()] || 'mon';
   }
 
-  const def = {
+  const def: DayScheduleConfig = {
     enabled: true,
     availableFrom: '22:00',
     availableUntil: '01:00',
     precisionMinutes: 15 as PrecisionMinutes,
+    confidencePercentage: 75,
+    slots: [],
   };
   const weekly = player.weeklySchedule?.[dayKey] ?? def;
   const override = player.dailyOverrides?.[dateStr];
@@ -109,9 +122,11 @@ function resolveEffectiveSchedule(player: PlayerProfile, dateStr: string): Effec
         plays: false,
         source: 'override',
         dayKey,
-        availableFrom: weekly.availableFrom,
-        availableUntil: weekly.availableUntil,
-        precisionMinutes: weekly.precisionMinutes,
+        availableFrom: eff.availableFrom || weekly.availableFrom,
+        availableUntil: eff.availableUntil || weekly.availableUntil,
+        precisionMinutes: eff.precisionMinutes || weekly.precisionMinutes,
+        confidencePercentage: 0,
+        slots: [],
         reason: override.reason,
       };
     }
@@ -119,20 +134,25 @@ function resolveEffectiveSchedule(player: PlayerProfile, dateStr: string): Effec
       plays: true,
       source: 'override',
       dayKey,
-      availableFrom: override.availableFrom || weekly.availableFrom,
-      availableUntil: override.availableUntil || weekly.availableUntil,
-      precisionMinutes: override.precisionMinutes || weekly.precisionMinutes,
+      availableFrom: override.availableFrom || eff.availableFrom || weekly.availableFrom,
+      availableUntil: override.availableUntil || eff.availableUntil || weekly.availableUntil,
+      precisionMinutes: override.precisionMinutes || eff.precisionMinutes || weekly.precisionMinutes,
+      confidencePercentage: override.confidencePercentage ?? eff.confidencePercentage ?? weekly.confidencePercentage ?? 75,
+      slots: override.slots || eff.slots || weekly.slots || [],
       reason: override.reason,
     };
   }
 
   return {
-    plays: weekly.enabled,
-    source: 'weekly',
+    plays: eff.plays ?? weekly.enabled,
+    source: eff.source ?? 'weekly',
     dayKey,
-    availableFrom: weekly.availableFrom,
-    availableUntil: weekly.availableUntil,
-    precisionMinutes: weekly.precisionMinutes,
+    availableFrom: eff.availableFrom || weekly.availableFrom,
+    availableUntil: eff.availableUntil || weekly.availableUntil,
+    precisionMinutes: eff.precisionMinutes || weekly.precisionMinutes,
+    confidencePercentage: eff.confidencePercentage ?? weekly.confidencePercentage ?? 75,
+    slots: eff.slots || weekly.slots || [],
+    reason: eff.reason,
   };
 }
 
@@ -187,6 +207,7 @@ export const WeeklyScheduleModal: React.FC = () => {
   const [editFrom, setEditFrom] = useState('22:00');
   const [editUntil, setEditUntil] = useState('01:30');
   const [editPrecision, setEditPrecision] = useState<PrecisionMinutes>(15);
+  const [editConfidence, setEditConfidence] = useState<number>(75);
   const [editReason, setEditReason] = useState('');
 
   // Keep draft in sync if user changes or modal opens
@@ -203,84 +224,6 @@ export const WeeklyScheduleModal: React.FC = () => {
   if (!showWeeklyScheduleModal) {
     return null;
   }
-
-  // Presets for Tab 1
-  const applyPresetWeekdays = () => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-      tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-      wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-      thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    }));
-  };
-
-  const applyPresetWeekend = () => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-      sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-    }));
-  };
-
-  const applyPresetEveryDay = () => {
-    const updated = { ...draftSchedule };
-    (Object.keys(updated) as DayOfWeekKey[]).forEach((day) => {
-      updated[day] = {
-        enabled: true,
-        availableFrom: '22:00',
-        availableUntil: '01:30',
-        precisionMinutes: 15,
-      };
-    });
-    setDraftSchedule(updated);
-  };
-
-  const applyPresetOnlyWeekends = () => {
-    const updated = { ...draftSchedule };
-    updated.mon = { ...updated.mon, enabled: false };
-    updated.tue = { ...updated.tue, enabled: false };
-    updated.wed = { ...updated.wed, enabled: false };
-    updated.thu = { ...updated.thu, enabled: false };
-    updated.fri = { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 };
-    updated.sat = { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 };
-    updated.sun = { enabled: true, availableFrom: '21:30', availableUntil: '00:30', precisionMinutes: 15 };
-    setDraftSchedule(updated);
-  };
-
-  const handleDayToggle = (day: DayOfWeekKey) => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        enabled: !prev[day].enabled,
-      },
-    }));
-  };
-
-  const handleDayTimeChange = (
-    day: DayOfWeekKey,
-    field: 'availableFrom' | 'availableUntil',
-    value: string
-  ) => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleDayPrecisionChange = (day: DayOfWeekKey, precision: PrecisionMinutes) => {
-    setDraftSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        precisionMinutes: precision,
-      },
-    }));
-  };
 
   const handleSaveRoutine = () => {
     updateWeeklySchedule(draftSchedule);
@@ -307,6 +250,7 @@ export const WeeklyScheduleModal: React.FC = () => {
     setEditFrom(eff.availableFrom || '22:00');
     setEditUntil(eff.availableUntil || '01:30');
     setEditPrecision(eff.precisionMinutes || 15);
+    setEditConfidence(eff.confidencePercentage || 75);
     setEditReason(eff.reason || 'Horario especial');
   };
 
@@ -316,6 +260,7 @@ export const WeeklyScheduleModal: React.FC = () => {
       availableFrom: editFrom,
       availableUntil: editUntil,
       precisionMinutes: editPrecision,
+      confidencePercentage: editConfidence,
       reason: editReason.trim() || undefined,
     });
     setEditingDateStr(null);
@@ -373,7 +318,7 @@ export const WeeklyScheduleModal: React.FC = () => {
             }`}
           >
             <CalendarCheck className="w-4 h-4" />
-            <span>📅 Rutina Semanal Default</span>
+            <span>📅 Rutina Semanal Default (7 Barras)</span>
           </button>
 
           <button
@@ -395,153 +340,29 @@ export const WeeklyScheduleModal: React.FC = () => {
           {/* TAB 1: RUTINA SEMANAL DEFAULT */}
           {activeTab === 'routine' && (
             <div className="space-y-6 animate-in fade-in">
-              {/* Alert Explanation Box */}
-              <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-start gap-3">
+              {/* Alert Explanation Box: Probabilistic nature */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-950/70 via-purple-950/40 to-slate-900 border border-indigo-500/40 flex items-start gap-3 shadow-lg">
                 <Zap className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-indigo-200 leading-relaxed">
-                  <p className="font-semibold text-white mb-0.5">
-                    ¿Cómo funciona la Auto-Inscripción?
+                  <p className="font-bold text-white mb-0.5">
+                    Horarios Probabilísticos (10% a 95%) — Cero Chamuyo
                   </p>
-                  En los días marcados como <strong>Activos</strong>, el sistema te anota
-                  automáticamente en la sesión del día respetando tu horario y margen de precisión. Si un
-                  día puntual no podés jugar, usá la pestaña de <strong>Excepciones</strong> o el botón{' '}
-                  <strong>&quot;Hoy No Juego&quot;</strong> para salvarte del Tribunal del Humo.
+                  <span>
+                    Tu rutina semanal es una estimación de probabilidad (máximo <strong>95%</strong>).
+                    El sistema te enrola de forma preventiva como <em>&quot;probable&quot;</em>.
+                    Pasarás a <strong className="text-emerald-400">&quot;100% Confirmado&quot;</strong> únicamente
+                    cuando confirmes asistencia en la sesión del día. Si no podés jugar, marcá{' '}
+                    <strong className="text-rose-300">&quot;Hoy No Juego&quot;</strong> para evitar sanciones
+                    del Tribunal del Humo.
+                  </span>
                 </div>
               </div>
 
-              {/* Quick Presets */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-900/30">
-                <span className="text-xs font-bold text-slate-300">
-                  ⚡ Presets rápidos de 1 click:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={applyPresetWeekdays}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-950 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    Lun–Jue (22:00–01:00)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyPresetWeekend}
-                    className="px-2.5 py-1 rounded-lg bg-purple-950 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    Vie–Sáb (22:30–02:30)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyPresetEveryDay}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-950 border border-emerald-500/30 text-emerald-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    Todos los días
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyPresetOnlyWeekends}
-                    className="px-2.5 py-1 rounded-lg bg-amber-950 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    Solo Finde
-                  </button>
-                </div>
-              </div>
-
-              {/* 7 Days List */}
-              <div className="space-y-3">
-                {DAYS_OF_WEEK.map((day) => {
-                  const cfg = draftSchedule[day.key];
-                  const isEnabled = cfg.enabled;
-
-                  return (
-                    <div
-                      key={day.key}
-                      className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        isEnabled
-                          ? 'bg-[#0b1120] border-indigo-500/30 shadow-sm'
-                          : 'bg-[#070b14]/60 border-slate-800/80 opacity-60'
-                      }`}
-                    >
-                      {/* Day Label & Toggle */}
-                      <div className="flex items-center gap-3 sm:w-44 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleDayToggle(day.key)}
-                          className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors shrink-0 ${
-                            isEnabled ? 'bg-indigo-600 justify-end' : 'bg-slate-700 justify-start'
-                          }`}
-                        >
-                          <div className="bg-white w-4 h-4 rounded-full shadow-md" />
-                        </button>
-
-                        <div>
-                          <span className="font-bold text-sm text-white block">{day.label}</span>
-                          <span
-                            className={`text-[10px] font-semibold ${
-                              isEnabled ? 'text-emerald-400' : 'text-slate-500'
-                            }`}
-                          >
-                            {isEnabled ? 'Juego normalmente' : 'Descanso'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Time Controls & Precision Pill */}
-                      {isEnabled ? (
-                        <div className="flex flex-wrap items-center gap-3 flex-1 sm:justify-end">
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-slate-400">Desde:</span>
-                            <input
-                              type="time"
-                              value={cfg.availableFrom}
-                              onChange={(e) =>
-                                handleDayTimeChange(day.key, 'availableFrom', e.target.value)
-                              }
-                              className="px-2 py-1 rounded bg-[#131c31] border border-indigo-500/20 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
-                            />
-                          </div>
-
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-slate-400">Hasta:</span>
-                            <input
-                              type="time"
-                              value={cfg.availableUntil}
-                              onChange={(e) =>
-                                handleDayTimeChange(day.key, 'availableUntil', e.target.value)
-                              }
-                              className="px-2 py-1 rounded bg-[#131c31] border border-indigo-500/20 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
-                            />
-                          </div>
-
-                          {/* Precision Selector */}
-                          <div className="flex items-center gap-1">
-                            <span className="text-[11px] text-slate-400 hidden sm:inline mr-1">
-                              Precisión:
-                            </span>
-                            {PRECISION_OPTIONS.map((prec) => (
-                              <button
-                                key={prec}
-                                type="button"
-                                onClick={() => handleDayPrecisionChange(day.key, prec)}
-                                className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
-                                  cfg.precisionMinutes === prec
-                                    ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300'
-                                    : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                                }`}
-                              >
-                                ±{prec}m
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-xs text-slate-500 italic sm:text-right flex-1">
-                          No se te enrolará automáticamente este día
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              {/* 7-Bar Interactive Schedule Editor */}
+              <WeeklyBarsScheduleEditor
+                schedule={draftSchedule}
+                onChange={setDraftSchedule}
+              />
 
               {/* Save Routine Footer */}
               <div className="pt-4 border-t border-indigo-900/30 flex items-center justify-between">
@@ -549,7 +370,7 @@ export const WeeklyScheduleModal: React.FC = () => {
                   {saveSuccessMessage && (
                     <span className="flex items-center gap-1.5 text-emerald-400 text-xs font-bold animate-in fade-in">
                       <CheckCircle2 className="w-4 h-4" />
-                      Rutina semanal guardada y aplicada exitosamente
+                      Rutina semanal guardada y sincronizada exitosamente
                     </span>
                   )}
                 </div>
@@ -577,7 +398,7 @@ export const WeeklyScheduleModal: React.FC = () => {
                     Modificar un día puntual sin tocar tu rutina
                   </p>
                   ¿Hoy salís a cenar, rendís examen o querés conectarte más tarde? Marcá una excepción
-                  para una fecha específica. Tu rutina semanal general no cambiará.
+                  para una fecha específica y definí tu grado de confianza (25%, 50%, 75%, 90%). Tu rutina semanal general no cambiará.
                 </div>
               </div>
 
@@ -605,7 +426,7 @@ export const WeeklyScheduleModal: React.FC = () => {
                             {eff.source === 'weekly' && eff.plays && (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/80 border border-emerald-500/40 text-emerald-300">
                                 <Zap className="w-3 h-3 text-emerald-400" />
-                                Rutina semanal: {eff.availableFrom} a {eff.availableUntil} (±{eff.precisionMinutes}m)
+                                Rutina semanal: {eff.availableFrom} a {eff.availableUntil} (±{eff.precisionMinutes}m) · {eff.confidencePercentage}% prob.
                               </span>
                             )}
 
@@ -626,7 +447,7 @@ export const WeeklyScheduleModal: React.FC = () => {
                             {eff.source === 'override' && eff.plays && (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950/90 border border-amber-500/50 text-amber-300">
                                 <Edit3 className="w-3 h-3 text-amber-400" />
-                                Excepción Activa: Horario especial {eff.availableFrom} a {eff.availableUntil} (±{eff.precisionMinutes}m) {eff.reason ? `(${eff.reason})` : ''}
+                                Excepción Activa: Horario especial {eff.availableFrom} a {eff.availableUntil} (±{eff.precisionMinutes}m) · {eff.confidencePercentage}% prob. {eff.reason ? `(${eff.reason})` : ''}
                               </span>
                             )}
                           </div>
@@ -725,6 +546,30 @@ export const WeeklyScheduleModal: React.FC = () => {
                                   }`}
                                 >
                                   ±{prec}m
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Confidence Selector */}
+                          <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-300 font-semibold">Probabilidad estimada:</span>
+                              <span className="text-amber-300 font-bold">{editConfidence}%</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {CONFIDENCE_OPTIONS.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => setEditConfidence(opt.value)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                                    editConfidence === opt.value
+                                      ? 'bg-indigo-600 text-white border border-indigo-400 shadow-sm'
+                                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                                  }`}
+                                >
+                                  {opt.label}
                                 </button>
                               ))}
                             </div>

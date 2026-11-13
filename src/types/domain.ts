@@ -12,6 +12,16 @@ export type CategoryPreferenceLevel = 'like' | 'neutral' | 'dislike';
 
 export type DayOfWeekKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
+export type ParticipantConfirmationStatus = 'probable' | 'confirmed';
+
+export interface TimeSlotBlock {
+  id: string;
+  from: string; // "HH:mm" e.g. "21:30"
+  until: string; // "HH:mm" e.g. "01:00"
+  confidencePercentage: number; // 10 to 95 (NEVER 100 in default mode)
+  precisionMinutes: PrecisionMinutes;
+}
+
 export interface GameCategoryInfo {
   id: string;
   label: string;
@@ -88,9 +98,11 @@ export const DAYS_OF_WEEK: Array<{ key: DayOfWeekKey; label: string; shortLabel:
 
 export interface DayScheduleConfig {
   enabled: boolean; // false = Ese día no juega por defecto
-  availableFrom: string; // "22:00"
-  availableUntil: string; // "01:30"
+  availableFrom: string; // "22:00" (primary/legacy slot start)
+  availableUntil: string; // "01:30" (primary/legacy slot end)
   precisionMinutes: PrecisionMinutes;
+  confidencePercentage?: number; // 10 to 95 (default 75%)
+  slots?: TimeSlotBlock[]; // Multi-slot probabilistic bars per day
 }
 
 export type WeeklySchedule = Record<DayOfWeekKey, DayScheduleConfig>;
@@ -101,6 +113,8 @@ export interface DailyScheduleOverride {
   availableFrom?: string;
   availableUntil?: string;
   precisionMinutes?: PrecisionMinutes;
+  confidencePercentage?: number; // 10 to 95 (unless confirmed on a session)
+  slots?: TimeSlotBlock[];
   reason?: string;
   updatedAt: string;
 }
@@ -112,6 +126,8 @@ export interface EffectiveDailySchedule {
   availableFrom: string;
   availableUntil: string;
   precisionMinutes: PrecisionMinutes;
+  confidencePercentage: number; // < 100 in default mode (e.g. 25, 50, 75, 90)
+  slots: TimeSlotBlock[];
   reason?: string;
 }
 
@@ -175,6 +191,16 @@ export interface SessionParticipant {
   attendanceStatus: AttendanceStatus;
   note?: string;
   isAutoEnrolled?: boolean;
+  confidencePercentage?: number; // < 100 when auto-enrolled/probable; 100 ONLY when confirmed
+  confirmationStatus?: ParticipantConfirmationStatus; // 'probable' | 'confirmed'
+}
+
+export interface SessionCalloutRecord {
+  id: string;
+  triggeredBy: string;
+  triggeredAt: string;
+  message?: string;
+  notifiedUserIds: string[];
 }
 
 export interface GamingSession {
@@ -191,6 +217,8 @@ export interface GamingSession {
   attendanceVotes: AttendanceVote[];
   allowSplitLobbies: boolean;
   discordMessageId?: string;
+  invitedUserIds?: string[]; // undefined or empty = everyone invited; array of userIds = selective invite
+  callouts?: SessionCalloutRecord[];
 }
 
 export type LobbyCompatibilityStatus =
@@ -244,6 +272,8 @@ export interface ParticipantScheduleTimeline {
   earliestStartFormatted: string; // e.g. "21:45"
   attendanceStatus: AttendanceStatus;
   checkedInAt?: string;
+  confidencePercentage: number; // <100 when probable, 100 when confirmed
+  confirmationStatus: ParticipantConfirmationStatus;
 }
 
 export interface ScheduleOverlapSummary {
@@ -295,7 +325,8 @@ export type DiscordEventType =
   | 'late_ping'
   | 'sanction_issued'
   | 'chat_broadcast'
-  | 'checkin_update';
+  | 'checkin_update'
+  | 'session_callout';
 
 export interface DiscordEmbedField {
   name: string;

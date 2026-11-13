@@ -71,6 +71,7 @@ export interface AppContextValue {
     availableFrom: string;
     availableUntil: string;
     precisionMinutes: PrecisionMinutes;
+    invitedUserIds?: string[];
   }) => GamingSession;
   joinOrUpdateSessionSchedule: (
     sessionId: string,
@@ -80,8 +81,15 @@ export interface AppContextValue {
       precisionMinutes: PrecisionMinutes;
       note?: string;
       userId?: string;
+      confirmAttendance?: boolean;
     }
   ) => void;
+  confirmSessionAttendance: (sessionId: string, userId?: string) => void;
+  sendSessionCallout: (
+    sessionId: string,
+    customMessage?: string
+  ) => Promise<{ notifiedUsers: PlayerProfile[] }>;
+  updateSessionInvites: (sessionId: string, invitedUserIds?: string[]) => void;
   leaveSession: (sessionId: string, userId?: string) => void;
   spinSessionRoulette: (sessionId: string) => Game | null;
   lockSessionGame: (sessionId: string, gameId: string) => void;

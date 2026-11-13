@@ -2,6 +2,7 @@ import {
   ChatMessage,
   DiscordButtonAction,
   DiscordEventType,
+  DiscordIntegrationConfig,
   DiscordNotificationLog,
   Game,
   GamingSession,
@@ -19,6 +20,7 @@ export const DISCORD_EMBED_COLORS = {
   chat_broadcast: 0x38bdf8, // Sky
   checkin_update_on_time: 0x10b981, // Emerald
   checkin_update_late: 0xf59e0b, // Amber
+  session_callout: 0xec4899, // Fuchsia/Pink
 } as const;
 
 /**
@@ -288,6 +290,87 @@ export function buildCheckinUpdateLog(
     },
     buttons: [
       { label: 'Ver Sesión', actionType: 'open_app', sessionId: session.id, style: 'primary' },
+    ],
+    createdAt: new Date().toISOString(),
+    deliveredToWebhook: false,
+  };
+}
+
+/**
+ * Builds a Discord Rich Embed log for `session_callout`.
+ * Mentions all probable players so Discord pings them on their devices to confirm 100% attendance.
+ */
+export function buildSessionCalloutDiscordPayload(
+  session: GamingSession,
+  caller: PlayerProfile,
+  probablePlayers: Array<{ player: PlayerProfile; confidencePercentage: number }>,
+  customMessage?: string,
+  config?: DiscordIntegrationConfig
+): DiscordNotificationLog {
+  const mentionsList = probablePlayers
+    .map((p) => `<@${p.player.discordId}>`)
+    .filter(Boolean);
+  const mentionText = mentionsList.length > 0 ? mentionsList.join(' ') : '@everyone';
+
+  const content = `📣🚨 **¡LLAMADO A SESIÓN!** ${mentionText}\n<@${caller.discordId}> (${caller.displayName}) está convocando a confirmar presencia para **${session.title}**!`;
+
+  const playerLines =
+    probablePlayers.length > 0
+      ? probablePlayers
+          .map(
+            (p) =>
+              `• **${p.player.displayName}** (<@${p.player.discordId}>) — **${p.confidencePercentage}% probable** según su horario habitual`
+          )
+          .join('\n')
+      : 'No hay jugadores con horario probable pendiente de confirmación.';
+
+  const description = customMessage
+    ? `💬 *"${customMessage}"*\n\n**Jugadores convocados por compatibilidad de horario:**\n${playerLines}\n\n👉 *¡Entrá y confirmá tu asistencia al 100% para arrancar puntual!*`
+    : `Se activó un llamado de presencia grupal. Según los horarios declarados, los siguientes jugadores tienen alta probabilidad de estar disponibles:\n\n${playerLines}\n\n👉 *¡Entrá y confirmá tu asistencia al 100% para arrancar puntual!*`;
+
+  return {
+    id: generateId('call'),
+    eventType: 'session_callout',
+    content,
+    embed: {
+      title: `📣 ¡LLAMADO A SESIÓN! — ${session.title}`,
+      description,
+      color: DISCORD_EMBED_COLORS.session_callout,
+      fields: [
+        { name: '📅 Fecha', value: session.date, inline: true },
+        { name: '👑 Invocador', value: caller.displayName, inline: true },
+        {
+          name: '🎯 Modo',
+          value: session.mode === 'random' ? '🎲 Ruleta Ponderada' : '🎯 Juego Fijo',
+          inline: true,
+        },
+        {
+          name: '👥 Convocados Probables',
+          value: `${probablePlayers.length} jugadores`,
+          inline: true,
+        },
+        {
+          name: '✅ Confirmados Actuales',
+          value: `${session.participants.filter((p) => p.confirmationStatus === 'confirmed').length} listos`,
+          inline: true,
+        },
+      ],
+      footer: { text: 'Boludos Gaming • Llamado a Sesión & Confirmación Anti-Humo' },
+      timestamp: new Date().toISOString(),
+    },
+    buttons: [
+      {
+        label: 'Confirmar Asistencia 100% ✅',
+        actionType: 'join_session',
+        sessionId: session.id,
+        style: 'success',
+      },
+      {
+        label: 'Abrir App 🚀',
+        actionType: 'open_app',
+        sessionId: session.id,
+        style: 'primary',
+      },
     ],
     createdAt: new Date().toISOString(),
     deliveredToWebhook: false,

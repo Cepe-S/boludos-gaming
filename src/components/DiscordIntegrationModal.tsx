@@ -170,6 +170,12 @@ export const DiscordIntegrationModal: React.FC<DiscordIntegrationModalProps> = (
       icon: '✅',
       desc: 'Avisa cuando un jugador ya está online listo en el lobby.',
     },
+    {
+      id: 'session_callout',
+      label: 'Llamados a Sesión (Ping a Probables)',
+      icon: '📣',
+      desc: 'Etiqueta por Discord a amigos con horarios probables para que confirmen asistencia.',
+    },
   ];
 
   if (!inlineView && !isOpen) return null;

@@ -12,6 +12,12 @@ import {
   getDayOfWeekKey,
   getEffectiveScheduleForDate,
   reconcileSessionParticipantsWithSchedules,
+  clampDefaultConfidence,
+  normalizeDaySlots,
+  isPlayerInvitedToSession,
+  getProbableAvailablePlayersForSession,
+  getEffectiveDailySchedule,
+  reconcileAutoParticipantsForSession,
 } from '../matchmakingEngine';
 import {
   Game,
@@ -22,6 +28,8 @@ import {
   GamingSession,
   WeeklySchedule,
   DailyScheduleOverride,
+  DayScheduleConfig,
+  TimeSlotBlock,
 } from '../../types/domain';
 
 // Fixture helpers for clean test isolation
@@ -526,6 +534,49 @@ describe('Matchmaking & Karma Engine (matchmakingEngine)', () => {
       expect(summary.guaranteedStartFormatted).toBe('23:00');
     });
 
+    it('accurately resolves confirmationStatus and confidencePercentage on participant timelines', () => {
+      const playerConfirmed = createTestPlayer({ id: 'p-conf', displayName: 'Confirmed Player' });
+      const playerProbable = createTestPlayer({ id: 'p-prob', displayName: 'Probable Player' });
+      const playerAuto = createTestPlayer({ id: 'p-auto', displayName: 'Auto Player' });
+
+      const participants: SessionParticipant[] = [
+        createTestParticipant({
+          userId: 'p-conf',
+          confirmationStatus: 'confirmed',
+          confidencePercentage: 100,
+          isAutoEnrolled: false,
+        }),
+        createTestParticipant({
+          userId: 'p-prob',
+          confirmationStatus: 'probable',
+          confidencePercentage: 80,
+          isAutoEnrolled: true,
+        }),
+        createTestParticipant({
+          userId: 'p-auto',
+          // No explicit confirmationStatus, auto-enrolled should resolve to probable and clamped confidence
+          isAutoEnrolled: true,
+          confidencePercentage: 100, // Should be clamped to 95 because it is probable
+        }),
+      ];
+
+      const summary = calculateScheduleOverlap(participants, [playerConfirmed, playerProbable, playerAuto]);
+      const timelines = summary.participantTimelines;
+
+      const tConf = timelines.find((t) => t.userId === 'p-conf')!;
+      expect(tConf.confirmationStatus).toBe('confirmed');
+      expect(tConf.confidencePercentage).toBe(100);
+
+      const tProb = timelines.find((t) => t.userId === 'p-prob')!;
+      expect(tProb.confirmationStatus).toBe('probable');
+      expect(tProb.confidencePercentage).toBe(80);
+
+      const tAuto = timelines.find((t) => t.userId === 'p-auto')!;
+      expect(tAuto.confirmationStatus).toBe('probable');
+      // Even if participant had confidencePercentage: 100, probable participants are clamped <= 95
+      expect(tAuto.confidencePercentage).toBe(95);
+    });
+
     it('returns empty fallback summary when participants list is empty', () => {
       const summary = calculateScheduleOverlap([], []);
       expect(summary.probableStartFormatted).toBe('--:--');
@@ -967,6 +1018,447 @@ describe('Matchmaking & Karma Engine (matchmakingEngine)', () => {
         expect(reconciled[0].availableUntil).toBe('03:15');
         expect(reconciled[0].precisionMinutes).toBe(30);
         expect(reconciled[0].isAutoEnrolled).toBe(false);
+      });
+    });
+
+    describe('clampDefaultConfidence', () => {
+      it('clamps confidence to the 10..95 range (never 100 in default mode)', () => {
+        // Passing 100 clamps to 95 — 100% is only valid when confirmationStatus === 'confirmed'
+        expect(clampDefaultConfidence(100)).toBe(95);
+        expect(clampDefaultConfidence(105)).toBe(95);
+        expect(clampDefaultConfidence(96)).toBe(95);
+        expect(clampDefaultConfidence(95)).toBe(95);
+
+        // Within 10..95 range
+        expect(clampDefaultConfidence(90)).toBe(90);
+        expect(clampDefaultConfidence(75)).toBe(75);
+        expect(clampDefaultConfidence(50)).toBe(50);
+        expect(clampDefaultConfidence(10)).toBe(10);
+
+        // Below 10 clamps to 10
+        expect(clampDefaultConfidence(9)).toBe(10);
+        expect(clampDefaultConfidence(0)).toBe(10);
+        expect(clampDefaultConfidence(-15)).toBe(10);
+
+        // Fallback for undefined/null/NaN defaults to 75
+        expect(clampDefaultConfidence(undefined)).toBe(75);
+        expect(clampDefaultConfidence(null as unknown as number)).toBe(75);
+        expect(clampDefaultConfidence(NaN)).toBe(75);
+
+        // Floating point values are rounded cleanly
+        expect(clampDefaultConfidence(82.6)).toBe(83);
+        expect(clampDefaultConfidence(82.4)).toBe(82);
+      });
+    });
+
+    describe('createDefaultWeeklySchedule probabilistic confidence & slots', () => {
+      it('creates default weekly schedule with confidencePercentage <= 95 and slot blocks', () => {
+        const schedule = createDefaultWeeklySchedule();
+        const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+
+        days.forEach((day) => {
+          expect(schedule[day].confidencePercentage).toBeDefined();
+          expect(schedule[day].confidencePercentage!).toBeLessThanOrEqual(95);
+          expect(schedule[day].confidencePercentage!).toBeGreaterThanOrEqual(10);
+          expect(schedule[day].slots).toBeDefined();
+          expect(schedule[day].slots!.length).toBeGreaterThan(0);
+          expect(schedule[day].slots![0].confidencePercentage).toBeLessThanOrEqual(95);
+        });
+      });
+
+      it('clamps custom confidencePercentage to <= 95 even when 100 is passed', () => {
+        const schedule = createDefaultWeeklySchedule('22:00', '01:00', 15, 100);
+        expect(schedule.mon.confidencePercentage).toBe(95);
+        expect(schedule.fri.confidencePercentage).toBe(95);
+        expect(schedule.mon.slots![0].confidencePercentage).toBe(95);
+      });
+    });
+
+    describe('normalizeDaySlots', () => {
+      it('returns empty array if dayConfig.enabled is false', () => {
+        const config: DayScheduleConfig = {
+          enabled: false,
+          availableFrom: '22:00',
+          availableUntil: '01:00',
+          precisionMinutes: 15,
+        };
+        expect(normalizeDaySlots(config, 'mon')).toEqual([]);
+      });
+
+      it('normalizes multi-slot DayScheduleConfig clamping slot confidence percentages to <= 95%', () => {
+        const config: DayScheduleConfig = {
+          enabled: true,
+          availableFrom: '19:00',
+          availableUntil: '02:00',
+          precisionMinutes: 15,
+          confidencePercentage: 80,
+          slots: [
+            {
+              id: 'slot-1',
+              from: '19:00',
+              until: '21:00',
+              confidencePercentage: 60,
+              precisionMinutes: 15,
+            },
+            {
+              id: 'slot-2',
+              from: '22:30',
+              until: '02:00',
+              confidencePercentage: 100, // Should be clamped to 95
+              precisionMinutes: 30,
+            },
+          ],
+        };
+
+        const normalized = normalizeDaySlots(config, 'fri');
+        expect(normalized).toHaveLength(2);
+        expect(normalized[0].confidencePercentage).toBe(60);
+        expect(normalized[1].confidencePercentage).toBe(95);
+      });
+
+      it('generates fallback single slot when slots array is omitted or empty', () => {
+        const config: DayScheduleConfig = {
+          enabled: true,
+          availableFrom: '21:00',
+          availableUntil: '00:30',
+          precisionMinutes: 30,
+          confidencePercentage: 85,
+        };
+
+        const normalized = normalizeDaySlots(config, 'tue');
+        expect(normalized).toHaveLength(1);
+        expect(normalized[0]).toEqual({
+          id: 'slot-tue-1',
+          from: '21:00',
+          until: '00:30',
+          confidencePercentage: 85,
+          precisionMinutes: 30,
+        });
+      });
+    });
+
+    describe('isPlayerInvitedToSession', () => {
+      const baseSession: Pick<GamingSession, 'createdBy' | 'invitedUserIds'> = {
+        createdBy: 'host-user',
+        invitedUserIds: undefined,
+      };
+
+      it('returns true when invitedUserIds is undefined or empty (all group members invited)', () => {
+        expect(isPlayerInvitedToSession({ ...baseSession, invitedUserIds: undefined }, 'any-user')).toBe(true);
+        expect(isPlayerInvitedToSession({ ...baseSession, invitedUserIds: [] }, 'any-user')).toBe(true);
+      });
+
+      it('always returns true for the session creator, even if invitedUserIds does not explicitly list them', () => {
+        const selectiveSession = {
+          createdBy: 'host-user',
+          invitedUserIds: ['guest-1', 'guest-2'],
+        };
+        expect(isPlayerInvitedToSession(selectiveSession, 'host-user')).toBe(true);
+      });
+
+      it('returns true when player is included in invitedUserIds', () => {
+        const selectiveSession = {
+          createdBy: 'host-user',
+          invitedUserIds: ['guest-1', 'guest-2'],
+        };
+        expect(isPlayerInvitedToSession(selectiveSession, 'guest-1')).toBe(true);
+        expect(isPlayerInvitedToSession(selectiveSession, 'guest-2')).toBe(true);
+      });
+
+      it('returns false when player is not in invitedUserIds and is not creator', () => {
+        const selectiveSession = {
+          createdBy: 'host-user',
+          invitedUserIds: ['guest-1', 'guest-2'],
+        };
+        expect(isPlayerInvitedToSession(selectiveSession, 'uninvited-user')).toBe(false);
+      });
+    });
+
+    describe('getEffectiveDailySchedule multi-slot & probabilistic resolution', () => {
+      it('resolves multi-slot weekly configuration with correct availableFrom, availableUntil, and max confidence', () => {
+        const customWeekly = createDefaultWeeklySchedule();
+        customWeekly.fri = {
+          enabled: true,
+          availableFrom: '20:00',
+          availableUntil: '02:00',
+          precisionMinutes: 15,
+          confidencePercentage: 80,
+          slots: [
+            {
+              id: 'slot-early',
+              from: '20:00',
+              until: '22:00',
+              confidencePercentage: 50,
+              precisionMinutes: 15,
+            },
+            {
+              id: 'slot-late',
+              from: '23:00',
+              until: '02:00',
+              confidencePercentage: 90,
+              precisionMinutes: 15,
+            },
+          ],
+        };
+
+        const player = createTestPlayer({ id: 'p-multi', weeklySchedule: customWeekly });
+        // 2026-11-13 is Friday
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+
+        expect(effective.plays).toBe(true);
+        expect(effective.source).toBe('weekly');
+        expect(effective.dayKey).toBe('fri');
+        expect(effective.availableFrom).toBe('20:00'); // First slot start
+        expect(effective.availableUntil).toBe('02:00'); // Last slot end
+        expect(effective.confidencePercentage).toBe(90); // Max confidence of slots (< 100%)
+        expect(effective.slots).toHaveLength(2);
+      });
+
+      it('resolves multi-slot daily override with precedence over weekly schedule', () => {
+        const player = createTestPlayer({
+          id: 'p-override-slots',
+          weeklySchedule: createDefaultWeeklySchedule(),
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'playing',
+              slots: [
+                {
+                  id: 'over-1',
+                  from: '21:00',
+                  until: '23:00',
+                  confidencePercentage: 60,
+                  precisionMinutes: 15,
+                },
+                {
+                  id: 'over-2',
+                  from: '23:30',
+                  until: '01:30',
+                  confidencePercentage: 100, // Clamps to 95
+                  precisionMinutes: 30,
+                },
+              ],
+              reason: 'Horario especial de fin de semana',
+              updatedAt: '2026-11-13T10:00:00Z',
+            },
+          },
+        });
+
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+        expect(effective.plays).toBe(true);
+        expect(effective.source).toBe('override');
+        expect(effective.availableFrom).toBe('21:00');
+        expect(effective.availableUntil).toBe('01:30');
+        expect(effective.confidencePercentage).toBe(95); // 100 clamped to 95
+        expect(effective.slots).toHaveLength(2);
+        expect(effective.slots[1].confidencePercentage).toBe(95);
+        expect(effective.reason).toBe('Horario especial de fin de semana');
+      });
+
+      it('returns plays: false, confidencePercentage: 0, and empty slots when override is not_playing', () => {
+        const player = createTestPlayer({
+          id: 'p-not-playing',
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'not_playing',
+              reason: 'Examen mañana',
+              updatedAt: '2026-11-13T10:00:00Z',
+            },
+          },
+        });
+
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+        expect(effective.plays).toBe(false);
+        expect(effective.source).toBe('override');
+        expect(effective.confidencePercentage).toBe(0);
+        expect(effective.slots).toEqual([]);
+      });
+    });
+
+    describe('reconcileAutoParticipantsForSession', () => {
+      it('respects selective invitedUserIds: only invited players are auto-enrolled', () => {
+        const creator = createTestPlayer({ id: 'creator-1', displayName: 'Creator' });
+        const invitedPlayer = createTestPlayer({ id: 'invited-1', displayName: 'Invited' });
+        const uninvitedPlayer = createTestPlayer({ id: 'uninvited-1', displayName: 'Uninvited' });
+
+        const session = createTestSession({
+          createdBy: 'creator-1',
+          date: '2026-11-13', // Friday
+          invitedUserIds: ['invited-1'], // Only invited-1 (creator is also implicitly allowed)
+          participants: [],
+        });
+
+        const updatedSession = reconcileAutoParticipantsForSession(session, [
+          creator,
+          invitedPlayer,
+          uninvitedPlayer,
+        ]);
+
+        const participantIds = updatedSession.participants.map((p) => p.userId);
+        expect(participantIds).toContain('creator-1');
+        expect(participantIds).toContain('invited-1');
+        expect(participantIds).not.toContain('uninvited-1');
+      });
+
+      it('prunes previously auto-enrolled participants if they are removed from invitedUserIds', () => {
+        const creator = createTestPlayer({ id: 'creator-1' });
+        const previouslyInvited = createTestPlayer({ id: 'p-removed' });
+
+        // Session previously had p-removed as auto-enrolled participant
+        const session = createTestSession({
+          createdBy: 'creator-1',
+          date: '2026-11-13',
+          invitedUserIds: ['creator-1'], // p-removed was excluded from invite list!
+          participants: [
+            createTestParticipant({
+              userId: 'p-removed',
+              isAutoEnrolled: true,
+              confirmationStatus: 'probable',
+            }),
+          ],
+        });
+
+        const updatedSession = reconcileAutoParticipantsForSession(session, [
+          creator,
+          previouslyInvited,
+        ]);
+
+        const participantIds = updatedSession.participants.map((p) => p.userId);
+        expect(participantIds).not.toContain('p-removed');
+      });
+
+      it('sets isAutoEnrolled: true, confirmationStatus: "probable", and confidencePercentage < 100 for auto-enrolled participants', () => {
+        const player = createTestPlayer({ id: 'p-auto-check' });
+        const session = createTestSession({
+          createdBy: 'p-auto-check',
+          date: '2026-11-13',
+          participants: [],
+        });
+
+        const updatedSession = reconcileAutoParticipantsForSession(session, [player]);
+        expect(updatedSession.participants).toHaveLength(1);
+
+        const participant = updatedSession.participants[0];
+        expect(participant.isAutoEnrolled).toBe(true);
+        expect(participant.confirmationStatus).toBe('probable');
+        expect(participant.confidencePercentage).toBeLessThan(100);
+        expect(participant.confidencePercentage).toBeGreaterThanOrEqual(10);
+        expect(participant.note).toContain('Probable');
+      });
+
+      it('preserves confirmationStatus: "confirmed" and guarantees confidencePercentage: 100 for confirmed participants', () => {
+        const player = createTestPlayer({ id: 'p-confirmed-check' });
+        const confirmedParticipant = createTestParticipant({
+          userId: 'p-confirmed-check',
+          confirmationStatus: 'confirmed',
+          confidencePercentage: 100,
+          isAutoEnrolled: false,
+        });
+
+        const session = createTestSession({
+          createdBy: 'p-confirmed-check',
+          date: '2026-11-13',
+          participants: [confirmedParticipant],
+        });
+
+        const updatedSession = reconcileAutoParticipantsForSession(session, [player]);
+        const participant = updatedSession.participants.find((p) => p.userId === 'p-confirmed-check')!;
+
+        expect(participant.confirmationStatus).toBe('confirmed');
+        expect(participant.confidencePercentage).toBe(100);
+      });
+
+      it('removes confirmed player if they explicitly set daily override to "not_playing"', () => {
+        const player = createTestPlayer({
+          id: 'p-bailing-confirmed',
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'not_playing',
+              reason: 'Fuerza mayor',
+              updatedAt: '2026-11-13T12:00:00Z',
+            },
+          },
+        });
+
+        const session = createTestSession({
+          createdBy: 'host',
+          date: '2026-11-13',
+          participants: [
+            createTestParticipant({
+              userId: 'p-bailing-confirmed',
+              confirmationStatus: 'confirmed',
+            }),
+          ],
+        });
+
+        const updatedSession = reconcileAutoParticipantsForSession(session, [player]);
+        expect(updatedSession.participants.find((p) => p.userId === 'p-bailing-confirmed')).toBeUndefined();
+      });
+    });
+
+    describe('getProbableAvailablePlayersForSession', () => {
+      it('returns invited players with probable schedules who have NOT yet confirmed 100%', () => {
+        const playerConfirmed = createTestPlayer({ id: 'p-conf', displayName: 'Confirmed' });
+        const playerProbableEnrolled = createTestPlayer({ id: 'p-prob', displayName: 'Probable' });
+        const playerNotEnrolledYet = createTestPlayer({ id: 'p-not-yet', displayName: 'Not Yet Enrolled' });
+        const playerNotPlaying = createTestPlayer({
+          id: 'p-no-play',
+          displayName: 'No Play',
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'not_playing',
+              updatedAt: '2026-11-13T12:00:00Z',
+            },
+          },
+        });
+        const playerUninvited = createTestPlayer({ id: 'p-uninvited', displayName: 'Uninvited' });
+
+        const session = createTestSession({
+          createdBy: 'p-conf',
+          date: '2026-11-13',
+          invitedUserIds: ['p-conf', 'p-prob', 'p-not-yet', 'p-no-play'], // p-uninvited is not invited
+          participants: [
+            createTestParticipant({
+              userId: 'p-conf',
+              confirmationStatus: 'confirmed',
+              confidencePercentage: 100,
+            }),
+            createTestParticipant({
+              userId: 'p-prob',
+              confirmationStatus: 'probable',
+              confidencePercentage: 75,
+            }),
+          ],
+        });
+
+        const probables = getProbableAvailablePlayersForSession(session, [
+          playerConfirmed,
+          playerProbableEnrolled,
+          playerNotEnrolledYet,
+          playerNotPlaying,
+          playerUninvited,
+        ]);
+
+        const probableIds = probables.map((res) => res.player.id);
+
+        // Confirmed player is excluded because they already confirmed 100%
+        expect(probableIds).not.toContain('p-conf');
+        // Probable enrolled player IS returned
+        expect(probableIds).toContain('p-prob');
+        // Player not enrolled yet but with plays: true IS returned
+        expect(probableIds).toContain('p-not-yet');
+        // Player with not_playing is excluded
+        expect(probableIds).not.toContain('p-no-play');
+        // Uninvited player is excluded
+        expect(probableIds).not.toContain('p-uninvited');
+
+        // Check matchedSlot structure
+        const probItem = probables.find((r) => r.player.id === 'p-prob')!;
+        expect(probItem.matchedSlot).toBeDefined();
+        expect(probItem.matchedSlot.confidencePercentage).toBeLessThan(100);
       });
     });
   });

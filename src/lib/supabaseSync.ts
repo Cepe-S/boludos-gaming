@@ -7,9 +7,11 @@ import {
   Game,
   GameRating,
   GamingSession,
+  ParticipantConfirmationStatus,
   PlayerProfile,
   PrecisionMinutes,
   SanctionRecord,
+  SessionCalloutRecord,
   SessionParticipant,
   UserGamePreference,
   WeeklySchedule,
@@ -84,6 +86,18 @@ function mapParticipantRow(row: Record<string, unknown>): SessionParticipant {
   const precisionMinutes = ([5, 15, 30, 60].includes(precisionRaw)
     ? precisionRaw
     : 15) as PrecisionMinutes;
+  const isAutoEnrolled = Boolean(row.is_auto_enrolled);
+  const confirmationStatus =
+    (row.confirmation_status as ParticipantConfirmationStatus) ||
+    (isAutoEnrolled ? 'probable' : 'confirmed');
+  const rawConf = Number(
+    row.confidence_percentage ?? (confirmationStatus === 'confirmed' ? 100 : 75)
+  );
+  const confidencePercentage =
+    confirmationStatus === 'confirmed'
+      ? 100
+      : Math.min(95, Math.max(10, isNaN(rawConf) ? 75 : rawConf));
+
   return {
     userId: String(row.user_id),
     joinedAt: String(row.joined_at || new Date().toISOString()),
@@ -93,7 +107,9 @@ function mapParticipantRow(row: Record<string, unknown>): SessionParticipant {
     checkedInAt: row.checked_in_at ? String(row.checked_in_at) : undefined,
     attendanceStatus: (row.attendance_status as SessionParticipant['attendanceStatus']) || 'pending',
     note: row.note ? String(row.note) : undefined,
-    isAutoEnrolled: Boolean(row.is_auto_enrolled),
+    isAutoEnrolled,
+    confidencePercentage,
+    confirmationStatus,
   };
 }
 
@@ -205,6 +221,12 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
     createdAt: String(row.created_at || new Date().toISOString()),
     allowSplitLobbies: Boolean(row.allow_split_lobbies),
     discordMessageId: row.discord_message_id ? String(row.discord_message_id) : undefined,
+    invitedUserIds: Array.isArray(row.invited_user_ids)
+      ? row.invited_user_ids.map(String)
+      : undefined,
+    callouts: Array.isArray(row.callouts)
+      ? (row.callouts as SessionCalloutRecord[])
+      : [],
     participants: participantsBySession.get(String(row.id)) || [],
     attendanceVotes: votesBySession.get(String(row.id)) || [],
   }));
@@ -227,6 +249,7 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
         sanction_issued: true,
         chat_broadcast: true,
         checkin_update: true,
+        session_callout: true,
       },
     };
   }
@@ -311,6 +334,11 @@ export async function dbCreateSession(session: GamingSession) {
     status: session.status,
     allow_split_lobbies: session.allowSplitLobbies,
     created_by: session.createdBy,
+    invited_user_ids:
+      session.invitedUserIds && session.invitedUserIds.length > 0
+        ? session.invitedUserIds
+        : null,
+    callouts: session.callouts || [],
   });
 
   for (const p of session.participants) {
@@ -320,6 +348,11 @@ export async function dbCreateSession(session: GamingSession) {
 
 export async function dbUpsertParticipant(sessionId: string, p: SessionParticipant) {
   if (!supabase) return;
+  const isConfirmed = p.confirmationStatus === 'confirmed';
+  const confidence = isConfirmed
+    ? 100
+    : Math.min(95, Math.max(10, p.confidencePercentage ?? 75));
+
   await supabase.from('session_participants').upsert(
     {
       session_id: sessionId,
@@ -331,9 +364,29 @@ export async function dbUpsertParticipant(sessionId: string, p: SessionParticipa
       attendance_status: p.attendanceStatus,
       note: p.note || null,
       is_auto_enrolled: Boolean(p.isAutoEnrolled),
+      confidence_percentage: confidence,
+      confirmation_status: p.confirmationStatus || (p.isAutoEnrolled ? 'probable' : 'confirmed'),
     },
     { onConflict: 'session_id,user_id' }
   );
+}
+
+export async function dbUpdateSessionInvitesAndCallouts(
+  sessionId: string,
+  invitedUserIds?: string[],
+  callouts?: SessionCalloutRecord[]
+) {
+  if (!supabase) return;
+  const payload: Record<string, unknown> = {};
+  if (invitedUserIds !== undefined) {
+    payload.invited_user_ids = invitedUserIds.length > 0 ? invitedUserIds : null;
+  }
+  if (callouts !== undefined) {
+    payload.callouts = callouts;
+  }
+  if (Object.keys(payload).length > 0) {
+    await supabase.from('sessions').update(payload).eq('id', sessionId);
+  }
 }
 
 export async function dbDeleteParticipant(sessionId: string, userId: string) {
