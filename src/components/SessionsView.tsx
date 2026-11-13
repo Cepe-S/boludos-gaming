@@ -515,28 +515,6 @@ export function SessionsView() {
     triggerAlert('info', `Voto registrado: ${voteLabels[vote]} para el Tribunal del Humo.`);
   };
 
-  // If no session exists
-  if (!activeSession) {
-    return (
-      <div className="flex flex-col items-center justify-center p-12 bg-[#131c31]/80 rounded-3xl border border-indigo-500/20 text-center max-w-xl mx-auto my-12">
-        <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-4 text-indigo-400">
-          <CalendarClock className="w-8 h-8" />
-        </div>
-        <h2 className="text-2xl font-bold text-white mb-2">No hay sesiones creadas todavía</h2>
-        <p className="text-slate-400 mb-6 text-sm">
-          Organizá la primera noche de vicio entre amigos con ruleta de sincronía y control estricto de puntualidad.
-        </p>
-        <button
-          onClick={() => setIsNewModalOpen(true)}
-          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-lg shadow-indigo-600/30 transition cursor-pointer"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Crear Primera Sesión</span>
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-8 pb-16">
       {/* 0. PROMINENT CONTROL BANNER: ESTADO DE HOY & AUTO-INSCRIPCIÓN SEMANAL */}
@@ -575,7 +553,7 @@ export function SessionsView() {
                       : 'bg-rose-500/20 border-rose-400/50 text-rose-300'
                   }`}
                 >
-                  {effectiveToday.plays ? '⚡ Anotado para Jugar' : '🚫 No Juego Hoy'}
+                  {effectiveToday.plays ? `⚡ Probable ${effectiveToday.confidencePercentage ?? 75}%` : '🚫 No Juego Hoy'}
                 </span>
                 <span className="text-[11px] text-slate-400 font-mono">
                   ({todayStr})
@@ -586,9 +564,9 @@ export function SessionsView() {
                 {effectiveToday.plays ? (
                   <>
                     <strong className="text-white">
-                      ⚡ Estás anotado automáticamente hoy de {effectiveToday.availableFrom} a {effectiveToday.availableUntil} (±{effectiveToday.precisionMinutes}m)
+                      ⚡ Tu horario default para hoy es de {effectiveToday.availableFrom} a {effectiveToday.availableUntil} (±{effectiveToday.precisionMinutes}m) · {effectiveToday.confidencePercentage ?? 75}% probable
                     </strong>{' '}
-                    según tu {effectiveToday.source === 'weekly' ? 'horario default semanal' : 'horario personalizado de hoy'}.
+                    ({effectiveToday.source === 'weekly' ? 'rutina semanal' : 'excepción de hoy'}).
                   </>
                 ) : (
                   <>
@@ -640,6 +618,26 @@ export function SessionsView() {
           </div>
         </div>
       </div>
+
+      {!activeSession ? (
+        <div className="flex flex-col items-center justify-center p-12 bg-[#131c31]/80 rounded-3xl border border-indigo-500/20 text-center max-w-xl mx-auto my-8">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-4 text-indigo-400">
+            <CalendarClock className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">No hay sesiones creadas todavía</h2>
+          <p className="text-slate-400 mb-6 text-sm">
+            Organizá la primera noche de vicio entre amigos eligiendo a quiénes invitar, con ruleta de sincronía y llamados a sesión.
+          </p>
+          <button
+            onClick={() => setIsNewModalOpen(true)}
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Crear Primera Sesión</span>
+          </button>
+        </div>
+      ) : (
+        <>
 
       {/* EXPLICIT 100% ATTENDANCE CONFIRMATION PULSING BANNER FOR CURRENT USER */}
       {currentParticipant && !isParticipantConfirmed(currentParticipant) && (
@@ -2138,6 +2136,8 @@ export function SessionsView() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* 7. MODAL: NUEVA SESIÓN */}
       {isNewModalOpen && (
@@ -2412,7 +2412,7 @@ export function SessionsView() {
         </div>
       )}
       {/* 8. MODAL: EDITAR INVITACIONES DE LA SESIÓN */}
-      {isManageInvitesOpen && (
+      {isManageInvitesOpen && activeSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-[#131c31] w-full max-w-xl rounded-3xl border border-indigo-500/40 p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -2577,7 +2577,7 @@ export function SessionsView() {
       )}
 
       {/* 9. MODAL: LLAMADO A SESIÓN (PING A PROBABLES) */}
-      {isCalloutModalOpen && (
+      {isCalloutModalOpen && activeSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-[#131c31] w-full max-w-lg rounded-3xl border border-amber-500/40 p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">

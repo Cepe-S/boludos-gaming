@@ -113,6 +113,17 @@ export const OnboardingTourModal: React.FC = () => {
     }
   }, [showOnboardingModal, currentUser]);
 
+  // Filtered games catalog for Step 4 (MUST be called before early return to respect Rules of Hooks)
+  const filteredGames = useMemo(() => {
+    return games.filter((g) => {
+      const matchesSearch =
+        g.name.toLowerCase().includes(gameFilterQuery.toLowerCase()) ||
+        g.category.toLowerCase().includes(gameFilterQuery.toLowerCase());
+      const matchesCategory = gameCategoryFilter === 'all' || g.category === gameCategoryFilter;
+      return matchesSearch && matchesCategory;
+    });
+  }, [games, gameFilterQuery, gameCategoryFilter]);
+
   if (!showOnboardingModal) {
     return null;
   }
@@ -162,17 +173,6 @@ export const OnboardingTourModal: React.FC = () => {
     setNewGameCoverUrl('');
     setShowAddGameForm(false);
   };
-
-  // Filtered games catalog for Step 4
-  const filteredGames = useMemo(() => {
-    return games.filter((g) => {
-      const matchesSearch =
-        g.name.toLowerCase().includes(gameFilterQuery.toLowerCase()) ||
-        g.category.toLowerCase().includes(gameFilterQuery.toLowerCase());
-      const matchesCategory = gameCategoryFilter === 'all' || g.category === gameCategoryFilter;
-      return matchesSearch && matchesCategory;
-    });
-  }, [games, gameFilterQuery, gameCategoryFilter]);
 
   // Step Navigation
   const handleNext = () => {

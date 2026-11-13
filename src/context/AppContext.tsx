@@ -322,11 +322,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setPlayers((prevPlayers) => {
           const existing = prevPlayers.find((p) => p.id === userId);
           if (existing) {
-            setCurrentUserId(userId);
-            setIsAuthenticated(true);
-            if (!existing.onboardingCompleted) {
-              setShowOnboardingModal(true);
-            }
+            dbUpsertProfile(existing).catch(console.warn);
+            setTimeout(() => {
+              setCurrentUserId(userId);
+              setIsAuthenticated(true);
+              if (!existing.onboardingCompleted) {
+                setShowOnboardingModal(true);
+              }
+            }, 0);
             return prevPlayers;
           }
 
@@ -363,9 +366,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
 
           dbUpsertProfile(newProfile).catch(console.warn);
-          setCurrentUserId(userId);
-          setIsAuthenticated(true);
-          setShowOnboardingModal(true);
+          setTimeout(() => {
+            setCurrentUserId(userId);
+            setIsAuthenticated(true);
+            setShowOnboardingModal(true);
+          }, 0);
           syncChannel?.postMessage({
             type: 'SYNC_PLAYERS',
             payload: [...prevPlayers, newProfile],
