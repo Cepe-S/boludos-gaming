@@ -1,7 +1,7 @@
 {
-  "name": "Boludos Gaming — Organizador de Vicio & Ruleta",
+  "name": "Boludos Gaming — El organizador del gaming",
   "short_name": "Boludos Gaming",
-  "description": "Organizador de sesiones de vicio gamer con cálculo de sincronía algorítmica, ruleta ponderada de juegos, Tribunal del Humo y alertas en vivo a Discord y Web Push.",
+  "description": "El organizador del gaming",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
