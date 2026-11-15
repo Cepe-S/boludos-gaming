@@ -6,13 +6,19 @@ import {
   DiscordEventType,
   DiscordIntegrationConfig,
   DiscordNotificationLog,
+  ExternalGamePlatform,
   Game,
   GameRating,
+  GamingGroup,
   GamingSession,
+  GroupDiscordConfig,
   PlayerProfile,
+  PlayerSteamProfile,
+  PlayerTasteProfile,
   PrecisionMinutes,
   PushNotificationAlert,
   SanctionRecord,
+  UnifiedSelectorGame,
   UserGamePreference,
   WeeklySchedule,
 } from './domain';
@@ -26,16 +32,18 @@ export interface AppContextValue {
   setShowOnboardingModal: (open: boolean) => void;
   showWeeklyScheduleModal: boolean;
   setShowWeeklyScheduleModal: (open: boolean) => void;
-  switchActivePlayer: (userId: string) => void;
-  loginAsProfile: (userId: string) => void;
   createAndLoginProfile: (params: {
     displayName: string;
-    discordUsername: string;
+    discordUsername?: string;
     discordId?: string;
     avatarUrl?: string;
   }) => PlayerProfile;
   logout: () => void;
   loginWithDiscord: () => Promise<void>;
+  updateUserProfile: (
+    patch: Partial<Pick<PlayerProfile, 'displayName' | 'discordUsername' | 'avatarUrl' | 'birthDate' | 'bio'>>,
+    userId?: string
+  ) => void;
   completeOnboarding: () => void;
   isSupabaseConnected: boolean;
 
@@ -55,8 +63,76 @@ export interface AppContextValue {
   // Games & Preferences (1-5 stars)
   games: Game[];
   preferences: UserGamePreference[];
-  updateGamePreference: (gameId: string, plays: boolean, rating: GameRating) => void;
+  updateGamePreference: (
+    gameId: string,
+    plays: boolean,
+    rating: GameRating,
+    hoursPlayed?: number,
+    recentHoursPlayed?: number
+  ) => void;
   addGame: (game: Omit<Game, 'id' | 'addedBy'>) => Game;
+
+  // Steam Library Import & 32D Taste Profile Engine
+  importSteamProfile: (
+    steamUrlOrId: string,
+    customApiKey?: string,
+    userId?: string
+  ) => Promise<{ ok: boolean; message: string; profile?: PlayerSteamProfile }>;
+  updateSteamGameFeedback: (
+    appId: number,
+    patch: {
+      userRating?: GameRating;
+      burnedOut?: boolean;
+      selectedForCatalog?: boolean;
+      manualHoursOverride?: number;
+      manualRecentHoursOverride?: number;
+    },
+    userId?: string
+  ) => void;
+  updatePlayerTasteProfile: (patch: Partial<PlayerTasteProfile>, userId?: string) => void;
+  syncSteamGamesToCatalog: (appIds: number[], userId?: string) => void;
+  setUnifiedGameFeedback: (
+    game: UnifiedSelectorGame,
+    patch: {
+      plays?: boolean;
+      rating?: GameRating;
+      burnedOut?: boolean;
+      platform?: ExternalGamePlatform;
+      hoursPlayed?: number;
+      recentHoursPlayed?: number;
+    },
+    userId?: string
+  ) => void;
+  syncUnifiedGameToCatalog: (game: UnifiedSelectorGame, userId?: string) => Game | null;
+
+  // Gaming Groups & Unified Invites
+  groups: GamingGroup[];
+  userGroups: GamingGroup[];
+  activeGroupId: string | null;
+  activeGroup: GamingGroup | null;
+  pendingInviteCode: string | null;
+  pendingInviteGroup: GamingGroup | null;
+  setActiveGroupId: (groupId: string | null) => void;
+  createGroup: (params: {
+    name: string;
+    description?: string;
+    avatarUrl?: string;
+    memberIds?: string[];
+    discordConfig?: Partial<GroupDiscordConfig>;
+  }) => GamingGroup;
+  updateGroup: (
+    groupId: string,
+    patch: Partial<Omit<GamingGroup, 'id' | 'createdAt'>>
+  ) => void;
+  deleteGroup: (groupId: string) => void;
+  joinGroupByInviteCode: (
+    inviteCode: string,
+    userId?: string
+  ) => { ok: boolean; group?: GamingGroup; error?: string };
+  addMemberToGroup: (groupId: string, userId: string) => void;
+  removeMemberFromGroup: (groupId: string, userId: string) => void;
+  testGroupDiscordWebhook: (groupId: string) => Promise<{ ok: boolean; error?: string }>;
+  getGroupInviteLink: (inviteCode: string) => string;
 
   // Sessions & Schedule Precision (±5, ±15, ±30, ±60 min)
   sessions: GamingSession[];
@@ -72,6 +148,7 @@ export interface AppContextValue {
     availableUntil: string;
     precisionMinutes: PrecisionMinutes;
     invitedUserIds?: string[];
+    groupId?: string;
   }) => GamingSession;
   joinOrUpdateSessionSchedule: (
     sessionId: string,

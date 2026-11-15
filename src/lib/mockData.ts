@@ -3,6 +3,7 @@ import {
   DiscordIntegrationConfig,
   DiscordNotificationLog,
   Game,
+  GamingGroup,
   GamingSession,
   PlayerProfile,
   SanctionRecord,
@@ -516,9 +517,38 @@ export const INITIAL_PREFERENCES: UserGamePreference[] = [
   { userId: 'user-gonza', gameId: 'game-phasmophobia', plays: true, rating: 3 },
 ];
 
+export const INITIAL_GROUPS: GamingGroup[] = [
+  {
+    id: 'group-boludos-og',
+    name: 'Boludos Gaming OG',
+    description: 'Grupo principal del club — sesiones, ruleta y Tribunal del Humo.',
+    inviteCode: 'BG-CLUB1',
+    createdBy: 'user-santi',
+    memberIds: [
+      'user-santi',
+      'user-tincho',
+      'user-lucho',
+      'user-nacho',
+      'user-fede',
+      'user-gonza',
+    ],
+    adminIds: ['user-santi', 'user-tincho'],
+    discordConfig: {
+      enabled: true,
+      webhookUrl: '',
+      channelName: '#gaming-general',
+      guildName: 'Los Pibes Gaming Club',
+      mentionRoleId: '@BoludosGaming',
+      useEveryoneMention: false,
+    },
+    createdAt: new Date(Date.now() - 30 * 24 * 3600000).toISOString(),
+  },
+];
+
 export const INITIAL_SESSIONS: GamingSession[] = [
   {
     id: 'session-tonight-01',
+    groupId: 'group-boludos-og',
     title: 'Noche de Vicio Boludil - Ruleta & Sublobbies',
     date: formatDate(today),
     mode: 'random',
@@ -594,6 +624,7 @@ export const INITIAL_SESSIONS: GamingSession[] = [
   },
   {
     id: 'session-tomorrow-02',
+    groupId: 'group-boludos-og',
     title: 'CS2 Competitivo Tryhard (Sin Manquear)',
     date: formatDate(tomorrow),
     mode: 'fixed',
@@ -658,6 +689,7 @@ export const INITIAL_SANCTIONS: SanctionRecord[] = [
     id: 'sanction-01',
     userId: 'user-fede',
     sessionId: 'session-old-01',
+    groupId: 'group-boludos-og',
     sessionTitle: 'Noche de CS2 y Birra',
     date: formatDate(yesterday),
     type: 'late',
@@ -671,6 +703,7 @@ export const INITIAL_SANCTIONS: SanctionRecord[] = [
     id: 'sanction-02',
     userId: 'user-gonza',
     sessionId: 'session-old-02',
+    groupId: 'group-boludos-og',
     sessionTitle: 'Torneo AoE2 3v3',
     date: formatDate(yesterday),
     type: 'no_show',
@@ -683,6 +716,7 @@ export const INITIAL_SANCTIONS: SanctionRecord[] = [
     id: 'sanction-03',
     userId: 'user-santi',
     sessionId: 'session-old-03',
+    groupId: 'group-boludos-og',
     sessionTitle: 'Lethal Company Viernes',
     date: formatDate(twoDaysAgo),
     type: 'on_time_bonus',
@@ -696,6 +730,7 @@ export const INITIAL_SANCTIONS: SanctionRecord[] = [
     id: 'sanction-04',
     userId: 'user-nacho',
     sessionId: 'session-old-04',
+    groupId: 'group-boludos-og',
     sessionTitle: 'Helldivers 2 Operación Democracia',
     date: formatDate(twoDaysAgo),
     type: 'late',
@@ -709,6 +744,7 @@ export const INITIAL_SANCTIONS: SanctionRecord[] = [
     id: 'sanction-05',
     userId: 'user-gonza',
     sessionId: 'session-old-05',
+    groupId: 'group-boludos-og',
     sessionTitle: 'Ranked Valorant Night',
     date: formatDate(twoDaysAgo),
     type: 'no_show',

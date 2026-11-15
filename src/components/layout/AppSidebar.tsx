@@ -1,0 +1,435 @@
+import React, { useMemo } from 'react';
+import { useApp } from '@/context/AppContext';
+import { getPlayerArchetypeBadge } from '@/lib/playerCategorizationEngine';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Bot,
+  Calendar,
+  Check,
+  ChevronDown,
+  Flame,
+  Gamepad2,
+  LogOut,
+  Plus,
+  Scale,
+  Sparkles,
+  Trophy,
+  Users,
+} from 'lucide-react';
+
+export type AppTab = 'sessions' | 'groups' | 'games' | 'tribunal' | 'discord';
+
+export interface AppSidebarContentProps {
+  activeTab: AppTab;
+  setActiveTab: (tab: AppTab) => void;
+  onOpenDiscordModal: () => void;
+  onItemNavigate?: () => void;
+}
+
+function getGroupInitials(name: string): string {
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+  if (words.length === 0) return 'BG';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+}
+
+function getKarmaBadgeVariant(score: number): 'success' | 'warning' | 'destructive' {
+  if (score >= 80) return 'success';
+  if (score >= 50) return 'warning';
+  return 'destructive';
+}
+
+export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
+  activeTab,
+  setActiveTab,
+  onOpenDiscordModal,
+  onItemNavigate,
+}) => {
+  const {
+    currentUser,
+    games,
+    preferences,
+    sessions,
+    sanctions,
+    userGroups,
+    activeGroup,
+    setActiveGroupId,
+    setShowWeeklyScheduleModal,
+    setShowOnboardingModal,
+    logout,
+    discordConfig,
+  } = useApp();
+
+  const currentArchetype = useMemo(
+    () => getPlayerArchetypeBadge(currentUser, preferences, games),
+    [currentUser, preferences, games]
+  );
+
+  const needsTasteSetup =
+    !currentUser.steamProfile &&
+    !(currentUser.tasteProfile?.topMultiplayerGames?.length);
+
+  const openSessionsCount = useMemo(() => {
+    const scoped = activeGroup
+      ? sessions.filter((s) => s.groupId === activeGroup.id)
+      : sessions;
+    return scoped.filter((s) => s.status !== 'finished').length;
+  }, [sessions, activeGroup]);
+
+  const scopedSanctionsCount = useMemo(() => {
+    if (!activeGroup) return sanctions.length;
+    const scopedIds = new Set(
+      sessions.filter((s) => s.groupId === activeGroup.id).map((s) => s.id)
+    );
+    return sanctions.filter(
+      (s) => s.groupId === activeGroup.id || scopedIds.has(s.sessionId)
+    ).length;
+  }, [sanctions, sessions, activeGroup]);
+
+  const navigate = (tab: AppTab) => {
+    setActiveTab(tab);
+    onItemNavigate?.();
+  };
+
+  const navItems: Array<{
+    id: AppTab;
+    label: string;
+    icon: React.ReactNode;
+    badge?: string | number;
+    badgeVariant?: 'default' | 'secondary' | 'warning' | 'destructive' | 'success';
+  }> = [
+    {
+      id: 'sessions',
+      label: 'Sesiones & Ruleta',
+      icon: <Gamepad2 className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
+      badge: openSessionsCount,
+      badgeVariant: openSessionsCount > 0 ? 'default' : 'secondary',
+    },
+    {
+      id: 'games',
+      label: 'Catálogo & ADN',
+      icon: <Trophy className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
+      badge: needsTasteSetup ? 'Setup' : games.length,
+      badgeVariant: needsTasteSetup ? 'warning' : 'secondary',
+    },
+    {
+      id: 'tribunal',
+      label: 'Tribunal del Humo',
+      icon: <Scale className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
+      badge: scopedSanctionsCount > 0 ? scopedSanctionsCount : undefined,
+      badgeVariant: 'destructive',
+    },
+    {
+      id: 'groups',
+      label: 'Grupos & Discord',
+      icon: <Users className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
+      badge: userGroups.length,
+      badgeVariant: 'secondary',
+    },
+  ];
+
+  return (
+    <div className="flex flex-col h-full bg-card/50 text-card-foreground select-none">
+      {/* Brand Header */}
+      <div className="h-14 px-3.5 border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => navigate('sessions')}
+          className="flex items-center gap-2.5 text-left group cursor-pointer focus:outline-none"
+        >
+          <div className="relative flex items-center justify-center w-8 h-8 rounded-md bg-primary/15 border border-primary/40 text-primary shrink-0">
+            <Flame className="w-4 h-4 text-primary group-hover:text-warning transition-colors" strokeWidth={2} />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-success ring-2 ring-card" />
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-xs font-black tracking-wider text-foreground">
+              BOLUDOS
+            </span>
+            <span className="text-xs font-semibold text-primary">GAMING</span>
+            <span className="text-[9px] font-bold uppercase px-1 py-0.2 rounded bg-secondary/55 border border-border text-muted-foreground">
+              ARG
+            </span>
+          </div>
+        </button>
+      </div>
+
+      {/* Active Server / Group Selector */}
+      <div className="p-3 border-b border-border shrink-0">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Cambiar grupo activo"
+              title="Cambiar grupo activo"
+              className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-secondary/55 hover:bg-accent border border-border transition-colors text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {activeGroup?.avatarUrl ? (
+                  <img
+                    src={activeGroup.avatarUrl}
+                    alt={activeGroup.name}
+                    className="w-6 h-6 rounded-md object-cover border border-border shrink-0"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-md bg-primary/20 border border-primary/40 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
+                    {activeGroup ? getGroupInitials(activeGroup.name) : <Users className="w-3.5 h-3.5" />}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground truncate">
+                    {activeGroup?.name || 'Sin grupo'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {activeGroup
+                      ? `${activeGroup.memberIds.length} · ${activeGroup.inviteCode}`
+                      : 'Seleccionar'}
+                  </p>
+                </div>
+              </div>
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" strokeWidth={1.75} />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuLabel>Grupos ({userGroups.length})</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {userGroups.length === 0 ? (
+              <div className="px-2 py-2 text-xs text-muted-foreground">
+                Sin grupos
+              </div>
+            ) : (
+              userGroups.map((group) => {
+                const isSelected = group.id === activeGroup?.id;
+                return (
+                  <DropdownMenuItem
+                    key={group.id}
+                    onClick={() => {
+                      setActiveGroupId(group.id);
+                      onItemNavigate?.();
+                    }}
+                    className="justify-between"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-5 h-5 rounded bg-primary/20 border border-primary/30 text-[9px] font-bold text-primary flex items-center justify-center shrink-0">
+                        {getGroupInitials(group.name)}
+                      </span>
+                      <span className="truncate font-medium">{group.name}</span>
+                    </div>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-success shrink-0" />}
+                  </DropdownMenuItem>
+                );
+              })
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate('groups')} className="text-primary font-semibold">
+              <Plus className="w-4 h-4" strokeWidth={1.75} />
+              <span>Gestionar grupos</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Main Navigation */}
+      <div className="flex-1 overflow-y-auto scroller-thin p-3 space-y-4">
+        <div className="space-y-1">
+          {navItems.map((item) => {
+            const isActive =
+              activeTab === item.id || (item.id === 'groups' && activeTab === 'discord');
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => navigate(item.id)}
+                className={cn(
+                  'w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-colors cursor-pointer border',
+                  isActive
+                    ? 'bg-primary/15 text-foreground border-primary/40 font-semibold'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/70'
+                )}
+              >
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <span className={cn(isActive ? 'text-primary' : 'text-muted-foreground')}>
+                    {item.icon}
+                  </span>
+                  <span className="truncate">{item.label}</span>
+                </span>
+                {item.badge !== undefined && (
+                  <Badge variant={item.badgeVariant} className="px-1.5 py-0 text-[10px]">
+                    {item.badge}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Quick Tools */}
+        <div className="space-y-1 pt-3 border-t border-border">
+          <button
+            type="button"
+            onClick={() => {
+              setShowWeeklyScheduleModal(true);
+              onItemNavigate?.();
+            }}
+            className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
+          >
+            <Calendar className="w-4 h-4 text-primary shrink-0" strokeWidth={1.75} />
+            <span className="truncate">Mi Horario</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenDiscordModal();
+              onItemNavigate?.();
+            }}
+            className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <Bot className="w-4 h-4 text-primary shrink-0" strokeWidth={1.75} />
+              <span className="truncate">Discord Bot</span>
+            </span>
+            <span
+              className={cn(
+                'w-2 h-2 rounded-full shrink-0',
+                discordConfig.enabled ? 'bg-success' : 'bg-muted-foreground/50'
+              )}
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowOnboardingModal(true);
+              onItemNavigate?.();
+            }}
+            className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-warning shrink-0" strokeWidth={1.75} />
+            <span className="truncate">Tour</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom User Profile Dock */}
+      <div className="p-2.5 border-t border-border bg-background shrink-0">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="w-full flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/80 border border-transparent hover:border-border transition-colors text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+              title="Cuenta y ajustes"
+              aria-label="Menú de usuario"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="relative shrink-0">
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.displayName}
+                    className="w-8 h-8 rounded-md object-cover border border-border"
+                  />
+                  <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success ring-2 ring-background" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-foreground truncate">
+                      {currentUser.displayName}
+                    </span>
+                    <Badge
+                      variant={getKarmaBadgeVariant(currentUser.karmaScore)}
+                      className="px-1 py-0 text-[9px] font-mono"
+                    >
+                      {currentUser.karmaScore}%
+                    </Badge>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground block truncate">
+                    {currentArchetype.hasData
+                      ? `${currentArchetype.emoji} ${currentArchetype.name}`
+                      : currentUser.activeTitle}
+                  </span>
+                </div>
+              </div>
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" strokeWidth={1.75} />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent side="top" align="start" className="w-64 p-2 space-y-2">
+            <div className="p-2 rounded-md bg-secondary/55 border border-border space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground truncate">
+                    {currentUser.displayName}
+                  </p>
+                  {currentUser.discordUsername && (
+                    <p className="text-[11px] font-mono text-muted-foreground truncate">
+                      @{currentUser.discordUsername}
+                    </p>
+                  )}
+                </div>
+                <Badge variant={getKarmaBadgeVariant(currentUser.karmaScore)}>
+                  {currentUser.karmaScore}%
+                </Badge>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 text-center text-[10px] pt-1.5 border-t border-border">
+                <div className="bg-background/45 p-1 rounded border border-border">
+                  <span className="text-muted-foreground block">Partidas</span>
+                  <strong className="text-foreground">{currentUser.sessionsPlayed}</strong>
+                </div>
+                <div className="bg-background/45 p-1 rounded border border-border">
+                  <span className="text-success block">Puntual</span>
+                  <strong className="text-foreground">{currentUser.onTimeCount}</strong>
+                </div>
+                <div className="bg-background/45 p-1 rounded border border-border">
+                  <span className="text-warning block">Racha</span>
+                  <strong className="text-foreground">{currentUser.currentStreak} 🔥</strong>
+                </div>
+              </div>
+            </div>
+
+            <DropdownMenuItem
+              onClick={() => {
+                setShowWeeklyScheduleModal(true);
+                onItemNavigate?.();
+              }}
+            >
+              <Calendar className="w-4 h-4 text-primary" strokeWidth={1.75} />
+              <span>Mi Horario</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              onClick={() => {
+                setShowOnboardingModal(true);
+                onItemNavigate?.();
+              }}
+            >
+              <Sparkles className="w-4 h-4 text-warning" strokeWidth={1.75} />
+              <span>Tour</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem
+              onClick={() => logout()}
+              className="text-destructive focus:text-destructive focus:bg-destructive/10"
+            >
+              <LogOut className="w-4 h-4" strokeWidth={1.75} />
+              <span>Cerrar sesión</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+};

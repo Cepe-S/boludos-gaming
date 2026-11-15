@@ -6,9 +6,12 @@ import {
   DiscordIntegrationConfig,
   Game,
   GameRating,
+  GamingGroup,
   GamingSession,
   ParticipantConfirmationStatus,
   PlayerProfile,
+  PlayerSteamProfile,
+  PlayerTasteProfile,
   PrecisionMinutes,
   SanctionRecord,
   SessionCalloutRecord,
@@ -22,10 +25,34 @@ export interface SupabaseHydratedState {
   players: PlayerProfile[];
   games: Game[];
   preferences: UserGamePreference[];
+  groups: GamingGroup[];
   sessions: GamingSession[];
   sanctions: SanctionRecord[];
   chatMessages: ChatMessage[];
   discordConfig: DiscordIntegrationConfig | null;
+}
+
+export function mapGroupRow(row: Record<string, unknown>): GamingGroup {
+  return {
+    id: String(row.id),
+    name: String(row.name || 'Grupo Gaming'),
+    description: String(row.description || ''),
+    avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined,
+    inviteCode: String(row.invite_code || ''),
+    createdBy: String(row.created_by || ''),
+    memberIds: Array.isArray(row.member_ids) ? row.member_ids.map(String) : [],
+    adminIds: Array.isArray(row.admin_ids) ? row.admin_ids.map(String) : [],
+    discordConfig: {
+      enabled: row.discord_enabled !== undefined ? Boolean(row.discord_enabled) : true,
+      webhookUrl: String(row.discord_webhook_url || ''),
+      channelName: String(row.discord_channel_name || 'general-gaming'),
+      guildName: String(row.discord_guild_name || ''),
+      mentionRoleId: String(row.discord_mention_role_id || ''),
+      useEveryoneMention: Boolean(row.discord_use_everyone),
+    },
+    createdAt: String(row.created_at || new Date().toISOString()),
+    updatedAt: row.updated_at ? String(row.updated_at) : undefined,
+  };
 }
 
 function mapProfileRow(row: Record<string, unknown>): PlayerProfile {
@@ -38,6 +65,8 @@ function mapProfileRow(row: Record<string, unknown>): PlayerProfile {
       row.avatar_url ||
         'https://api.dicebear.com/9.x/adventurer/svg?seed=Gamer&backgroundColor=4f46e5'
     ),
+    birthDate: row.birth_date ? String(row.birth_date) : undefined,
+    bio: row.bio ? String(row.bio) : undefined,
     karmaScore: Number(row.karma_score ?? 80),
     sessionsPlayed: Number(row.sessions_played ?? 0),
     hoursPlayed: Number(row.hours_played ?? 0),
@@ -52,6 +81,8 @@ function mapProfileRow(row: Record<string, unknown>): PlayerProfile {
     weeklySchedule: (row.weekly_schedule as WeeklySchedule) || undefined,
     dailyOverrides: (row.daily_overrides as Record<string, DailyScheduleOverride>) || {},
     categoryPreferences: (row.category_preferences as Record<string, CategoryPreferenceLevel>) || {},
+    steamProfile: (row.steam_profile as PlayerSteamProfile) || undefined,
+    tasteProfile: (row.taste_profile as PlayerTasteProfile) || undefined,
   };
 }
 
@@ -132,6 +163,7 @@ function mapSanctionRow(row: Record<string, unknown>): SanctionRecord {
     id: String(row.id),
     userId: String(row.user_id),
     sessionId: String(row.session_id),
+    groupId: row.group_id ? String(row.group_id) : undefined,
     sessionTitle: String(row.session_title),
     date: String(row.created_at || new Date().toISOString()).split('T')[0],
     type: row.type as SanctionRecord['type'],
@@ -147,6 +179,7 @@ function mapChatRow(row: Record<string, unknown>): ChatMessage {
   return {
     id: String(row.id),
     userId: String(row.user_id),
+    groupId: row.group_id ? String(row.group_id) : undefined,
     content: String(row.content),
     mentions: Array.isArray(row.mentions) ? row.mentions.map(String) : [],
     replyToId: row.reply_to_id ? String(row.reply_to_id) : undefined,
@@ -164,6 +197,7 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
     profilesRes,
     gamesRes,
     prefsRes,
+    groupsRes,
     sessionsRes,
     participantsRes,
     votesRes,
@@ -174,6 +208,7 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
     supabase.from('profiles').select('*').order('karma_score', { ascending: false }),
     supabase.from('games').select('*').order('name', { ascending: true }),
     supabase.from('user_game_preferences').select('*'),
+    supabase.from('groups').select('*').order('created_at', { ascending: false }),
     supabase.from('sessions').select('*').order('created_at', { ascending: false }),
     supabase.from('session_participants').select('*'),
     supabase.from('attendance_votes').select('*'),
@@ -189,6 +224,10 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
       sessions: sessionsRes.error,
     });
     return null;
+  }
+
+  if (groupsRes.error) {
+    console.warn('Supabase groups fetch warning:', groupsRes.error);
   }
 
   const participantsBySession = new Map<string, SessionParticipant[]>();
@@ -207,8 +246,13 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
     votesBySession.set(sid, list);
   }
 
+  const groups: GamingGroup[] = groupsRes.error
+    ? []
+    : (groupsRes.data || []).map(mapGroupRow);
+
   const sessions: GamingSession[] = (sessionsRes.data || []).map((row) => ({
     id: String(row.id),
+    groupId: String(row.group_id || 'group-boludos-og'),
     title: String(row.title),
     date: String(row.scheduled_date),
     mode: row.mode as GamingSession['mode'],
@@ -251,6 +295,9 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
         checkin_update: true,
         session_callout: true,
       },
+      steamApiKey: dc.steam_api_key ? String(dc.steam_api_key) : undefined,
+      igdbClientId: dc.igdb_client_id ? String(dc.igdb_client_id) : undefined,
+      igdbClientSecret: dc.igdb_client_secret ? String(dc.igdb_client_secret) : undefined,
     };
   }
 
@@ -258,11 +305,48 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
     players: (profilesRes.data || []).map(mapProfileRow),
     games: (gamesRes.data || []).map(mapGameRow),
     preferences: (prefsRes.data || []).map(mapPreferenceRow),
+    groups,
     sessions,
     sanctions: (sanctionsRes.data || []).map(mapSanctionRow),
     chatMessages: (chatRes.data || []).map(mapChatRow),
     discordConfig,
   };
+}
+
+export async function dbUpsertGroup(group: GamingGroup): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from('groups').upsert(
+    {
+      id: group.id,
+      name: group.name,
+      description: group.description || '',
+      avatar_url: group.avatarUrl || null,
+      invite_code: group.inviteCode,
+      created_by: group.createdBy || null,
+      member_ids: group.memberIds,
+      admin_ids: group.adminIds,
+      discord_webhook_url: group.discordConfig.webhookUrl || '',
+      discord_channel_name: group.discordConfig.channelName || 'general-gaming',
+      discord_guild_name: group.discordConfig.guildName || '',
+      discord_mention_role_id: group.discordConfig.mentionRoleId || '',
+      discord_use_everyone: Boolean(group.discordConfig.useEveryoneMention),
+      discord_enabled: Boolean(group.discordConfig.enabled),
+      created_at: group.createdAt,
+      updated_at: group.updatedAt || new Date().toISOString(),
+    },
+    { onConflict: 'id' }
+  );
+  if (error) {
+    console.warn('Supabase dbUpsertGroup warning:', error);
+  }
+}
+
+export async function dbDeleteGroup(groupId: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from('groups').delete().eq('id', groupId);
+  if (error) {
+    console.warn('Supabase dbDeleteGroup warning:', error);
+  }
 }
 
 export async function dbUpsertPreference(pref: UserGamePreference) {
@@ -288,6 +372,8 @@ export async function dbUpsertProfile(player: PlayerProfile): Promise<void> {
       discord_username: player.discordUsername,
       display_name: player.displayName,
       avatar_url: player.avatarUrl,
+      birth_date: player.birthDate || null,
+      bio: player.bio || null,
       karma_score: player.karmaScore,
       sessions_played: player.sessionsPlayed,
       hours_played: player.hoursPlayed,
@@ -300,6 +386,8 @@ export async function dbUpsertProfile(player: PlayerProfile): Promise<void> {
       weekly_schedule: player.weeklySchedule || null,
       daily_overrides: player.dailyOverrides || {},
       category_preferences: player.categoryPreferences || {},
+      steam_profile: player.steamProfile || null,
+      taste_profile: player.tasteProfile || null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' }
@@ -324,8 +412,9 @@ export async function dbInsertGame(game: Game) {
 
 export async function dbCreateSession(session: GamingSession) {
   if (!supabase) return;
-  await supabase.from('sessions').insert({
+  const { error } = await supabase.from('sessions').insert({
     id: session.id,
+    group_id: session.groupId,
     title: session.title,
     scheduled_date: session.date,
     mode: session.mode,
@@ -333,13 +422,17 @@ export async function dbCreateSession(session: GamingSession) {
     roulette_winner_game_id: session.rouletteWinnerGameId || null,
     status: session.status,
     allow_split_lobbies: session.allowSplitLobbies,
-    created_by: session.createdBy,
+    created_by: session.createdBy || null,
     invited_user_ids:
       session.invitedUserIds && session.invitedUserIds.length > 0
         ? session.invitedUserIds
         : null,
     callouts: session.callouts || [],
   });
+
+  if (error) {
+    console.warn('Supabase dbCreateSession warning:', error);
+  }
 
   for (const p of session.participants) {
     await dbUpsertParticipant(session.id, p);
@@ -420,6 +513,7 @@ export async function dbInsertSanction(sanction: SanctionRecord) {
     id: sanction.id,
     user_id: sanction.userId,
     session_id: sanction.sessionId,
+    group_id: sanction.groupId || null,
     session_title: sanction.sessionTitle,
     type: sanction.type,
     promised_time: sanction.promisedTime,
@@ -449,6 +543,7 @@ export async function dbInsertChatMessage(msg: ChatMessage) {
   await supabase.from('chat_messages').insert({
     id: msg.id,
     user_id: msg.userId,
+    group_id: msg.groupId || null,
     content: msg.content,
     mentions: msg.mentions,
     reply_to_id: msg.replyToId || null,
@@ -474,6 +569,45 @@ export async function dbUpdateDiscordConfig(config: DiscordIntegrationConfig) {
     mention_role_id: config.mentionRoleId,
     use_everyone_mention: config.useEveryoneMention,
     events: config.events,
+    steam_api_key: config.steamApiKey || null,
+    igdb_client_id: config.igdbClientId || null,
+    igdb_client_secret: config.igdbClientSecret || null,
     updated_at: new Date().toISOString(),
   });
+}
+
+const REALTIME_TABLES = [
+  'profiles',
+  'games',
+  'user_game_preferences',
+  'groups',
+  'sessions',
+  'session_participants',
+  'attendance_votes',
+  'sanctions',
+  'chat_messages',
+  'discord_config',
+] as const;
+
+export function subscribeToSupabaseRealtime(onChange: () => void): () => void {
+  if (!supabase) return () => {};
+
+  const client = supabase;
+  let channel = client.channel('boludos-gaming-realtime');
+
+  for (const table of REALTIME_TABLES) {
+    channel = channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      () => {
+        onChange();
+      }
+    );
+  }
+
+  channel.subscribe();
+
+  return () => {
+    client.removeChannel(channel);
+  };
 }

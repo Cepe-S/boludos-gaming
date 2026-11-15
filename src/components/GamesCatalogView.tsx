@@ -1,193 +1,58 @@
-import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import {
-  Game,
-  GameRating,
-  UserGamePreference,
-  PlayerProfile,
-  GAME_CATEGORIES,
   CategoryPreferenceLevel,
-} from '../types/domain';
+  ExternalGamePlatform,
+  GAME_CATEGORIES,
+  GameRating,
+  PodiumGameEntry,
+  TasteDimensionKey,
+  UnifiedSelectorGame,
+  UserGamePreference,
+} from '@/types/domain';
 import {
-  AlertTriangle,
-  Award,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Filter,
-  Flame,
-  Gamepad2,
-  Heart,
-  Plus,
-  RotateCcw,
-  Search,
-  SlidersHorizontal,
-  Sparkles,
-  Star,
-  Tag,
-  Users,
-  X,
-  Zap,
-} from 'lucide-react';
+  KnowledgeGameEntry,
+  buildPlayerTasteProfile,
+  buildUnifiedGameSelectorList,
+  normalizeGameName,
+} from '@/lib/tasteProfileEngine';
+import { computePlayerPvj6dProfile } from '@/lib/playerCategorizationEngine';
+import {
+  SearchedSteamGame,
+  fetchExternalDiscoveryGames,
+  searchSteamStoreGames,
+} from '@/lib/steamService';
+import {
+  ActivePodiumPickerState,
+  CatalogPlayerFilter,
+  CatalogSortBy,
+  FALLBACK_GAME_COVER,
+  GameGroupMetrics,
+  RATING_INFO,
+  SelectorFilterTab,
+  getSafeCoverUrl,
+  isValidSteamProfileInput,
+} from '@/components/catalog/sharedCatalogConstants';
+import { GamerProfileSplitView } from '@/components/catalog/GamerProfileSplitView';
+import { ClubMatrixTableView } from '@/components/catalog/ClubMatrixTableView';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { CheckCircle2, Library, UserCheck, X } from 'lucide-react';
 
-interface GameGroupMetrics {
-  game: Game;
-  playsCount: number;
-  totalPlayers: number;
-  averageRating: number;
-  synchronyScore: number;
-  dislikeCount: number;
-  playerRatings: {
-    player: PlayerProfile;
-    plays: boolean;
-    rating: GameRating;
-  }[];
+export interface GamesCatalogViewProps {
+  /** Compact layout mode when embedded inside the interactive onboarding tour */
+  embeddedInTour?: boolean;
+  /** Controlled Step 2 visibility (Categories & ADN Gamer): parent can hide Step 2 until finalized */
+  profileRevealed?: boolean;
+  /** Callback when Step 2 visibility toggles */
+  onProfileRevealedChange?: (revealed: boolean) => void;
 }
 
-const PRESET_GAMES = [
-  {
-    name: 'Left 4 Dead 2',
-    description: 'Campaña cooperativa clásica de supervivencia contra hordas masivas de infectados y tanques.',
-    category: 'Co-op Acción',
-    minPlayers: 1,
-    maxPlayers: 4,
-    tags: 'zombies, coop, campaña, supervivencia',
-    averageDurationMins: 45,
-    coverUrl:
-      'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Minecraft',
-    description: 'Mundo abierto infinito para craftear bases, explorar cuevas o armar servidores comunitarios.',
-    category: 'Survival Sandbox',
-    minPlayers: 1,
-    maxPlayers: 20,
-    tags: 'survival, sandbox, construccion, mods, chill',
-    averageDurationMins: 90,
-    coverUrl:
-      'https://images.unsplash.com/photo-1627856013091-fed6e4e30025?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Chained Together',
-    description: 'Cooperativo de plataformas encadenados donde una mala caída arrastra a todo el grupo al fondo.',
-    category: 'Party Casual',
-    minPlayers: 1,
-    maxPlayers: 4,
-    tags: 'coop, caidas, risas, infierno, parkour',
-    averageDurationMins: 60,
-    coverUrl:
-      'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'PUBG: BATTLEGROUNDS',
-    description: 'Battle Royale táctico de escuadrones con loot, vehículos y tiroteos tensos hasta el último círculo.',
-    category: 'Shooter Táctico',
-    minPlayers: 1,
-    maxPlayers: 4,
-    tags: 'battleroyale, shooter, squads, tactico',
-    averageDurationMins: 35,
-    coverUrl:
-      'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Rust',
-    description: 'Supervivencia hardcore en servidores hostiles: construí bases, organizá incursiones y cuidá tus recursos.',
-    category: 'Survival Sandbox',
-    minPlayers: 1,
-    maxPlayers: 16,
-    tags: 'survival, pvp, raids, bases, toxico',
-    averageDurationMins: 120,
-    coverUrl:
-      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'EA Sports FC 25',
-    description: 'Fútbol rápido, clubes pro con amigos y torneos cortos con rivalidad garantizada.',
-    category: 'Deportes / Autos',
-    minPlayers: 1,
-    maxPlayers: 22,
-    tags: 'futbol, clubes pro, amigos, fulbito',
-    averageDurationMins: 25,
-    coverUrl:
-      'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Lethal Company',
-    description: 'Terror y extracción cooperativa con chat de proximidad en lunas industriales abandonadas.',
-    category: 'Co-op Horror',
-    minPlayers: 1,
-    maxPlayers: 4,
-    tags: 'terror, risas, scrap, monstruos, voz de proximidad',
-    averageDurationMins: 45,
-    coverUrl:
-      'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Age of Empires II: DE',
-    description: 'Estrategia en tiempo real competitiva o en equipo: castillos, asedios y batallas de imperios.',
-    category: 'RTS',
-    minPlayers: 1,
-    maxPlayers: 8,
-    tags: 'rts, medieval, estrategia, aldeanos, wololo',
-    averageDurationMins: 60,
-    coverUrl:
-      'https://images.unsplash.com/photo-1579373903781-fd5c0c30c4cd?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Valorant',
-    description: 'Shooter táctico 5v5 por rondas con armas precisas, roles de agentes y utilidades coordinadas.',
-    category: 'Shooter Táctico',
-    minPlayers: 1,
-    maxPlayers: 5,
-    tags: 'tactical fps, 5v5, competitivo, vandal, poderes',
-    averageDurationMins: 40,
-    coverUrl:
-      'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    name: 'Helldivers 2',
-    description: 'Cooperativo frenético de disparos en tercera persona combatiendo termínidos y autómatas por la galaxia.',
-    category: 'Co-op Acción',
-    minPlayers: 1,
-    maxPlayers: 4,
-    tags: 'coop, disparos, democracia, bichos, mechs',
-    averageDurationMins: 40,
-    coverUrl:
-      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=600&q=80',
-  },
-];
-
-const RATING_INFO: Record<GameRating, { label: string; sub: string; color: string }> = {
-  1: {
-    label: '1★ Solo si me obligan',
-    sub: 'Penaliza -15 pts la ruleta',
-    color: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
-  },
-  2: {
-    label: '2★ Zafa de vez en cuando',
-    sub: 'Tolerable si no hay otro',
-    color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
-  },
-  3: {
-    label: '3★ Me copa',
-    sub: 'Buena opción para la noche',
-    color: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-  },
-  4: {
-    label: '4★ Juegazo',
-    sub: 'Ganas de viciar en serio',
-    color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30',
-  },
-  5: {
-    label: '5★ Vicio enfermizo',
-    sub: 'Prioridad máxima en ruleta',
-    color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
-  },
-};
-
-export function GamesCatalogView() {
+export function GamesCatalogView({
+  embeddedInTour = false,
+  profileRevealed,
+  onProfileRevealedChange,
+}: GamesCatalogViewProps) {
   const {
     games,
     preferences,
@@ -195,47 +60,471 @@ export function GamesCatalogView() {
     addGame,
     currentUser,
     players,
+    discordConfig,
     updateCategoryPreferences,
+    importSteamProfile,
+    updatePlayerTasteProfile,
+    setUnifiedGameFeedback,
   } = useApp();
 
-  // Search & Filters
+  const needsTasteSetup =
+    !currentUser.steamProfile &&
+    !(currentUser.tasteProfile?.topMultiplayerGames?.length);
+
+  const [activeTab, setActiveTab] = useState<'profiler' | 'catalog'>(() =>
+    embeddedInTour || needsTasteSetup ? 'profiler' : 'catalog'
+  );
+
+  // Two-phase profiling flow state preserved for OnboardingTourModal compatibility
+  const [internalProfileRevealed, setInternalProfileRevealed] =
+    useState<boolean>(false);
+  const topContainerRef = useRef<HTMLDivElement | null>(null);
+  const isProfileRevealed =
+    profileRevealed !== undefined ? profileRevealed : internalProfileRevealed;
+
+  const setProfileRevealed = useCallback(
+    (revealed: boolean) => {
+      if (profileRevealed === undefined) {
+        setInternalProfileRevealed(revealed);
+      }
+      onProfileRevealedChange?.(revealed);
+      if (revealed) {
+        window.setTimeout(() => {
+          topContainerRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }, 40);
+      }
+    },
+    [profileRevealed, onProfileRevealedChange]
+  );
+
+  // Shared Toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+  }, []);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => setToastMessage(null), 3800);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
+
+  // Steam & API Keys State
+  const [steamUrlInput, setSteamUrlInput] = useState<string>(
+    currentUser.steamProfile?.profileUrl || ''
+  );
+  const [isSyncingSteam, setIsSyncingSteam] = useState<boolean>(false);
+  const [syncResult, setSyncResult] = useState<{
+    ok: boolean;
+    message: string;
+    autoTriggered?: boolean;
+  } | null>(null);
+  const lastAutoSyncedInputRef = useRef<string>(
+    (currentUser.steamProfile?.profileUrl || '').trim()
+  );
+
+  // Unified selector & podium state
+  const [discoveryGames, setDiscoveryGames] = useState<KnowledgeGameEntry[]>(
+    []
+  );
+  const [isLoadingDiscovery, setIsLoadingDiscovery] = useState<boolean>(false);
+  const [selectorTab, setSelectorTab] = useState<SelectorFilterTab>('all');
+  const [selectorQuery, setSelectorQuery] = useState<string>('');
+  const [liveSearchResults, setLiveSearchResults] = useState<
+    SearchedSteamGame[]
+  >([]);
+  const [isSearchingLive, setIsSearchingLive] = useState<boolean>(false);
+  const [visibleLimit, setVisibleLimit] = useState<number>(
+    embeddedInTour ? 18 : 36
+  );
+
+  const [activePodiumPicker, setActivePodiumPicker] =
+    useState<ActivePodiumPickerState | null>(null);
+  const [podiumSearchQuery, setPodiumSearchQuery] = useState<string>('');
+  const [podiumLiveResults, setPodiumLiveResults] = useState<
+    SearchedSteamGame[]
+  >([]);
+  const [isSearchingPodiumLive, setIsSearchingPodiumLive] =
+    useState<boolean>(false);
+
+  // Club Matrix Filter & Sort State
   const [searchQuery, setSearchQuery] = useState('');
-  const [playerFilter, setPlayerFilter] = useState<
-    'all' | 'up_to_4' | '5_players' | '6_plus' | 'only_mine'
-  >('all');
+  const [playerFilter, setPlayerFilter] =
+    useState<CatalogPlayerFilter>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'synchrony' | 'name' | 'max_players' | 'my_rating'>(
-    'synchrony'
+  const [sortBy, setSortBy] = useState<CatalogSortBy>(() =>
+    currentUser.steamProfile ? 'likelihood' : 'synchrony'
   );
 
-  // Category Preferences collapsible section
-  const [isCategoriesPanelOpen, setIsCategoriesPanelOpen] = useState(true);
+  // Sync user-local state on user change
+  useEffect(() => {
+    const existingUrl = currentUser.steamProfile?.profileUrl || '';
+    setSteamUrlInput(existingUrl);
+    lastAutoSyncedInputRef.current = existingUrl.trim();
+    setSyncResult(null);
+    setActivePodiumPicker(null);
+    setInternalProfileRevealed(false);
+  }, [currentUser.id, currentUser.steamProfile?.profileUrl]);
 
-  // Hover star state for interactive selector feedback
-  const [hoveredStar, setHoveredStar] = useState<{ gameId: string; star: GameRating } | null>(
-    null
+  useEffect(() => {
+    setVisibleLimit(embeddedInTour ? 18 : 36);
+  }, [selectorTab, selectorQuery, embeddedInTour]);
+
+  // Fetch IGDB / SteamSpy live discovery games
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingDiscovery(true);
+    fetchExternalDiscoveryGames({
+      igdbClientId: discordConfig.igdbClientId,
+      igdbClientSecret: discordConfig.igdbClientSecret,
+    })
+      .then((items) => {
+        if (!cancelled) setDiscoveryGames(items);
+      })
+      .catch(() => {
+        if (!cancelled) setDiscoveryGames([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDiscovery(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [discordConfig.igdbClientId, discordConfig.igdbClientSecret]);
+
+  // Core Steam sync helper
+  const executeSteamSync = useCallback(
+    async (rawUrlOrId: string, autoTriggered: boolean) => {
+      const clean = rawUrlOrId.trim();
+      if (!clean) return;
+
+      lastAutoSyncedInputRef.current = clean;
+      setIsSyncingSteam(true);
+      setSyncResult(null);
+
+      try {
+        const res = await importSteamProfile(
+          clean,
+          discordConfig.steamApiKey || undefined
+        );
+        setSyncResult({
+          ok: res.ok,
+          message: res.message,
+          autoTriggered,
+        });
+        if (res.ok) {
+          showToast(
+            autoTriggered
+              ? '⚡ Link detectado: Steam cargado y juegos organizados automáticamente.'
+              : '✅ ¡Biblioteca de Steam sincronizada y selector actualizado!'
+          );
+        }
+      } finally {
+        setIsSyncingSteam(false);
+      }
+    },
+    [importSteamProfile, discordConfig.steamApiKey, showToast]
   );
 
-  // Add Game Modal State
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addName, setAddName] = useState('');
-  const [addDescription, setAddDescription] = useState('');
-  const [addCoverUrl, setAddCoverUrl] = useState('');
-  const [addMinPlayers, setAddMinPlayers] = useState(1);
-  const [addMaxPlayers, setAddMaxPlayers] = useState(4);
-  const [addCategory, setAddCategory] = useState('Shooter Táctico');
-  const [addTags, setAddTags] = useState('coop, accion, risas');
-  const [addDuration, setAddDuration] = useState(45);
+  // Auto-load valid Steam link pasted/typed
+  useEffect(() => {
+    const clean = steamUrlInput.trim();
+    if (!clean || isSyncingSteam) return;
+    if (!isValidSteamProfileInput(clean)) return;
+    if (clean === lastAutoSyncedInputRef.current) return;
+    if (clean === (currentUser.steamProfile?.profileUrl || '').trim()) return;
 
-  // Quick feedback alert
-  const [notification, setNotification] = useState<string | null>(null);
+    const timer = window.setTimeout(() => {
+      executeSteamSync(clean, true);
+    }, 400);
 
-  const showNotification = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 4000);
-  };
+    return () => window.clearTimeout(timer);
+  }, [
+    steamUrlInput,
+    isSyncingSteam,
+    currentUser.steamProfile?.profileUrl,
+    executeSteamSync,
+  ]);
 
-  // Preference map: `${userId}_${gameId}` -> UserGamePreference
+  // Auto-live IGDB / Steam Store search for Unified Selector
+  useEffect(() => {
+    const q = selectorQuery.trim();
+    if (q.length < 2) {
+      setLiveSearchResults([]);
+      setIsSearchingLive(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingLive(true);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const items = await searchSteamStoreGames(q, {
+          igdbClientId: discordConfig.igdbClientId,
+          igdbClientSecret: discordConfig.igdbClientSecret,
+        });
+        if (!cancelled) setLiveSearchResults(items);
+      } catch {
+        if (!cancelled) setLiveSearchResults([]);
+      } finally {
+        if (!cancelled) setIsSearchingLive(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selectorQuery, discordConfig.igdbClientId, discordConfig.igdbClientSecret]);
+
+  // Auto-live search for Podium Picker
+  useEffect(() => {
+    const q = podiumSearchQuery.trim();
+    if (!activePodiumPicker || q.length < 2) {
+      setPodiumLiveResults([]);
+      setIsSearchingPodiumLive(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingPodiumLive(true);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const items = await searchSteamStoreGames(q, {
+          igdbClientId: discordConfig.igdbClientId,
+          igdbClientSecret: discordConfig.igdbClientSecret,
+        });
+        if (!cancelled) setPodiumLiveResults(items);
+      } catch {
+        if (!cancelled) setPodiumLiveResults([]);
+      } finally {
+        if (!cancelled) setIsSearchingPodiumLive(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activePodiumPicker,
+    podiumSearchQuery,
+    discordConfig.igdbClientId,
+    discordConfig.igdbClientSecret,
+  ]);
+
+  // Unified Data & Ranking
+  const unifiedGames = useMemo<UnifiedSelectorGame[]>(() => {
+    return buildUnifiedGameSelectorList({
+      player: currentUser,
+      allPreferences: preferences,
+      catalogGames: games,
+      discoveryGames,
+      liveSearchResults,
+    });
+  }, [currentUser, preferences, games, discoveryGames, liveSearchResults]);
+
+  const unifiedPodiumPool = useMemo<UnifiedSelectorGame[]>(() => {
+    if (!activePodiumPicker) return [];
+    const combinedLive = [...liveSearchResults, ...podiumLiveResults];
+    return buildUnifiedGameSelectorList({
+      player: currentUser,
+      allPreferences: preferences,
+      catalogGames: games,
+      discoveryGames,
+      liveSearchResults: combinedLive,
+    });
+  }, [
+    activePodiumPicker,
+    currentUser,
+    preferences,
+    games,
+    discoveryGames,
+    liveSearchResults,
+    podiumLiveResults,
+  ]);
+
+  const ownedSteamCount = currentUser.steamProfile?.ownedGames?.length || 0;
+
+  const pvjProfile = useMemo(
+    () => computePlayerPvj6dProfile(currentUser, preferences, games),
+    [currentUser, preferences, games]
+  );
+
+  const tabCounts = useMemo<Record<SelectorFilterTab, number>>(() => {
+    let active = 0;
+    let discover = 0;
+    let mp = 0;
+    let sp = 0;
+    let steam = 0;
+
+    for (const g of unifiedGames) {
+      if (g.isPlayedOrRatedByUser || (g.ownedOnSteam && g.playtimeHours >= 2))
+        active++;
+      if (!g.ownedOnSteam) discover++;
+      if (g.isMultiplayer && g.maxPlayers >= 3) mp++;
+      else if (!g.isMultiplayer || g.maxPlayers <= 2) sp++;
+      if (g.ownedOnSteam) steam++;
+    }
+
+    return {
+      all: unifiedGames.length,
+      active,
+      discover,
+      mp,
+      sp,
+      steam,
+    };
+  }, [unifiedGames]);
+
+  const filteredUnifiedGames = useMemo<UnifiedSelectorGame[]>(() => {
+    const q = selectorQuery.trim().toLowerCase();
+
+    return unifiedGames.filter((g) => {
+      if (selectorTab === 'active') {
+        const isActive =
+          g.isPlayedOrRatedByUser || (g.ownedOnSteam && g.playtimeHours >= 2);
+        if (!isActive) return false;
+      } else if (selectorTab === 'discover') {
+        if (g.ownedOnSteam) return false;
+      } else if (selectorTab === 'mp') {
+        if (!(g.isMultiplayer && g.maxPlayers >= 3)) return false;
+      } else if (selectorTab === 'sp') {
+        if (g.isMultiplayer && g.maxPlayers > 2) return false;
+      } else if (selectorTab === 'steam') {
+        if (!g.ownedOnSteam) return false;
+      }
+
+      if (q) {
+        const matchesText =
+          g.name.toLowerCase().includes(q) ||
+          g.category.toLowerCase().includes(q) ||
+          g.platform.toLowerCase().includes(q) ||
+          g.genres.some((gen) => gen.toLowerCase().includes(q)) ||
+          g.tags.some((t) => t.toLowerCase().includes(q));
+        if (!matchesText) return false;
+      }
+
+      return true;
+    });
+  }, [unifiedGames, selectorTab, selectorQuery]);
+
+  const displayedUnifiedGames = useMemo(
+    () => filteredUnifiedGames.slice(0, visibleLimit),
+    [filteredUnifiedGames, visibleLimit]
+  );
+
+  const selectedGamesCount = useMemo(
+    () => unifiedGames.filter((g) => g.isPlayedOrRatedByUser).length,
+    [unifiedGames]
+  );
+
+  // Podiums
+  const topMultiplayerGames = useMemo<PodiumGameEntry[]>(() => {
+    return [...(currentUser.tasteProfile?.topMultiplayerGames || [])].sort(
+      (a, b) => a.rank - b.rank
+    );
+  }, [currentUser.tasteProfile?.topMultiplayerGames]);
+
+  const topSingleplayerGames = useMemo<PodiumGameEntry[]>(() => {
+    return [...(currentUser.tasteProfile?.topSingleplayerGames || [])].sort(
+      (a, b) => a.rank - b.rank
+    );
+  }, [currentUser.tasteProfile?.topSingleplayerGames]);
+
+  const findPodiumRank = useCallback(
+    (gameName: string): { type: 'mp' | 'sp'; rank: 1 | 2 | 3 } | null => {
+      const norm = normalizeGameName(gameName);
+      const mpMatch = topMultiplayerGames.find(
+        (m) => normalizeGameName(m.name) === norm
+      );
+      if (mpMatch) return { type: 'mp', rank: mpMatch.rank };
+      const spMatch = topSingleplayerGames.find(
+        (s) => normalizeGameName(s.name) === norm
+      );
+      if (spMatch) return { type: 'sp', rank: spMatch.rank };
+      return null;
+    },
+    [topMultiplayerGames, topSingleplayerGames]
+  );
+
+  const podiumPickerCandidates = useMemo<UnifiedSelectorGame[]>(() => {
+    if (!activePodiumPicker) return [];
+    const isMp = activePodiumPicker.type === 'mp';
+    const q = podiumSearchQuery.trim().toLowerCase();
+
+    return unifiedPodiumPool
+      .filter((g) => {
+        if (isMp && !(g.isMultiplayer && g.maxPlayers >= 3)) return false;
+        if (!isMp && g.isMultiplayer && g.maxPlayers > 4 && !q) return false;
+        if (q) {
+          const matches =
+            g.name.toLowerCase().includes(q) ||
+            g.category.toLowerCase().includes(q) ||
+            g.platform.toLowerCase().includes(q) ||
+            g.tags.some((t) => t.toLowerCase().includes(q));
+          if (!matches) return false;
+        }
+        return true;
+      })
+      .slice(0, 24);
+  }, [activePodiumPicker, podiumSearchQuery, unifiedPodiumPool]);
+
+  const computedProfileSnapshot = useMemo(
+    () => buildPlayerTasteProfile(currentUser, preferences, games),
+    [currentUser, preferences, games]
+  );
+
+  const topDimensions = useMemo(() => {
+    if (
+      computedProfileSnapshot.topDimensions &&
+      computedProfileSnapshot.topDimensions.length > 0
+    ) {
+      return computedProfileSnapshot.topDimensions;
+    }
+    return currentUser.tasteProfile?.topDimensions || [];
+  }, [
+    computedProfileSnapshot.topDimensions,
+    currentUser.tasteProfile?.topDimensions,
+  ]);
+
+  const activeFeatureVector = useMemo<
+    Partial<Record<TasteDimensionKey, number>>
+  >(() => {
+    return (
+      computedProfileSnapshot.featureVector ||
+      currentUser.tasteProfile?.featureVector ||
+      {}
+    );
+  }, [
+    computedProfileSnapshot.featureVector,
+    currentUser.tasteProfile?.featureVector,
+  ]);
+
+  const hasTasteSignal = useMemo(() => {
+    return (
+      ownedSteamCount > 0 ||
+      topMultiplayerGames.length > 0 ||
+      topSingleplayerGames.length > 0 ||
+      (currentUser.tasteProfile?.externalGames?.length || 0) > 0 ||
+      preferences.some((p) => p.userId === currentUser.id && p.plays)
+    );
+  }, [
+    ownedSteamCount,
+    topMultiplayerGames.length,
+    topSingleplayerGames.length,
+    currentUser.tasteProfile?.externalGames?.length,
+    preferences,
+    currentUser.id,
+  ]);
+
+  // Club Matrix Computations
   const prefMap = useMemo(() => {
     const map = new Map<string, UserGamePreference>();
     for (const p of preferences) {
@@ -244,7 +533,6 @@ export function GamesCatalogView() {
     return map;
   }, [preferences]);
 
-  // Compute group metrics for every game
   const gamesWithMetrics = useMemo<GameGroupMetrics[]>(() => {
     return games.map((game) => {
       let playsCount = 0;
@@ -293,7 +581,6 @@ export function GamesCatalogView() {
     });
   }, [games, players, prefMap]);
 
-  // Unique categories for filter pills
   const categories = useMemo(() => {
     const set = new Set<string>();
     games.forEach((g) => {
@@ -302,12 +589,29 @@ export function GamesCatalogView() {
     return Array.from(set);
   }, [games]);
 
-  // Filtered & Sorted Games
-  const filteredGames = useMemo(() => {
+  const unifiedLikelihoodMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { score: number; badge: string; affinity: number }
+    >();
+    for (const item of unifiedGames) {
+      const entry = {
+        score: item.likelihoodScore,
+        badge: item.likelihoodBadge,
+        affinity: item.tasteAffinityPct,
+      };
+      if (item.catalogGameId) {
+        map.set(item.catalogGameId, entry);
+      }
+      map.set(normalizeGameName(item.name), entry);
+    }
+    return map;
+  }, [unifiedGames]);
+
+  const filteredCatalogGames = useMemo(() => {
     return gamesWithMetrics
       .filter((item) => {
         const g = item.game;
-        // Search query
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
           const matchName = g.name.toLowerCase().includes(q);
@@ -316,21 +620,13 @@ export function GamesCatalogView() {
           if (!matchName && !matchCat && !matchTags) return false;
         }
 
-        // Category filter
-        if (selectedCategory !== 'all' && g.category !== selectedCategory) {
+        if (selectedCategory !== 'all' && g.category !== selectedCategory)
           return false;
-        }
 
-        // Player count filter
-        if (playerFilter === 'up_to_4') {
-          return g.maxPlayers <= 4;
-        }
-        if (playerFilter === '5_players') {
+        if (playerFilter === 'up_to_4') return g.maxPlayers <= 4;
+        if (playerFilter === '5_players')
           return g.minPlayers <= 5 && g.maxPlayers >= 5;
-        }
-        if (playerFilter === '6_plus') {
-          return g.maxPlayers >= 6;
-        }
+        if (playerFilter === '6_plus') return g.maxPlayers >= 6;
         if (playerFilter === 'only_mine') {
           const userPref = prefMap.get(`${currentUser.id}_${g.id}`);
           return userPref?.plays === true;
@@ -339,15 +635,22 @@ export function GamesCatalogView() {
         return true;
       })
       .sort((a, b) => {
-        if (sortBy === 'synchrony') {
+        if (sortBy === 'likelihood') {
+          const scoreA =
+            unifiedLikelihoodMap.get(a.game.id)?.score ??
+            unifiedLikelihoodMap.get(normalizeGameName(a.game.name))?.score ??
+            0;
+          const scoreB =
+            unifiedLikelihoodMap.get(b.game.id)?.score ??
+            unifiedLikelihoodMap.get(normalizeGameName(b.game.name))?.score ??
+            0;
+          if (scoreB !== scoreA) return scoreB - scoreA;
           return b.synchronyScore - a.synchronyScore;
         }
-        if (sortBy === 'name') {
-          return a.game.name.localeCompare(b.game.name);
-        }
-        if (sortBy === 'max_players') {
+        if (sortBy === 'synchrony') return b.synchronyScore - a.synchronyScore;
+        if (sortBy === 'name') return a.game.name.localeCompare(b.game.name);
+        if (sortBy === 'max_players')
           return b.game.maxPlayers - a.game.maxPlayers;
-        }
         if (sortBy === 'my_rating') {
           const prefA = prefMap.get(`${currentUser.id}_${a.game.id}`);
           const prefB = prefMap.get(`${currentUser.id}_${b.game.id}`);
@@ -357,56 +660,300 @@ export function GamesCatalogView() {
         }
         return 0;
       });
-  }, [gamesWithMetrics, searchQuery, selectedCategory, playerFilter, sortBy, prefMap, currentUser.id]);
+  }, [
+    gamesWithMetrics,
+    searchQuery,
+    selectedCategory,
+    playerFilter,
+    sortBy,
+    prefMap,
+    currentUser.id,
+    unifiedLikelihoodMap,
+  ]);
 
-  // Quick stats
   const totalMyGames = useMemo(() => {
-    return games.filter((g) => {
-      const p = prefMap.get(`${currentUser.id}_${g.id}`);
-      return p?.plays === true;
-    }).length;
+    return games.filter(
+      (g) => prefMap.get(`${currentUser.id}_${g.id}`)?.plays === true
+    ).length;
   }, [games, prefMap, currentUser.id]);
 
-  // Handle Preset Selection in Add Modal
-  const handleSelectPreset = (preset: typeof PRESET_GAMES[0]) => {
-    setAddName(preset.name);
-    setAddDescription(preset.description || '');
-    setAddCategory(preset.category);
-    setAddMinPlayers(preset.minPlayers);
-    setAddMaxPlayers(preset.maxPlayers);
-    setAddTags(preset.tags);
-    setAddDuration(preset.averageDurationMins);
-    setAddCoverUrl(preset.coverUrl);
+  // Handlers
+  const handleManualSubmitSteam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!steamUrlInput.trim()) {
+      setSyncResult({
+        ok: false,
+        message: 'Ingresá tu link de Steam o SteamID64 antes de sincronizar.',
+      });
+      return;
+    }
+    await executeSteamSync(steamUrlInput.trim(), false);
   };
 
-  // Submit Add Game
-  const handleAddGameSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!addName.trim()) return;
+  const mapUnifiedToPodiumEntry = (
+    g: UnifiedSelectorGame
+  ): Omit<PodiumGameEntry, 'rank'> => ({
+    gameId: g.catalogGameId || g.externalGameId || g.key,
+    steamAppId: g.steamAppId,
+    name: g.name,
+    coverUrl: getSafeCoverUrl(g.coverUrl),
+    category: g.category,
+    tags: g.tags,
+    minPlayers: g.minPlayers,
+    maxPlayers: g.maxPlayers,
+    isMultiplayer: g.isMultiplayer,
+    source: g.ownedOnSteam ? 'steam' : g.catalogGameId ? 'catalog' : 'external',
+    ...(g.playtimeHours > 0 ? { hoursPlayed: g.playtimeHours } : {}),
+    ...(g.playtimeRecentHours > 0
+      ? { recentHoursPlayed: g.playtimeRecentHours }
+      : {}),
+  });
 
-    addGame({
-      name: addName.trim(),
-      description: addDescription.trim() || undefined,
-      coverUrl:
-        addCoverUrl.trim() ||
-        'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=600&q=80',
-      minPlayers: Number(addMinPlayers) || 1,
-      maxPlayers: Number(addMaxPlayers) || 4,
-      category: addCategory.trim() || 'Shooter Táctico',
-      tags: addTags
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean),
-      averageDurationMins: Number(addDuration) || 45,
+  const assignPodiumEntry = useCallback(
+    (
+      type: 'mp' | 'sp',
+      rank: 1 | 2 | 3,
+      entry: Omit<PodiumGameEntry, 'rank'>
+    ) => {
+      const currentList =
+        type === 'mp' ? topMultiplayerGames : topSingleplayerGames;
+      const normNew = normalizeGameName(entry.name);
+
+      const filtered = currentList.filter(
+        (item) =>
+          item.rank !== rank && normalizeGameName(item.name) !== normNew
+      );
+
+      const updated: PodiumGameEntry[] = [
+        ...filtered,
+        {
+          ...entry,
+          rank,
+        },
+      ].sort((a, b) => a.rank - b.rank);
+
+      if (type === 'mp') {
+        updatePlayerTasteProfile({ topMultiplayerGames: updated });
+      } else {
+        updatePlayerTasteProfile({ topSingleplayerGames: updated });
+      }
+
+      const matchedUnified = unifiedGames.find(
+        (g) =>
+          (entry.steamAppId !== undefined && g.steamAppId === entry.steamAppId) ||
+          normalizeGameName(g.name) === normNew
+      );
+      const targetUnified: UnifiedSelectorGame = matchedUnified || {
+        key: `podium-${normNew}`,
+        name: entry.name,
+        coverUrl: entry.coverUrl,
+        category: entry.category,
+        tags: entry.tags,
+        genres: [],
+        minPlayers: entry.minPlayers,
+        maxPlayers: entry.maxPlayers,
+        isMultiplayer: entry.isMultiplayer,
+        platform: entry.source === 'steam' ? 'Steam' : 'Otro Launcher',
+        source: entry.source === 'steam' ? 'steam_owned' : 'external_rated',
+        steamAppId: entry.steamAppId,
+        ownedOnSteam: entry.source === 'steam',
+        playtimeHours: entry.hoursPlayed ?? 0,
+        playtimeRecentHours: entry.recentHoursPlayed ?? 0,
+        isPlayedOrRatedByUser: true,
+        effectiveRating: 5,
+        hasExplicitUserRating: true,
+        burnedOut: false,
+        inClubCatalog: entry.source === 'catalog',
+        needsHoursInput: false,
+        tasteAffinityPct: 100,
+        likelihoodScore: 0,
+        likelihoodBadge: 'Top 3',
+      };
+
+      setUnifiedGameFeedback(targetUnified, {
+        plays: true,
+        rating: 5,
+        ...(entry.hoursPlayed !== undefined && entry.hoursPlayed > 0
+          ? { hoursPlayed: entry.hoursPlayed }
+          : {}),
+      });
+
+      setActivePodiumPicker(null);
+      showToast(
+        `🏆 "${entry.name}" asignado al #${rank} ${
+          type === 'mp' ? 'Multiplayer' : 'Singleplayer'
+        }!`
+      );
+    },
+    [
+      topMultiplayerGames,
+      topSingleplayerGames,
+      unifiedGames,
+      updatePlayerTasteProfile,
+      setUnifiedGameFeedback,
+      showToast,
+    ]
+  );
+
+  const handleAutoFillPodiumFromSteam = (type: 'mp' | 'sp') => {
+    const isMp = type === 'mp';
+    const existingList = isMp ? topMultiplayerGames : topSingleplayerGames;
+    const occupiedRanks = new Set(existingList.map((e) => e.rank));
+    const existingNames = new Set(
+      [...topMultiplayerGames, ...topSingleplayerGames].map((e) =>
+        normalizeGameName(e.name)
+      )
+    );
+
+    const eligibleSteamGames = unifiedGames.filter((g) => {
+      if (!g.ownedOnSteam || g.burnedOut || g.playtimeHours < 1) return false;
+      if (existingNames.has(normalizeGameName(g.name))) return false;
+      if (isMp) return g.isMultiplayer && g.maxPlayers >= 3;
+      return !g.isMultiplayer || g.maxPlayers <= 2;
     });
 
-    setIsAddModalOpen(false);
-    setAddDescription('');
-    showNotification(`🎮 ¡"${addName.trim()}" fue agregado al catálogo grupal!`);
+    const targetRanks: Array<1 | 2 | 3> = ([1, 2, 3] as const).filter(
+      (r) => !occupiedRanks.has(r)
+    );
+
+    if (targetRanks.length === 0 || eligibleSteamGames.length === 0) {
+      showToast(
+        eligibleSteamGames.length === 0
+          ? 'No encontramos juegos disponibles en tu Steam para sugerir.'
+          : 'Este podio ya tiene los 3 puestos completos.'
+      );
+      return;
+    }
+
+    const addedEntries: PodiumGameEntry[] = [...existingList];
+    targetRanks.forEach((rank, idx) => {
+      const candidate = eligibleSteamGames[idx];
+      if (!candidate) return;
+      addedEntries.push({
+        ...mapUnifiedToPodiumEntry(candidate),
+        rank,
+      });
+    });
+
+    const sorted = addedEntries.sort((a, b) => a.rank - b.rank);
+    if (isMp) {
+      updatePlayerTasteProfile({ topMultiplayerGames: sorted });
+    } else {
+      updatePlayerTasteProfile({ topSingleplayerGames: sorted });
+    }
+    showToast(
+      `✨ Podio ${
+        isMp ? 'Multiplayer' : 'Singleplayer'
+      } completado con tus juegos top de Steam!`
+    );
   };
 
-  // Category Preference helper
-  const handleSetCategoryPreference = (categoryId: string, level: CategoryPreferenceLevel) => {
+  const removePodiumRank = (type: 'mp' | 'sp', rank: 1 | 2 | 3) => {
+    const currentList =
+      type === 'mp' ? topMultiplayerGames : topSingleplayerGames;
+    const updated = currentList.filter((item) => item.rank !== rank);
+    if (type === 'mp') {
+      updatePlayerTasteProfile({ topMultiplayerGames: updated });
+    } else {
+      updatePlayerTasteProfile({ topSingleplayerGames: updated });
+    }
+    showToast(`🗑️ Puesto #${rank} liberado.`);
+  };
+
+  const handleSetPodiumEntryHours = (
+    type: 'mp' | 'sp',
+    rank: 1 | 2 | 3,
+    hours: number
+  ) => {
+    const cleanHours = Math.max(0, Math.round(hours));
+    const currentList =
+      type === 'mp' ? topMultiplayerGames : topSingleplayerGames;
+    const targetEntry = currentList.find((e) => e.rank === rank);
+    if (!targetEntry) return;
+
+    const updated = currentList.map((e) =>
+      e.rank === rank ? { ...e, hoursPlayed: cleanHours } : e
+    );
+
+    if (type === 'mp') {
+      updatePlayerTasteProfile({ topMultiplayerGames: updated });
+    } else {
+      updatePlayerTasteProfile({ topSingleplayerGames: updated });
+    }
+
+    const matchingUnified = unifiedGames.find(
+      (ug) =>
+        (targetEntry.steamAppId !== undefined &&
+          ug.steamAppId === targetEntry.steamAppId) ||
+        normalizeGameName(ug.name) === normalizeGameName(targetEntry.name)
+    );
+    if (matchingUnified) {
+      setUnifiedGameFeedback(matchingUnified, {
+        plays: true,
+        hoursPlayed: cleanHours,
+      });
+    }
+  };
+
+  const handleAddManualCustomGame = (params: {
+    name: string;
+    platform: ExternalGamePlatform;
+    category: string;
+    minPlayers: number;
+    maxPlayers: number;
+    tags: string;
+    rating: GameRating;
+    hoursPlayed: number;
+    recentHoursPlayed: number;
+  }) => {
+    const rawTags = params.tags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const syntheticGame: UnifiedSelectorGame = {
+      key: `custom-${normalizeGameName(params.name)}-${Date.now()}`,
+      name: params.name,
+      coverUrl: FALLBACK_GAME_COVER,
+      category: params.category,
+      tags: rawTags,
+      genres: [params.category],
+      minPlayers: params.minPlayers,
+      maxPlayers: params.maxPlayers,
+      isMultiplayer: params.maxPlayers >= 2,
+      platform: params.platform,
+      source: 'external_rated',
+      ownedOnSteam: false,
+      playtimeHours: params.hoursPlayed,
+      playtimeRecentHours: params.recentHoursPlayed,
+      isPlayedOrRatedByUser: true,
+      effectiveRating: params.rating,
+      hasExplicitUserRating: true,
+      burnedOut: false,
+      inClubCatalog: false,
+      tasteAffinityPct: 75,
+      likelihoodScore: 1000,
+      likelihoodBadge: `⭐ ${params.rating}★ (${params.platform})`,
+    };
+
+    setUnifiedGameFeedback(syntheticGame, {
+      plays: true,
+      rating: params.rating,
+      platform: params.platform,
+      hoursPlayed: params.hoursPlayed,
+      recentHoursPlayed: params.recentHoursPlayed,
+    });
+    setSelectorQuery(params.name);
+    setSelectorTab('all');
+    showToast(
+      `🎮 "${params.name}" (${params.platform}) guardado con ${params.rating}★!`
+    );
+  };
+
+  const handleSetCategoryPreference = (
+    categoryId: string,
+    level: CategoryPreferenceLevel
+  ) => {
     const updated = {
       ...(currentUser.categoryPreferences || {}),
       [categoryId]: level,
@@ -417,799 +964,205 @@ export function GamesCatalogView() {
       level === 'like'
         ? '💚 Me gusta'
         : level === 'dislike'
-        ? '💔 No me gusta'
-        : '😐 Me da igual';
-    showNotification(`Categoría ${cat?.emoji || ''} "${cat?.label || categoryId}": ${label}`);
+          ? '💔 No me gusta'
+          : '😐 Neutral';
+    showToast(
+      `Categoría ${cat?.emoji || ''} "${cat?.label || categoryId}": ${label}`
+    );
   };
 
-  // Update preference helper
-  const handleTogglePlay = (gameId: string, currentPlays: boolean, currentRating: GameRating) => {
+  const handleSetAllCategories = (level: CategoryPreferenceLevel) => {
+    const updated: Record<string, CategoryPreferenceLevel> = {};
+    GAME_CATEGORIES.forEach((cat) => {
+      updated[cat.id] = level;
+    });
+    updateCategoryPreferences(updated);
+    showToast(
+      level === 'like'
+        ? '💚 Marcaste todas las categorías como Me gusta.'
+        : '😐 Restableciste todas las categorías a Neutral.'
+    );
+  };
+
+  const handleTogglePlay = (
+    gameId: string,
+    currentPlays: boolean,
+    currentRating: GameRating
+  ) => {
     const nextPlays = !currentPlays;
     updateGamePreference(gameId, nextPlays, currentRating || 3);
     const game = games.find((g) => g.id === gameId);
-    showNotification(
+    showToast(
       nextPlays
         ? `✅ Agregaste "${game?.name}" a tus juegos que jugás.`
-        : `❌ Marcaste "${game?.name}" como 'No lo juego'. No entrará en tu ruleta.`
+        : `❌ Marcaste "${game?.name}" como 'No lo juego'.`
     );
   };
 
   const handleSetRating = (gameId: string, rating: GameRating) => {
     updateGamePreference(gameId, true, rating);
     const game = games.find((g) => g.id === gameId);
-    showNotification(`⭐ Calificaste "${game?.name}" con ${RATING_INFO[rating].label}`);
+    showToast(`⭐ Calificaste "${game?.name}" con ${RATING_INFO[rating].label}`);
   };
 
   return (
-    <div className="space-y-8 pb-16">
-      {/* Toast notification banner */}
-      {notification && (
-        <div className="flex items-center justify-between p-4 rounded-2xl bg-indigo-950/90 border border-indigo-500/40 text-indigo-200 text-xs shadow-xl animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span>{notification}</span>
-          </div>
-          <button
-            onClick={() => setNotification(null)}
-            className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* 1. HERO HEADER & QUICK STATS */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-[#16213c] to-[#0f172a] border border-indigo-500/30 p-6 sm:p-8 shadow-2xl">
-        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-72 h-72 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/4 -mb-24 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-xs font-bold uppercase tracking-wider">
-              <Gamepad2 className="w-3.5 h-3.5" />
-              <span>Gestor de Gustos y Compatibilidad</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Catálogo de Juegos y Matriz de Sincronía
-            </h1>
-            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
-              Calificá cada juego del <strong>1 al 5★</strong>. Si votás <strong>1★</strong> ('Solo si me obligan'),
-              la ruleta penaliza el juego fuertemente (-15 pts) para que nadie sufra la noche de vicio.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs tracking-wide shadow-xl shadow-indigo-600/30 transition transform hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Agregar Juego al Catálogo</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Quick Stats Strip */}
-        <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 mt-6 border-t border-slate-800/80">
-          <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800">
-            <span className="text-[11px] text-slate-400 block mb-0.5">Total en Catálogo</span>
-            <span className="text-lg font-black text-white font-mono">{games.length} juegos</span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900/60 border border-indigo-500/30">
-            <span className="text-[11px] text-indigo-300 block mb-0.5">Juegos que jugás vos</span>
-            <span className="text-lg font-black text-indigo-300 font-mono">
-              {totalMyGames} de {games.length}
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800">
-            <span className="text-[11px] text-slate-400 block mb-0.5">Jugadores en la Matriz</span>
-            <span className="text-lg font-black text-white font-mono">{players.length} amigos</span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/30">
-            <span className="text-[11px] text-emerald-300 block mb-0.5">Top Sincronía (&gt;80%)</span>
-            <span className="text-lg font-black text-emerald-300 font-mono">
-              {gamesWithMetrics.filter((m) => m.synchronyScore >= 80).length} juegos
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 1.5. MIS GUSTOS POR CATEGORÍA DE JUEGOS */}
-      <div className="bg-[#131c31] rounded-3xl border border-indigo-500/30 p-5 sm:p-6 shadow-xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
-              <Heart className="w-5 h-5 fill-rose-500/20" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <span>❤️ Mis Gustos por Categoría de Juegos</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono font-normal">
-                  {currentUser.displayName}
-                </span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Ajustá qué géneros te motivan más o cuáles preferís evitar para calibrar mejor las sugerencias del grupo.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setIsCategoriesPanelOpen(!isCategoriesPanelOpen)}
-            className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition cursor-pointer"
-          >
-            <span>{isCategoriesPanelOpen ? 'Ocultar panel' : 'Configurar categorías'}</span>
-            {isCategoriesPanelOpen ? (
-              <ChevronUp className="w-4 h-4 text-indigo-400" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-indigo-400" />
-            )}
-          </button>
-        </div>
-
-        {isCategoriesPanelOpen && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
-            {GAME_CATEGORIES.map((cat) => {
-              const currentPref: CategoryPreferenceLevel =
-                currentUser.categoryPreferences?.[cat.id] || 'neutral';
-
-              return (
-                <div
-                  key={cat.id}
-                  className={`p-3.5 rounded-2xl border transition-all duration-200 flex flex-col justify-between space-y-3 ${
-                    currentPref === 'like'
-                      ? 'bg-emerald-950/20 border-emerald-500/40 shadow-sm shadow-emerald-950/20'
-                      : currentPref === 'dislike'
-                      ? 'bg-rose-950/20 border-rose-500/40 shadow-sm shadow-rose-950/20'
-                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">{cat.emoji}</span>
-                        <span className="text-xs font-bold text-white leading-tight">
-                          {cat.label}
-                        </span>
-                      </div>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                          currentPref === 'like'
-                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                            : currentPref === 'dislike'
-                            ? 'bg-rose-500/20 border-rose-400 text-rose-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-400'
-                        }`}
-                      >
-                        {currentPref === 'like'
-                          ? '💚 Me gusta'
-                          : currentPref === 'dislike'
-                          ? '💔 No me gusta'
-                          : '😐 Neutral'}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
-                      {cat.description}
-                    </p>
-                  </div>
-
-                  {/* 3 Quick Pill Buttons */}
-                  <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-800/80">
-                    <button
-                      type="button"
-                      onClick={() => handleSetCategoryPreference(cat.id, 'like')}
-                      className={`px-2 py-1 rounded-xl text-[10px] font-bold transition cursor-pointer border flex items-center justify-center gap-1 ${
-                        currentPref === 'like'
-                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-600/30'
-                          : 'bg-slate-800/70 hover:bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
-                    >
-                      <span>💚</span>
-                      <span>Me gusta</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSetCategoryPreference(cat.id, 'neutral')}
-                      className={`px-2 py-1 rounded-xl text-[10px] font-bold transition cursor-pointer border flex items-center justify-center gap-1 ${
-                        currentPref === 'neutral'
-                          ? 'bg-slate-700 text-white border-slate-500 shadow-md'
-                          : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      <span>😐</span>
-                      <span>Igual</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSetCategoryPreference(cat.id, 'dislike')}
-                      className={`px-2 py-1 rounded-xl text-[10px] font-bold transition cursor-pointer border flex items-center justify-center gap-1 ${
-                        currentPref === 'dislike'
-                          ? 'bg-rose-600 text-white border-rose-400 shadow-md shadow-rose-600/30'
-                          : 'bg-slate-800/70 hover:bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
-                    >
-                      <span>💔</span>
-                      <span>No me va</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* 2. SEARCH, FILTER & SORT BAR */}
-      <div className="bg-[#131c31] rounded-3xl border border-indigo-500/20 p-5 shadow-xl space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Search Box */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Buscar por nombre, categoría o etiqueta (ej: zombies, rts, coop)..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#090d16] border border-slate-700/80 focus:border-indigo-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition shadow-inner"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Sort By Dropdown */}
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Ordenar por:</span>
-            </span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-[#090d16] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none cursor-pointer"
-            >
-              <option value="synchrony">Mayor Sincronía Grupal 🎯</option>
-              <option value="my_rating">Mayor Calificación Propia ⭐</option>
-              <option value="name">Nombre (A-Z) 🔤</option>
-              <option value="max_players">Máximo de Jugadores 👥</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Filter Chips: Player Limits & Ownership */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">
-            Cupo:
+    <div ref={topContainerRef} className="space-y-4">
+      {/* Shared Toast Banner */}
+      {toastMessage && (
+        <div className="px-3.5 py-2.5 rounded-md bg-success/10 border border-success/40 text-success text-xs flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-2 font-medium">
+            <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+            {toastMessage}
           </span>
-          {[
-            { id: 'all', label: 'Todos' },
-            { id: 'up_to_4', label: 'Hasta 4 jug.' },
-            { id: '5_players', label: '5 jugadores' },
-            { id: '6_plus', label: '6+ jugadores' },
-            { id: 'only_mine', label: 'Solo los que juego ⭐' },
-          ].map((btn) => (
-            <button
-              key={btn.id}
-              onClick={() => setPlayerFilter(btn.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer border ${
-                playerFilter === btn.id
-                  ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-sm'
-                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              {btn.label}
-            </button>
-          ))}
-
-          {/* Category Chips */}
-          <div className="hidden sm:flex items-center gap-1.5 ml-auto">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">
-              Cat:
-            </span>
-            <button
-              onClick={() => setSelectedCategory('all')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${
-                selectedCategory === 'all'
-                  ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Todas
-            </button>
-            {categories.slice(0, 5).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${
-                  selectedCategory === cat
-                    ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 3. GAME CARDS GRID */}
-      {filteredGames.length === 0 ? (
-        <div className="p-12 text-center bg-[#131c31]/60 rounded-3xl border border-slate-800 space-y-3">
-          <Gamepad2 className="w-12 h-12 text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-white">No se encontraron juegos con esos filtros</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Probá limpiar la búsqueda o agregá un juego nuevo al catálogo con el botón superior.
-          </p>
           <button
-            onClick={() => {
-              setSearchQuery('');
-              setPlayerFilter('all');
-              setSelectedCategory('all');
-            }}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 transition cursor-pointer"
+            type="button"
+            onClick={() => setToastMessage(null)}
+            title="Cerrar"
+            aria-label="Cerrar"
+            className="p-0.5 rounded opacity-75 hover:opacity-100 cursor-pointer"
           >
-            Restablecer Filtros
+            <X className="w-3.5 h-3.5" strokeWidth={1.75} />
           </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredGames.map((item) => {
-            const { game, synchronyScore, averageRating, dislikeCount, playerRatings } = item;
-            const userPref = prefMap.get(`${currentUser.id}_${game.id}`);
-            const plays = userPref ? userPref.plays : false;
-            const rating = (userPref ? userPref.rating : 3) as GameRating;
-
-            const activeRatingHover =
-              hoveredStar?.gameId === game.id ? hoveredStar.star : rating;
-
-            return (
-              <div
-                key={game.id}
-                className="group relative flex flex-col bg-[#131c31] rounded-3xl border border-indigo-500/20 hover:border-indigo-400/50 shadow-xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-indigo-950/40"
-              >
-                {/* Cover & Badges */}
-                <div className="relative h-44 w-full overflow-hidden bg-slate-900">
-                  <img
-                    src={game.coverUrl}
-                    alt={game.name}
-                    className="w-full h-full object-cover transition duration-500 group-hover:scale-105"
-                    onError={(e) => {
-                      // Fallback cover if image fails
-                      (e.target as HTMLImageElement).src =
-                        'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=600&q=80';
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#131c31] via-[#131c31]/30 to-transparent" />
-
-                  {/* Top Badges */}
-                  <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5">
-                    <span className="px-2.5 py-1 rounded-full bg-slate-900/90 backdrop-blur-md text-[11px] font-bold text-white border border-slate-700/80 shadow">
-                      {game.category}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-full bg-indigo-950/90 backdrop-blur-md text-[11px] font-bold text-indigo-300 border border-indigo-500/40 shadow flex items-center gap-1">
-                      <Users className="w-3 h-3 text-indigo-400" />
-                      <span>
-                        {game.minPlayers}-{game.maxPlayers} jug.
-                      </span>
-                    </span>
-                  </div>
-
-                  <div className="absolute top-3 right-3">
-                    <span
-                      className={`px-2.5 py-1 rounded-full text-xs font-black font-mono shadow border backdrop-blur-md ${
-                        synchronyScore >= 80
-                          ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
-                          : synchronyScore >= 60
-                          ? 'bg-indigo-950/90 text-indigo-300 border-indigo-500/50'
-                          : 'bg-amber-950/90 text-amber-300 border-amber-500/50'
-                      }`}
-                      title="Puntaje de Sincronía Grupal"
-                    >
-                      {synchronyScore}% Sinc.
-                    </span>
-                  </div>
-
-                  {/* Duration tag at bottom right */}
-                  <div className="absolute bottom-2 right-3 flex items-center gap-1 text-[11px] text-slate-300 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-lg border border-slate-700">
-                    <Clock className="w-3 h-3 text-slate-400" />
-                    <span>~{game.averageDurationMins} min</span>
-                  </div>
-                </div>
-
-                {/* Card Body */}
-                <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-lg font-bold text-white group-hover:text-indigo-300 transition line-clamp-1">
-                        {game.name}
-                      </h3>
-                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-semibold text-slate-300 border border-slate-700 shrink-0">
-                        {game.category}
-                      </span>
-                    </div>
-
-                    {/* Brief 1-2 line description */}
-                    {game.description && (
-                      <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
-                        {game.description}
-                      </p>
-                    )}
-
-                    {/* Tags */}
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {game.tags.slice(0, 3).map((tag, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 text-[10px] border border-slate-800"
-                        >
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* CURRENT USER PREFERENCE SECTION */}
-                  <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-300">
-                        Tu Preferencia ({currentUser.displayName}):
-                      </span>
-
-                      {/* Plays toggle */}
-                      <button
-                        onClick={() => handleTogglePlay(game.id, plays, rating)}
-                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition cursor-pointer border flex items-center gap-1 ${
-                          plays
-                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {plays ? (
-                          <>
-                            <Check className="w-3 h-3" />
-                            <span>Lo tengo / Juego</span>
-                          </>
-                        ) : (
-                          <>
-                            <X className="w-3 h-3" />
-                            <span>No lo juego</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {plays ? (
-                      <div className="space-y-1.5">
-                        {/* 5-Star Selector */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            {([1, 2, 3, 4, 5] as GameRating[]).map((starVal) => {
-                              const isActive = starVal <= activeRatingHover;
-                              return (
-                                <button
-                                  key={starVal}
-                                  type="button"
-                                  onMouseEnter={() =>
-                                    setHoveredStar({ gameId: game.id, star: starVal })
-                                  }
-                                  onMouseLeave={() => setHoveredStar(null)}
-                                  onClick={() => handleSetRating(game.id, starVal)}
-                                  className="p-1 transition transform hover:scale-125 cursor-pointer"
-                                  title={RATING_INFO[starVal].label}
-                                >
-                                  <Star
-                                    className={`w-4 h-4 transition ${
-                                      isActive
-                                        ? starVal === 1
-                                          ? 'text-rose-400 fill-rose-400'
-                                          : starVal <= 3
-                                          ? 'text-amber-400 fill-amber-400'
-                                          : 'text-indigo-400 fill-indigo-400'
-                                        : 'text-slate-700 hover:text-slate-500'
-                                    }`}
-                                  />
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          <span className="text-[11px] font-mono text-slate-300 font-bold">
-                            {rating} de 5★
-                          </span>
-                        </div>
-
-                        {/* Active Rating Description Label */}
-                        <div
-                          className={`px-2.5 py-1 rounded-xl text-[10px] font-medium border ${
-                            RATING_INFO[activeRatingHover].color
-                          }`}
-                        >
-                          <span className="font-bold">
-                            {RATING_INFO[activeRatingHover].label}
-                          </span>
-                          <span className="opacity-80 block text-[9px]">
-                            {RATING_INFO[activeRatingHover].sub}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-slate-500 italic py-1">
-                        Marcado como 'No lo juego'. No sumás votos a este juego en la ruleta.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* GROUP SYNCHRONY MATRIX */}
-                  <div className="pt-2 border-t border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-[11px] font-semibold text-slate-400">
-                        Sincronía del Grupo ({averageRating}★ prom):
-                      </span>
-                      <span className="text-[11px] font-bold text-white font-mono">
-                        {synchronyScore}%
-                      </span>
-                    </div>
-
-                    {/* Score Bar */}
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"
-                        style={{ width: `${synchronyScore}%` }}
-                      />
-                    </div>
-
-                    {/* Friends' Avatars Row with Star Rating Pill */}
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center -space-x-1.5 overflow-hidden">
-                        {playerRatings.map(({ player, plays: pPlays, rating: pRating }) => (
-                          <div
-                            key={player.id}
-                            className="relative group cursor-pointer"
-                            title={`${player.displayName}: ${pPlays ? `${pRating}★` : '❌ No juega'}`}
-                          >
-                            <img
-                              src={player.avatarUrl}
-                              alt={player.displayName}
-                              className={`w-6 h-6 rounded-full border-2 border-slate-900 object-cover ${
-                                !pPlays ? 'grayscale opacity-50' : ''
-                              }`}
-                            />
-                            {pPlays ? (
-                              <span
-                                className={`absolute -bottom-1 -right-1 text-[8px] font-extrabold px-1 rounded-full ${
-                                  pRating === 1
-                                    ? 'bg-rose-500 text-white'
-                                    : pRating >= 4
-                                    ? 'bg-emerald-500 text-slate-950'
-                                    : 'bg-amber-500 text-slate-950'
-                                }`}
-                              >
-                                {pRating}★
-                              </span>
-                            ) : (
-                              <span className="absolute -bottom-1 -right-1 text-[8px] bg-slate-700 text-white px-0.5 rounded-full">
-                                ✕
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      <span className="text-[10px] text-slate-400">
-                        {item.playsCount}/{item.totalPlayers} lo juegan
-                      </span>
-                    </div>
-
-                    {/* Dislike penalty indicator */}
-                    {dislikeCount > 0 && (
-                      <div className="flex items-center gap-1.5 text-[10px] text-rose-300 bg-rose-950/30 px-2 py-0.5 rounded-lg border border-rose-500/20">
-                        <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                        <span>{dislikeCount} jugador votó 1★ (penalizado)</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       )}
 
-      {/* 4. MODAL: AGREGAR JUEGO AL CATÁLOGO CON PRESETS */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-[#131c31] w-full max-w-2xl rounded-3xl border border-indigo-500/40 p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                  <Plus className="w-4 h-4" />
-                </div>
-                <h3 className="text-lg font-bold text-white">Agregar Juego al Catálogo</h3>
-              </div>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Primary Two-View Switcher (Mi Perfil vs Matriz) */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(val) => setActiveTab(val as 'profiler' | 'catalog')}
+        className="w-full"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
+          <TabsList>
+            <TabsTrigger value="profiler" className="gap-1.5">
+              <UserCheck className="w-4 h-4" strokeWidth={1.75} />
+              <span>Mi Perfil</span>
+              {needsTasteSetup && (
+                <Badge variant="warning" className="text-[9px] px-1.5 py-0 ml-1">
+                  Setup
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="catalog" className="gap-1.5">
+              <Library className="w-4 h-4" strokeWidth={1.75} />
+              <span>Matriz ({games.length})</span>
+            </TabsTrigger>
+          </TabsList>
 
-            {/* Quick 1-Click Presets Strip */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Presets Rápidos (Hacé clic para autocompletar):</span>
-              </span>
-              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 bg-slate-900/60 rounded-2xl border border-slate-800">
-                {PRESET_GAMES.map((preset) => (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    onClick={() => handleSelectPreset(preset)}
-                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-indigo-600/30 hover:border-indigo-400 border border-slate-700 text-[11px] font-semibold text-slate-200 transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>🎮</span>
-                    <span>{preset.name}</span>
-                    <span className="text-[10px] text-slate-400">
-                      ({preset.minPlayers}-{preset.maxPlayers})
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Manual Form */}
-            <form onSubmit={handleAddGameSubmit} className="space-y-4 pt-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Nombre del Juego:
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej: Left 4 Dead 2"
-                    value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
-                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Categoría:
-                  </label>
-                  <select
-                    value={addCategory}
-                    onChange={(e) => setAddCategory(e.target.value)}
-                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition cursor-pointer"
-                  >
-                    {GAME_CATEGORIES.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.emoji} {cat.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Descripción breve del juego:
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Resumen de qué se trata y por qué está bueno jugarlo..."
-                  value={addDescription}
-                  onChange={(e) => setAddDescription(e.target.value)}
-                  className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition resize-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  URL de Portada (Imagen):
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://images.unsplash.com/photo-..."
-                  value={addCoverUrl}
-                  onChange={(e) => setAddCoverUrl(e.target.value)}
-                  className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Mín. Jugadores:
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={32}
-                    required
-                    value={addMinPlayers}
-                    onChange={(e) => setAddMinPlayers(Number(e.target.value))}
-                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Máx. Jugadores:
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={64}
-                    required
-                    value={addMaxPlayers}
-                    onChange={(e) => setAddMaxPlayers(Number(e.target.value))}
-                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Duración (min):
-                  </label>
-                  <input
-                    type="number"
-                    min={10}
-                    max={360}
-                    value={addDuration}
-                    onChange={(e) => setAddDuration(Number(e.target.value))}
-                    className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Etiquetas (separadas por comas):
-                </label>
-                <input
-                  type="text"
-                  placeholder="coop, zombies, risas, supervivencia"
-                  value={addTags}
-                  onChange={(e) => setAddTags(e.target.value)}
-                  className="w-full bg-[#090d16] border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold tracking-wide shadow-lg shadow-indigo-600/30 transition cursor-pointer"
-                >
-                  Guardar Juego en el Catálogo 🚀
-                </button>
-              </div>
-            </form>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              <strong className="text-foreground">{totalMyGames}</strong> en club
+            </span>
           </div>
         </div>
-      )}
+
+        <TabsContent value="profiler" className="mt-3">
+          <GamerProfileSplitView
+            currentUser={currentUser}
+            pvjProfile={pvjProfile}
+            embeddedInTour={embeddedInTour}
+            isProfileRevealed={isProfileRevealed}
+            setProfileRevealed={(revealed) => {
+              if (revealed && embeddedInTour && selectedGamesCount < 10) return;
+              setProfileRevealed(revealed);
+            }}
+            selectedGamesCount={selectedGamesCount}
+            hasTasteSignal={hasTasteSignal}
+            topDimensions={topDimensions}
+            activeFeatureVector={activeFeatureVector}
+            steamUrlInput={steamUrlInput}
+            setSteamUrlInput={setSteamUrlInput}
+            isSyncingSteam={isSyncingSteam}
+            syncResult={syncResult}
+            onSubmitSteamSync={handleManualSubmitSteam}
+            topMultiplayerGames={topMultiplayerGames}
+            topSingleplayerGames={topSingleplayerGames}
+            activePodiumPicker={activePodiumPicker}
+            setActivePodiumPicker={setActivePodiumPicker}
+            podiumSearchQuery={podiumSearchQuery}
+            setPodiumSearchQuery={setPodiumSearchQuery}
+            podiumPickerCandidates={podiumPickerCandidates}
+            isSearchingPodiumLive={isSearchingPodiumLive}
+            onAutoFillPodiumFromSteam={handleAutoFillPodiumFromSteam}
+            onRemovePodiumRank={removePodiumRank}
+            onAssignPodiumEntry={(type, rank, cand) =>
+              assignPodiumEntry(type, rank, mapUnifiedToPodiumEntry(cand))
+            }
+            onDropPodiumGame={(type, rank, payload) => {
+              const norm = normalizeGameName(payload.name);
+              const matched = unifiedGames.find(
+                (g) => normalizeGameName(g.name) === norm
+              );
+              if (matched) {
+                assignPodiumEntry(type, rank, {
+                  ...mapUnifiedToPodiumEntry(matched),
+                  ...(payload.hoursPlayed !== undefined
+                    ? { hoursPlayed: payload.hoursPlayed }
+                    : {}),
+                });
+              } else {
+                assignPodiumEntry(type, rank, {
+                  gameId: payload.name,
+                  name: payload.name,
+                  coverUrl: getSafeCoverUrl(payload.coverUrl),
+                  category: 'General',
+                  tags: [],
+                  minPlayers: 1,
+                  maxPlayers: 4,
+                  isMultiplayer: type === 'mp',
+                  source: 'external',
+                  ...(payload.hoursPlayed !== undefined
+                    ? { hoursPlayed: payload.hoursPlayed }
+                    : {}),
+                });
+              }
+            }}
+            onSetPodiumEntryHours={handleSetPodiumEntryHours}
+            findPodiumRank={findPodiumRank}
+            onSetCategoryPreference={handleSetCategoryPreference}
+            onSetAllCategories={handleSetAllCategories}
+            selectorTab={selectorTab}
+            setSelectorTab={setSelectorTab}
+            tabCounts={tabCounts}
+            selectorQuery={selectorQuery}
+            setSelectorQuery={setSelectorQuery}
+            isLoadingDiscovery={isLoadingDiscovery}
+            isSearchingLive={isSearchingLive}
+            filteredUnifiedGames={filteredUnifiedGames}
+            displayedUnifiedGames={displayedUnifiedGames}
+            visibleLimit={visibleLimit}
+            setVisibleLimit={setVisibleLimit}
+            onSetUnifiedFeedback={(game, patch) => setUnifiedGameFeedback(game, patch)}
+            onAddManualCustomGame={handleAddManualCustomGame}
+          />
+        </TabsContent>
+
+        <TabsContent value="catalog" className="mt-3">
+          <ClubMatrixTableView
+            currentUser={currentUser}
+            filteredCatalogGames={filteredCatalogGames}
+            totalGamesCount={games.length}
+            totalMyGames={totalMyGames}
+            categories={categories}
+            prefMap={prefMap}
+            unifiedLikelihoodMap={unifiedLikelihoodMap}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            playerFilter={playerFilter}
+            setPlayerFilter={setPlayerFilter}
+            selectedCategory={selectedCategory}
+            setSelectedCategory={setSelectedCategory}
+            sortBy={sortBy}
+            setSortBy={setSortBy}
+            onTogglePlay={handleTogglePlay}
+            onSetRating={handleSetRating}
+            onAddGame={(newGame) => {
+              const created = addGame(newGame);
+              showToast(`🎮 "${created.name}" agregado al catálogo grupal!`);
+            }}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
-
-export default GamesCatalogView;

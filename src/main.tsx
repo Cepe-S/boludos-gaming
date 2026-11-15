@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App';
 import { AppProvider } from './context/AppContext';
+import { initTheme } from './lib/theme';
+
+initTheme();
 
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -24,21 +27,21 @@ class RootErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#090d16] text-slate-100 flex items-center justify-center p-6">
-          <div className="max-w-lg w-full bg-[#131c31] border border-rose-500/40 rounded-2xl p-6 space-y-4 shadow-2xl">
-            <h2 className="text-xl font-bold text-rose-400">
+        <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bg-card border border-destructive/40 rounded-md p-6 space-y-4">
+            <h2 className="text-base font-bold text-destructive">
               ⚠️ Ocurrió un error al renderizar la interfaz
             </h2>
-            <p className="text-xs text-slate-300 font-mono bg-black/50 p-3 rounded-xl border border-slate-800 break-words">
+            <p className="text-xs text-muted-foreground font-mono bg-background p-3 rounded-md border border-border break-words">
               {this.state.error?.message || 'Error desconocido'}
             </p>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => {
                   this.setState({ hasError: false, error: null });
                   window.location.reload();
                 }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold cursor-pointer"
+                className="px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white text-xs font-semibold cursor-pointer"
               >
                 🔄 Recargar Página
               </button>
@@ -49,7 +52,7 @@ class RootErrorBoundary extends React.Component<
                   });
                   window.location.reload();
                 }}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
+                className="px-3 py-1.5 rounded-md bg-destructive hover:bg-destructive/90 text-white text-xs font-semibold cursor-pointer"
               >
                 🧹 Limpiar Caché Local y Recargar
               </button>

@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  DAYS_OF_WEEK,
   DayOfWeekKey,
   PrecisionMinutes,
   WeeklySchedule,
   EffectiveDailySchedule,
   PlayerProfile,
   DayScheduleConfig,
+  TimeSlotBlock,
 } from '../types/domain';
 import {
   createDefaultWeeklySchedule,
   getDayOfWeekKey,
   getEffectiveScheduleForDate,
+  normalizeDaySlots,
 } from '../lib/matchmakingEngine';
 import { WeeklyBarsScheduleEditor, getConfidenceStyle } from './WeeklyBarsScheduleEditor';
 import {
@@ -20,17 +21,15 @@ import {
   CalendarCheck,
   CalendarOff,
   Clock,
-  Zap,
   RotateCcw,
   Check,
   CheckCircle2,
   Calendar,
-  Sparkles,
   Edit3,
   Save,
-  HelpCircle,
-  AlertTriangle,
-  ShieldAlert,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
 } from 'lucide-react';
 
 const PRECISION_OPTIONS: PrecisionMinutes[] = [5, 15, 30, 60];
@@ -50,6 +49,101 @@ const REASON_PRESETS = [
   'Cansado / Descanso',
   'Fuerza mayor',
 ];
+
+const MONTH_NAMES_ES = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+];
+
+const WEEKDAY_HEADERS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+function formatDateToStr(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+interface MonthCalendarCell {
+  date: Date;
+  dateStr: string;
+  dayNumber: number;
+  dayKey: DayOfWeekKey;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isPast: boolean;
+}
+
+function generateMonthGrid(monthDate: Date, todayStr: string): MonthCalendarCell[] {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+
+  const firstDay = new Date(year, month, 1);
+  // (0 = Sun, 1 = Mon, ..., 6 = Sat) -> Mon is 0, Sun is 6
+  const leadingDays = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const cells: MonthCalendarCell[] = [];
+
+  // 1. Previous month leading days
+  for (let i = leadingDays - 1; i >= 0; i--) {
+    const d = new Date(year, month - 1, daysInPrevMonth - i);
+    const dateStr = formatDateToStr(d);
+    cells.push({
+      date: d,
+      dateStr,
+      dayNumber: d.getDate(),
+      dayKey: getDayOfWeekKey(dateStr),
+      isCurrentMonth: false,
+      isToday: dateStr === todayStr,
+      isPast: dateStr < todayStr,
+    });
+  }
+
+  // 2. Current month days
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(year, month, day);
+    const dateStr = formatDateToStr(d);
+    cells.push({
+      date: d,
+      dateStr,
+      dayNumber: day,
+      dayKey: getDayOfWeekKey(dateStr),
+      isCurrentMonth: true,
+      isToday: dateStr === todayStr,
+      isPast: dateStr < todayStr,
+    });
+  }
+
+  // 3. Trailing days to fill the last row (multiple of 7)
+  const trailingDays = (7 - (cells.length % 7)) % 7;
+  for (let day = 1; day <= trailingDays; day++) {
+    const d = new Date(year, month + 1, day);
+    const dateStr = formatDateToStr(d);
+    cells.push({
+      date: d,
+      dateStr,
+      dayNumber: day,
+      dayKey: getDayOfWeekKey(dateStr),
+      isCurrentMonth: false,
+      isToday: dateStr === todayStr,
+      isPast: dateStr < todayStr,
+    });
+  }
+
+  return cells;
+}
 
 function getSafeInitialSchedule(userSchedule?: WeeklySchedule): WeeklySchedule {
   if (userSchedule && Object.keys(userSchedule).length >= 7) {
@@ -156,33 +250,51 @@ function resolveEffectiveSchedule(player: PlayerProfile, dateStr: string): Effec
   };
 }
 
-function getNext7Days(): Array<{ dateStr: string; label: string; jsDate: Date }> {
-  const result = [];
-  const now = new Date();
+function getSlotsForDateCell(
+  user: PlayerProfile,
+  dateStr: string,
+  dayKey: DayOfWeekKey
+): {
+  baseSlots: TimeSlotBlock[];
+  displaySlots: TimeSlotBlock[];
+  isCancelledMap: Record<string, boolean>;
+} {
+  const weekly = user.weeklySchedule?.[dayKey] ?? {
+    enabled: true,
+    availableFrom: '22:00',
+    availableUntil: '01:30',
+    precisionMinutes: 15 as PrecisionMinutes,
+    confidencePercentage: 75,
+  };
 
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dayNum = String(d.getDate()).padStart(2, '0');
-    const dateStr = `${y}-${m}-${dayNum}`;
+  const baseSlots = normalizeDaySlots(weekly, dayKey);
+  const override = user.dailyOverrides?.[dateStr];
 
-    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    const weekday = dayNames[d.getDay()];
-
-    let label = '';
-    if (i === 0) {
-      label = `Hoy (${weekday} ${dayNum}/${m})`;
-    } else if (i === 1) {
-      label = `Mañana (${weekday} ${dayNum}/${m})`;
-    } else {
-      label = `${weekday} (${dayNum}/${m})`;
+  // Include baseSlots, and if override has extra custom slots, include those as well
+  const displaySlots: TimeSlotBlock[] = [...baseSlots];
+  if (override?.status === 'playing' && Array.isArray(override.slots)) {
+    for (const extraSlot of override.slots) {
+      if (!displaySlots.some((s) => s.id === extraSlot.id)) {
+        displaySlots.push(extraSlot);
+      }
     }
-
-    result.push({ dateStr, label, jsDate: d });
   }
 
-  return result;
+  const isCancelledMap: Record<string, boolean> = {};
+  displaySlots.forEach((slot) => {
+    const isCancelled =
+      override?.status === 'not_playing' ||
+      Boolean(override?.cancelledSlotIds?.includes(slot.id)) ||
+      Boolean(
+        override?.status === 'playing' &&
+          Array.isArray(override.slots) &&
+          override.slots.length > 0 &&
+          !override.slots.some((s) => s.id === slot.id)
+      );
+    isCancelledMap[slot.id] = isCancelled;
+  });
+
+  return { baseSlots, displaySlots, isCancelledMap };
 }
 
 export const WeeklyScheduleModal: React.FC = () => {
@@ -202,6 +314,16 @@ export const WeeklyScheduleModal: React.FC = () => {
   );
   const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
 
+  // Tab 2: Monthly Calendar Navigation & Selection
+  const today = useMemo(() => new Date(), []);
+  const todayStr = useMemo(() => formatDateToStr(today), [today]);
+
+  const [currentMonthDate, setCurrentMonthDate] = useState<Date>(
+    () => new Date(today.getFullYear(), today.getMonth(), 1)
+  );
+  const [selectedSlotKeys, setSelectedSlotKeys] = useState<string[]>([]);
+  const [actionBarFeedback, setActionBarFeedback] = useState<string | null>(null);
+
   // Tab 2: Inline editor state for date override
   const [editingDateStr, setEditingDateStr] = useState<string | null>(null);
   const [editFrom, setEditFrom] = useState('22:00');
@@ -216,15 +338,53 @@ export const WeeklyScheduleModal: React.FC = () => {
       setDraftSchedule(getSafeInitialSchedule(currentUser.weeklySchedule));
       setSaveSuccessMessage(false);
       setEditingDateStr(null);
+      setSelectedSlotKeys([]);
+      setActionBarFeedback(null);
     }
   }, [showWeeklyScheduleModal, currentUser]);
 
-  const next7Days = useMemo(() => getNext7Days(), []);
+  const isCurrentMonthViewing = useMemo(() => {
+    return (
+      currentMonthDate.getFullYear() === today.getFullYear() &&
+      currentMonthDate.getMonth() === today.getMonth()
+    );
+  }, [currentMonthDate, today]);
+
+  const monthCells = useMemo(() => {
+    return generateMonthGrid(currentMonthDate, todayStr);
+  }, [currentMonthDate, todayStr]);
+
+  // Active overrides in the current viewed month
+  const monthOverrides = useMemo(() => {
+    const overrides = currentUser.dailyOverrides || {};
+    return Object.values(overrides)
+      .filter((ov) => {
+        if (!ov || !ov.date) return false;
+        const [yStr, mStr] = ov.date.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10) - 1;
+        return (
+          y === currentMonthDate.getFullYear() &&
+          m === currentMonthDate.getMonth()
+        );
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [currentUser.dailyOverrides, currentMonthDate]);
+
+  const editingDateFormatted = useMemo(() => {
+    if (!editingDateStr) return '';
+    const [y, m, d] = editingDateStr.split('-').map(Number);
+    const jsDate = new Date(y, m - 1, d);
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const weekday = dayNames[jsDate.getDay()];
+    return `${weekday} ${d} de ${MONTH_NAMES_ES[m - 1]} de ${y}`;
+  }, [editingDateStr]);
 
   if (!showWeeklyScheduleModal) {
     return null;
   }
 
+  // Routine Tab Save
   const handleSaveRoutine = () => {
     updateWeeklySchedule(draftSchedule);
     setSaveSuccessMessage(true);
@@ -233,10 +393,186 @@ export const WeeklyScheduleModal: React.FC = () => {
     }, 3000);
   };
 
-  // Tab 2 Override Handlers
+  // Calendar Month Navigation Handlers
+  const handlePrevMonth = () => {
+    setCurrentMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCurrentMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
+  const handleGoToToday = () => {
+    setCurrentMonthDate(new Date(today.getFullYear(), today.getMonth(), 1));
+  };
+
+  // Slot Selection Handlers
+  const toggleSlotSelection = (dateStr: string, slotId: string) => {
+    const key = `${dateStr}::${slotId}`;
+    setSelectedSlotKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  const handleToggleSelectAllDay = (dateStr: string, daySlots: TimeSlotBlock[]) => {
+    if (daySlots.length === 0) return;
+    const dayKeys = daySlots.map((s) => `${dateStr}::${s.id}`);
+    const allSelected = dayKeys.every((k) => selectedSlotKeys.includes(k));
+    if (allSelected) {
+      setSelectedSlotKeys((prev) => prev.filter((k) => !dayKeys.includes(k)));
+    } else {
+      setSelectedSlotKeys((prev) => Array.from(new Set([...prev, ...dayKeys])));
+    }
+  };
+
+  // Bulk Cancel Selected Slots
+  const handleCancelSelectedSlots = () => {
+    if (selectedSlotKeys.length === 0) return;
+
+    const groupedByDate: Record<string, string[]> = {};
+    selectedSlotKeys.forEach((key) => {
+      const [dStr, sId] = key.split('::');
+      if (dStr && sId) {
+        if (!groupedByDate[dStr]) groupedByDate[dStr] = [];
+        groupedByDate[dStr].push(sId);
+      }
+    });
+
+    Object.entries(groupedByDate).forEach(([dateStr, slotIdsToCancel]) => {
+      const dayKey = getDayOfWeekKey(dateStr);
+      const weekly = currentUser.weeklySchedule?.[dayKey] ?? {
+        enabled: true,
+        availableFrom: '22:00',
+        availableUntil: '01:30',
+        precisionMinutes: 15 as PrecisionMinutes,
+        confidencePercentage: 75,
+      };
+      const baseSlots = normalizeDaySlots(weekly, dayKey);
+      const existingOverride = currentUser.dailyOverrides?.[dateStr];
+
+      const existingCancelled: string[] =
+        existingOverride?.cancelledSlotIds ||
+        (existingOverride?.status === 'not_playing' ? baseSlots.map((s) => s.id) : []);
+
+      const updatedCancelledIds = Array.from(
+        new Set([...existingCancelled, ...slotIdsToCancel])
+      );
+      const remainingSlots = baseSlots.filter((s) => !updatedCancelledIds.includes(s.id));
+
+      if (remainingSlots.length === 0) {
+        setDailyOverride(dateStr, {
+          status: 'not_playing',
+          cancelledSlotIds: updatedCancelledIds,
+          slots: [],
+          reason: 'Franjas canceladas en calendario',
+        });
+      } else {
+        setDailyOverride(dateStr, {
+          status: 'playing',
+          availableFrom: remainingSlots[0].from,
+          availableUntil: remainingSlots[remainingSlots.length - 1].until,
+          precisionMinutes: remainingSlots[0].precisionMinutes,
+          confidencePercentage: Math.max(...remainingSlots.map((s) => s.confidencePercentage)),
+          slots: remainingSlots,
+          cancelledSlotIds: updatedCancelledIds,
+          reason: 'Franja parcial cancelada',
+        });
+      }
+    });
+
+    const count = selectedSlotKeys.length;
+    setSelectedSlotKeys([]);
+    setActionBarFeedback(`🚫 ${count} franja(s) cancelada(s) correctamente.`);
+    setTimeout(() => setActionBarFeedback(null), 4000);
+  };
+
+  // Bulk Restore Selected Slots
+  const handleRestoreSelectedSlots = () => {
+    if (selectedSlotKeys.length === 0) return;
+
+    const groupedByDate: Record<string, string[]> = {};
+    selectedSlotKeys.forEach((key) => {
+      const [dStr, sId] = key.split('::');
+      if (dStr && sId) {
+        if (!groupedByDate[dStr]) groupedByDate[dStr] = [];
+        groupedByDate[dStr].push(sId);
+      }
+    });
+
+    Object.entries(groupedByDate).forEach(([dateStr, slotIdsToRestore]) => {
+      const dayKey = getDayOfWeekKey(dateStr);
+      const weekly = currentUser.weeklySchedule?.[dayKey] ?? {
+        enabled: true,
+        availableFrom: '22:00',
+        availableUntil: '01:30',
+        precisionMinutes: 15 as PrecisionMinutes,
+        confidencePercentage: 75,
+      };
+      const baseSlots = normalizeDaySlots(weekly, dayKey);
+      const existingOverride = currentUser.dailyOverrides?.[dateStr];
+
+      if (!existingOverride) return;
+
+      const restoreSet = new Set(slotIdsToRestore);
+      let currentlyCancelled: string[] = [];
+      if (existingOverride.cancelledSlotIds && existingOverride.cancelledSlotIds.length > 0) {
+        currentlyCancelled = existingOverride.cancelledSlotIds;
+      } else if (existingOverride.status === 'not_playing') {
+        currentlyCancelled = baseSlots.map((s) => s.id);
+      }
+
+      const remainingCancelledIds = currentlyCancelled.filter((id) => !restoreSet.has(id));
+
+      if (remainingCancelledIds.length === 0) {
+        // If no slots remain cancelled on dateStr, restore default weekly schedule
+        setDailyOverride(dateStr, null);
+      } else {
+        const remainingSlots = baseSlots.filter((s) => !remainingCancelledIds.includes(s.id));
+        if (remainingSlots.length === 0) {
+          setDailyOverride(dateStr, {
+            status: 'not_playing',
+            cancelledSlotIds: remainingCancelledIds,
+            slots: [],
+            reason: 'Franjas canceladas en calendario',
+          });
+        } else {
+          setDailyOverride(dateStr, {
+            status: 'playing',
+            availableFrom: remainingSlots[0].from,
+            availableUntil: remainingSlots[remainingSlots.length - 1].until,
+            precisionMinutes: remainingSlots[0].precisionMinutes,
+            confidencePercentage: Math.max(...remainingSlots.map((s) => s.confidencePercentage)),
+            slots: remainingSlots,
+            cancelledSlotIds: remainingCancelledIds,
+            reason: 'Franja parcial cancelada',
+          });
+        }
+      }
+    });
+
+    const count = selectedSlotKeys.length;
+    setSelectedSlotKeys([]);
+    setActionBarFeedback(`✅ ${count} franja(s) restaurada(s) a la rutina semanal.`);
+    setTimeout(() => setActionBarFeedback(null), 4000);
+  };
+
+  // Day Level Handlers
   const handleMarkNotPlaying = (dateStr: string, reason = 'Baja programada') => {
+    const dayKey = getDayOfWeekKey(dateStr);
+    const weekly = currentUser.weeklySchedule?.[dayKey] ?? {
+      enabled: true,
+      availableFrom: '22:00',
+      availableUntil: '01:30',
+      precisionMinutes: 15 as PrecisionMinutes,
+      confidencePercentage: 75,
+    };
+    const baseSlots = normalizeDaySlots(weekly, dayKey);
+    const allSlotIds = baseSlots.map((s) => s.id);
+
     setDailyOverride(dateStr, {
       status: 'not_playing',
+      cancelledSlotIds: allSlotIds,
+      slots: [],
       reason,
     });
     if (editingDateStr === dateStr) {
@@ -255,43 +591,54 @@ export const WeeklyScheduleModal: React.FC = () => {
   };
 
   const handleSaveCustomTime = (dateStr: string) => {
+    const customSlot: TimeSlotBlock = {
+      id: `slot-override-${dateStr}-${Date.now()}`,
+      from: editFrom,
+      until: editUntil,
+      precisionMinutes: editPrecision,
+      confidencePercentage: editConfidence,
+    };
+
     setDailyOverride(dateStr, {
       status: 'playing',
       availableFrom: editFrom,
       availableUntil: editUntil,
       precisionMinutes: editPrecision,
       confidencePercentage: editConfidence,
+      slots: [customSlot],
+      cancelledSlotIds: [],
       reason: editReason.trim() || undefined,
     });
     setEditingDateStr(null);
+    setActionBarFeedback(`Horario especial guardado para ${dateStr}`);
+    setTimeout(() => setActionBarFeedback(null), 3500);
   };
 
   const handleRestoreDefault = (dateStr: string) => {
     setDailyOverride(dateStr, null);
+    setSelectedSlotKeys((prev) => prev.filter((k) => !k.startsWith(`${dateStr}::`)));
     if (editingDateStr === dateStr) {
       setEditingDateStr(null);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-[#131c31] border border-indigo-500/30 rounded-2xl shadow-2xl shadow-indigo-950/50 flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
+      <div className="relative w-full max-w-6xl bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 rounded-lg shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] flex flex-col max-h-[94vh] overflow-hidden">
         {/* Modal Header */}
-        <div className="p-4 sm:p-6 border-b border-indigo-900/40 flex items-center justify-between shrink-0 bg-[#0d1424]">
+        <div className="p-4 sm:p-5 border-b border-border/70 flex items-center justify-between shrink-0 bg-card">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500/20 to-emerald-500/20 border border-indigo-500/30 text-emerald-400">
-              <Clock className="w-5 h-5 text-emerald-400" />
+            <div className="p-2.5 rounded-md bg-primary/15 border border-border/70 text-success">
+              <Clock className="w-5 h-5 text-success" />
             </div>
             <div>
               <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-                <span>Disponibilidad Semanal &amp; Excepciones</span>
+                <span>Disponibilidad &amp; Excepciones</span>
               </h2>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-400">
-                <span>
-                  Perfil de <strong className="text-white">{currentUser.displayName}</strong>
-                </span>
-                <span>•</span>
-                <span className="text-emerald-400 font-semibold">{currentUser.karmaScore} Karma</span>
+              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                <span className="text-white font-medium">{currentUser.displayName}</span>
+                <span>·</span>
+                <span className="text-success font-semibold">{currentUser.karmaScore} Karma</span>
               </div>
             </div>
           </div>
@@ -299,65 +646,48 @@ export const WeeklyScheduleModal: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowWeeklyScheduleModal(false)}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-            title="Cerrar ventana"
+            className="p-2 rounded-md text-muted-foreground hover:text-white hover:bg-secondary/60 transition-colors"
+            title="Cerrar"
+            aria-label="Cerrar"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-4 sm:px-6 pt-3 pb-2 bg-[#0e1627] border-b border-indigo-900/30 flex items-center gap-2 shrink-0">
+        <div className="px-4 sm:px-6 pt-3 pb-2 bg-secondary border-b border-border/70 flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('routine')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-bold transition-all ${
               activeTab === 'routine'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
+                ? 'bg-primary text-white shadow-none'
+                : 'bg-secondary text-muted-foreground hover:text-foreground'
             }`}
           >
             <CalendarCheck className="w-4 h-4" />
-            <span>📅 Rutina Semanal Default (7 Barras)</span>
+            <span>Rutina Semanal</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('exceptions')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-bold transition-all ${
               activeTab === 'exceptions'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
+                ? 'bg-primary text-white shadow-none'
+                : 'bg-secondary text-muted-foreground hover:text-foreground'
             }`}
           >
             <CalendarOff className="w-4 h-4" />
-            <span>🎯 Excepciones por Día (Próximos 7 Días)</span>
+            <span>Excepciones</span>
           </button>
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 text-slate-200">
+        <div className="p-3 sm:p-5 md:p-6 overflow-y-auto flex-1 text-foreground space-y-5">
           {/* TAB 1: RUTINA SEMANAL DEFAULT */}
           {activeTab === 'routine' && (
-            <div className="space-y-6 animate-in fade-in">
-              {/* Alert Explanation Box: Probabilistic nature */}
-              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-950/70 via-purple-950/40 to-slate-900 border border-indigo-500/40 flex items-start gap-3 shadow-lg">
-                <Zap className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="text-xs text-indigo-200 leading-relaxed">
-                  <p className="font-bold text-white mb-0.5">
-                    Horarios Probabilísticos (10% a 95%) — Cero Chamuyo
-                  </p>
-                  <span>
-                    Tu rutina semanal es una estimación de probabilidad (máximo <strong>95%</strong>).
-                    El sistema te enrola de forma preventiva como <em>&quot;probable&quot;</em>.
-                    Pasarás a <strong className="text-emerald-400">&quot;100% Confirmado&quot;</strong> únicamente
-                    cuando confirmes asistencia en la sesión del día. Si no podés jugar, marcá{' '}
-                    <strong className="text-rose-300">&quot;Hoy No Juego&quot;</strong> para evitar sanciones
-                    del Tribunal del Humo.
-                  </span>
-                </div>
-              </div>
-
+            <div className="space-y-4 animate-in fade-in">
               {/* 7-Bar Interactive Schedule Editor */}
               <WeeklyBarsScheduleEditor
                 schedule={draftSchedule}
@@ -365,12 +695,12 @@ export const WeeklyScheduleModal: React.FC = () => {
               />
 
               {/* Save Routine Footer */}
-              <div className="pt-4 border-t border-indigo-900/30 flex items-center justify-between">
+              <div className="pt-4 border-t border-border/70 flex items-center justify-between">
                 <div>
                   {saveSuccessMessage && (
-                    <span className="flex items-center gap-1.5 text-emerald-400 text-xs font-bold animate-in fade-in">
+                    <span className="flex items-center gap-1.5 text-success text-xs font-bold animate-in fade-in">
                       <CheckCircle2 className="w-4 h-4" />
-                      Rutina semanal guardada y sincronizada exitosamente
+                      Rutina guardada
                     </span>
                   )}
                 </div>
@@ -378,266 +708,574 @@ export const WeeklyScheduleModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleSaveRoutine}
-                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all"
+                  className="px-5 py-2 rounded-md bg-primary hover:bg-primary/90 active:scale-95 text-white text-xs font-bold flex items-center gap-2 shadow-none transition-all"
                 >
                   <Save className="w-4 h-4" />
-                  <span>Guardar Rutina Semanal</span>
+                  <span>Guardar</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* TAB 2: EXCEPCIONES POR DÍA */}
+          {/* TAB 2: CALENDARIO DE EXCEPCIONES MENSUAL CON BARRITAS HORARIAS */}
           {activeTab === 'exceptions' && (
-            <div className="space-y-6 animate-in fade-in">
-              {/* Alert Explanation Box */}
-              <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 flex items-start gap-3">
-                <CalendarOff className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="text-xs text-amber-200 leading-relaxed">
-                  <p className="font-semibold text-white mb-0.5">
-                    Modificar un día puntual sin tocar tu rutina
-                  </p>
-                  ¿Hoy salís a cenar, rendís examen o querés conectarte más tarde? Marcá una excepción
-                  para una fecha específica y definí tu grado de confianza (25%, 50%, 75%, 90%). Tu rutina semanal general no cambiará.
+            <div className="space-y-4 animate-in fade-in">
+              {/* Monthly Calendar Navigation Bar */}
+              <div className="p-3 rounded-md bg-background/45 border border-border/70 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-md bg-primary/10 border border-border/70 text-primary">
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-base font-bold text-white capitalize flex items-center gap-2">
+                    <span>
+                      {MONTH_NAMES_ES[currentMonthDate.getMonth()]} {currentMonthDate.getFullYear()}
+                    </span>
+                    {isCurrentMonthViewing && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-success/20 text-success border border-success/30">
+                        Actual
+                      </span>
+                    )}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    className="p-1.5 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-foreground transition-all active:scale-95"
+                    title="Mes anterior"
+                    aria-label="Mes anterior"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleGoToToday}
+                    className={`px-3 py-1.5 rounded-md border text-xs font-semibold transition-all active:scale-95 ${
+                      isCurrentMonthViewing
+                        ? 'bg-primary/25 border-primary/50 text-primary'
+                        : 'bg-primary hover:bg-primary/90 text-white border-transparent'
+                    }`}
+                    title="Ir a hoy"
+                  >
+                    Hoy
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    className="p-1.5 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-foreground transition-all active:scale-95"
+                    title="Mes siguiente"
+                    aria-label="Mes siguiente"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
 
-              {/* 7 Calendar Days Starting from Today */}
-              <div className="space-y-3.5">
-                {next7Days.map(({ dateStr, label }) => {
-                  const eff = resolveEffectiveSchedule(currentUser, dateStr);
-                  const hasOverride = Boolean(currentUser.dailyOverrides?.[dateStr]);
-                  const isEditingThisDate = editingDateStr === dateStr;
+              {/* Sticky Action Bar for Selection */}
+              {(selectedSlotKeys.length > 0 || actionBarFeedback) && (
+                <div className="sticky top-0 z-20 p-3 rounded-md bg-secondary border border-border/70 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    {selectedSlotKeys.length > 0 && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-warning/20 text-warning border border-warning/40 flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5" />
+                        {selectedSlotKeys.length} selec.
+                      </span>
+                    )}
 
-                  return (
-                    <div
-                      key={dateStr}
-                      className="p-4 rounded-xl bg-[#0b1120] border border-indigo-500/20 hover:border-indigo-500/40 transition-all"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        {/* Day & Current Status */}
-                        <div>
-                          <div className="flex items-center gap-2.5">
-                            <span className="font-bold text-sm text-white">{label}</span>
-                            <span className="font-mono text-[11px] text-slate-500">({dateStr})</span>
-                          </div>
+                    {actionBarFeedback && (
+                      <span className="text-xs text-success font-bold flex items-center gap-1.5 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4" />
+                        {actionBarFeedback}
+                      </span>
+                    )}
+                  </div>
 
-                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                            {eff.source === 'weekly' && eff.plays && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/80 border border-emerald-500/40 text-emerald-300">
-                                <Zap className="w-3 h-3 text-emerald-400" />
-                                Rutina semanal: {eff.availableFrom} a {eff.availableUntil} (±{eff.precisionMinutes}m) · {eff.confidencePercentage}% prob.
-                              </span>
-                            )}
+                  {selectedSlotKeys.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleCancelSelectedSlots}
+                        className="px-3 py-1.5 rounded-md bg-destructive hover:bg-destructive active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+                        title="Cancelar franjas seleccionadas"
+                        aria-label="Cancelar franjas seleccionadas"
+                      >
+                        <CalendarOff className="w-3.5 h-3.5" />
+                        <span>Cancelar ({selectedSlotKeys.length})</span>
+                      </button>
 
-                            {eff.source === 'weekly' && !eff.plays && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 border border-slate-700 text-slate-400">
-                                <CalendarOff className="w-3 h-3" />
-                                Rutina semanal: No juega este día
-                              </span>
-                            )}
+                      <button
+                        type="button"
+                        onClick={handleRestoreSelectedSlots}
+                        className="px-3 py-1.5 rounded-md bg-emerald-700 hover:bg-success active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+                        title="Restaurar franjas seleccionadas"
+                        aria-label="Restaurar franjas seleccionadas"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Restaurar</span>
+                      </button>
 
-                            {eff.source === 'override' && !eff.plays && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950/90 border border-rose-500/50 text-rose-300">
-                                <CalendarOff className="w-3 h-3 text-rose-400" />
-                                Excepción Activa: No juego este día {eff.reason ? `("${eff.reason}")` : ''}
-                              </span>
-                            )}
-
-                            {eff.source === 'override' && eff.plays && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950/90 border border-amber-500/50 text-amber-300">
-                                <Edit3 className="w-3 h-3 text-amber-400" />
-                                Excepción Activa: Horario especial {eff.availableFrom} a {eff.availableUntil} (±{eff.precisionMinutes}m) · {eff.confidencePercentage}% prob. {eff.reason ? `(${eff.reason})` : ''}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          {/* "No juego este día" */}
-                          {(!hasOverride || eff.plays) && (
-                            <button
-                              type="button"
-                              onClick={() => handleMarkNotPlaying(dateStr, 'Baja programada')}
-                              className="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                            >
-                              <CalendarOff className="w-3.5 h-3.5" />
-                              <span>🚫 No juego hoy</span>
-                            </button>
-                          )}
-
-                          {/* "Cambiar horario solo este día" */}
-                          {!isEditingThisDate && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditCustomTime(dateStr)}
-                              className="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                            >
-                              <Clock className="w-3.5 h-3.5" />
-                              <span>🕒 Horario especial</span>
-                            </button>
-                          )}
-
-                          {/* "Restaurar default" */}
-                          {hasOverride && (
-                            <button
-                              type="button"
-                              onClick={() => handleRestoreDefault(dateStr)}
-                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                              title="Eliminar excepción y volver a la rutina semanal normal"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>🔄 Reset a default</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Inline Custom Time Editor */}
-                      {isEditingThisDate && (
-                        <div className="mt-3 pt-3 border-t border-slate-800/80 bg-[#131c31] p-3 rounded-lg space-y-3 animate-in fade-in">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                              <Edit3 className="w-3.5 h-3.5" />
-                              Definir horario especial solo para {label}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setEditingDateStr(null)}
-                              className="text-slate-400 hover:text-slate-200 text-xs"
-                            >
-                              Cancelar
-                            </button>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-1.5 text-xs">
-                              <span className="text-slate-400">Desde:</span>
-                              <input
-                                type="time"
-                                value={editFrom}
-                                onChange={(e) => setEditFrom(e.target.value)}
-                                className="px-2 py-1 rounded bg-[#0b1120] border border-indigo-500/30 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
-                              />
-                            </div>
-
-                            <div className="flex items-center gap-1.5 text-xs">
-                              <span className="text-slate-400">Hasta:</span>
-                              <input
-                                type="time"
-                                value={editUntil}
-                                onChange={(e) => setEditUntil(e.target.value)}
-                                className="px-2 py-1 rounded bg-[#0b1120] border border-indigo-500/30 text-white text-xs font-mono focus:outline-none focus:border-indigo-400"
-                              />
-                            </div>
-
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-slate-400 mr-1">Margen:</span>
-                              {PRECISION_OPTIONS.map((prec) => (
-                                <button
-                                  key={prec}
-                                  type="button"
-                                  onClick={() => setEditPrecision(prec)}
-                                  className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
-                                    editPrecision === prec
-                                      ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300'
-                                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                                  }`}
-                                >
-                                  ±{prec}m
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Confidence Selector */}
-                          <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-slate-300 font-semibold">Probabilidad estimada:</span>
-                              <span className="text-amber-300 font-bold">{editConfidence}%</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {CONFIDENCE_OPTIONS.map((opt) => (
-                                <button
-                                  key={opt.value}
-                                  type="button"
-                                  onClick={() => setEditConfidence(opt.value)}
-                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                                    editConfidence === opt.value
-                                      ? 'bg-indigo-600 text-white border border-indigo-400 shadow-sm'
-                                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 border border-slate-700/50'
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div>
-                            <span className="text-[11px] text-slate-400 block mb-1">
-                              Motivo / Razón opcional (para avisar al grupo):
-                            </span>
-                            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                              {REASON_PRESETS.map((p) => (
-                                <button
-                                  key={p}
-                                  type="button"
-                                  onClick={() => setEditReason(p)}
-                                  className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
-                                >
-                                  {p}
-                                </button>
-                              ))}
-                            </div>
-                            <input
-                              type="text"
-                              value={editReason}
-                              onChange={(e) => setEditReason(e.target.value)}
-                              placeholder="Ej: Llego media hora más tarde por el tráfico..."
-                              className="w-full px-3 py-1.5 rounded bg-[#0b1120] border border-slate-700 text-slate-100 text-xs focus:outline-none focus:border-indigo-400"
-                            />
-                          </div>
-
-                          <div className="flex justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setEditingDateStr(null)}
-                              className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium"
-                            >
-                              Cancelar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveCustomTime(dateStr)}
-                              className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Aplicar Horario Especial</span>
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSlotKeys([])}
+                        className="p-1.5 rounded-md bg-secondary/60 hover:bg-accent/70 text-muted-foreground transition-colors"
+                        title="Limpiar selección"
+                        aria-label="Limpiar selección"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  );
-                })}
+                  )}
+                </div>
+              )}
+
+              {/* Inline Custom Time Editor Card (when editingDateStr is active) */}
+              {editingDateStr && (
+                <div className="p-4 rounded-md bg-secondary border border-warning/50 space-y-3 animate-in fade-in">
+                  <div className="flex items-center justify-between border-b border-warning/20 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Edit3 className="w-4 h-4 text-warning" />
+                      <span className="text-xs sm:text-sm font-bold text-warning">
+                        {editingDateFormatted} ({editingDateStr})
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingDateStr(null)}
+                      className="text-muted-foreground hover:text-white p-1 rounded-md hover:bg-secondary/60"
+                      title="Cerrar"
+                      aria-label="Cerrar"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-muted-foreground font-medium">Desde:</span>
+                      <input
+                        type="time"
+                        value={editFrom}
+                        onChange={(e) => setEditFrom(e.target.value)}
+                        className="px-2.5 py-1 rounded bg-background/45 border border-border/70 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-muted-foreground font-medium">Hasta:</span>
+                      <input
+                        type="time"
+                        value={editUntil}
+                        onChange={(e) => setEditUntil(e.target.value)}
+                        className="px-2.5 py-1 rounded bg-background/45 border border-border/70 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="text-muted-foreground mr-1 font-medium">Margen:</span>
+                      {PRECISION_OPTIONS.map((prec) => (
+                        <button
+                          key={prec}
+                          type="button"
+                          onClick={() => setEditPrecision(prec)}
+                          className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
+                            editPrecision === prec
+                              ? 'bg-warning/20 border border-warning/50 text-warning'
+                              : 'bg-secondary/60 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          ±{prec}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground font-semibold">Probabilidad</span>
+                      <span className="text-warning font-bold">{editConfidence}%</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CONFIDENCE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setEditConfidence(opt.value)}
+                          title={opt.label}
+                          className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                            editConfidence === opt.value
+                              ? 'bg-primary text-white border border-primary'
+                              : 'bg-secondary/60 text-muted-foreground hover:text-foreground border border-border/70'
+                          }`}
+                        >
+                          {opt.value}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[11px] text-muted-foreground block mb-1">
+                      Motivo
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                      {REASON_PRESETS.map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setEditReason(p)}
+                          className="px-2 py-0.5 rounded text-[10px] bg-secondary/60 hover:bg-accent/70 text-muted-foreground border border-border/70 transition-colors"
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={editReason}
+                      onChange={(e) => setEditReason(e.target.value)}
+                      placeholder="Motivo opcional..."
+                      className="w-full px-3 py-1.5 rounded bg-background/45 border border-border/70 text-foreground text-xs focus:outline-none focus:border-primary"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleMarkNotPlaying(editingDateStr, 'Baja programada')}
+                      className="px-3 py-1.5 rounded-md bg-destructive/15 hover:bg-destructive/90 border border-destructive/40 text-destructive hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Cancelar todo el día"
+                    >
+                      <CalendarOff className="w-3.5 h-3.5" />
+                      <span>Baja día</span>
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingDateStr(null)}
+                        className="px-3 py-1.5 rounded-md bg-secondary/60 text-muted-foreground text-xs font-medium hover:bg-accent/70"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveCustomTime(editingDateStr)}
+                        className="px-4 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Aplicar</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 7-Column Month Calendar Grid Container */}
+              <div className="bg-background/45 border border-border/70 rounded-md p-2.5 sm:p-4 shadow-sm space-y-2">
+                {/* 7 Weekday Headers */}
+                <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                  {WEEKDAY_HEADERS.map((dayName, idx) => (
+                    <div
+                      key={dayName}
+                      className={`py-1.5 text-center text-xs font-bold uppercase tracking-wider rounded-lg border ${
+                        idx >= 5
+                          ? 'bg-primary/15 border-primary/40 text-primary'
+                          : 'bg-secondary border-border/70 text-muted-foreground'
+                      }`}
+                    >
+                      {dayName}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Day Cells Grid */}
+                <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                  {monthCells.map((cell) => {
+                    const { baseSlots, displaySlots, isCancelledMap } = getSlotsForDateCell(
+                      currentUser,
+                      cell.dateStr,
+                      cell.dayKey
+                    );
+                    const override = currentUser.dailyOverrides?.[cell.dateStr];
+                    const hasOverride = Boolean(override);
+                    const isFullyCancelled = override?.status === 'not_playing';
+                    const isEditing = editingDateStr === cell.dateStr;
+
+                    const allSlotsSelected =
+                      displaySlots.length > 0 &&
+                      displaySlots.every((s) => selectedSlotKeys.includes(`${cell.dateStr}::${s.id}`));
+                    const anySlotSelected = displaySlots.some((s) =>
+                      selectedSlotKeys.includes(`${cell.dateStr}::${s.id}`)
+                    );
+
+                    return (
+                      <div
+                        key={cell.dateStr}
+                        className={`relative min-h-[110px] sm:min-h-[125px] p-2 rounded-md border flex flex-col justify-between transition-all group ${
+                          cell.isCurrentMonth
+                            ? cell.isToday
+                              ? 'bg-secondary border-success/60 ring-2 ring-success'
+                              : hasOverride
+                              ? 'bg-secondary border-primary/40 hover:border-primary/60'
+                              : 'bg-background border-border/70 hover:border-primary/40'
+                            : 'bg-background/60 border-border/70/60 opacity-40 hover:opacity-75'
+                        } ${isEditing ? 'ring-2 ring-amber-400 border-warning bg-warning/20' : ''}`}
+                      >
+                        {/* Day Cell Header */}
+                        <div className="flex items-center justify-between gap-1 pb-1 mb-1 border-b border-border/70">
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span
+                              className={`text-xs font-bold leading-none ${
+                                cell.isToday
+                                  ? 'text-success font-extrabold'
+                                  : cell.isCurrentMonth
+                                  ? 'text-foreground'
+                                  : 'text-muted-foreground'
+                              }`}
+                            >
+                              {cell.dayNumber}
+                            </span>
+                            {cell.isToday && (
+                              <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-success/20 text-success border border-success/30">
+                                HOY
+                              </span>
+                            )}
+                            {isFullyCancelled && (
+                              <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-destructive/15 text-destructive border border-destructive/40">
+                                BAJA
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Quick Day Cell Actions */}
+                          {cell.isCurrentMonth && (
+                            <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                              {displaySlots.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSelectAllDay(cell.dateStr, displaySlots)}
+                                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-all ${
+                                    allSlotsSelected
+                                      ? 'bg-warning/30 text-warning border border-warning/50'
+                                      : anySlotSelected
+                                      ? 'bg-warning/20 text-warning'
+                                      : 'hover:bg-secondary/60 text-muted-foreground hover:text-white'
+                                  }`}
+                                  title={
+                                    allSlotsSelected
+                                      ? 'Deseleccionar todas las franjas de este día'
+                                      : 'Seleccionar todas las franjas de este día'
+                                  }
+                                >
+                                  {allSlotsSelected ? '☑' : '☐'}
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditCustomTime(cell.dateStr)}
+                                className="p-0.5 rounded hover:bg-primary/15 text-muted-foreground hover:text-primary transition-colors"
+                                title="Horario especial"
+                                aria-label={`Editar horario especial ${cell.dateStr}`}
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+
+                              {!isFullyCancelled && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleMarkNotPlaying(cell.dateStr, 'Baja programada en calendario')
+                                  }
+                                  className="p-0.5 rounded hover:bg-destructive/15 text-muted-foreground hover:text-destructive transition-colors"
+                                  title="Cancelar día"
+                                  aria-label={`Cancelar día ${cell.dateStr}`}
+                                >
+                                  <CalendarOff className="w-3 h-3" />
+                                </button>
+                              )}
+
+                              {hasOverride && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreDefault(cell.dateStr)}
+                                  className="p-0.5 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors"
+                                  title="Restaurar rutina"
+                                  aria-label={`Restaurar rutina ${cell.dateStr}`}
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Day Slots Body: Horizontal Bar for Each Slot */}
+                        <div className="flex-1 space-y-1">
+                          {displaySlots.length === 0 ? (
+                            <div className="h-full flex items-center justify-center py-2">
+                              <span className="text-[10px] text-muted-foreground italic">
+                                Descanso
+                              </span>
+                            </div>
+                          ) : (
+                            displaySlots.map((slot) => {
+                              const isCancelled = Boolean(isCancelledMap[slot.id]);
+                              const slotKey = `${cell.dateStr}::${slot.id}`;
+                              const isSelected = selectedSlotKeys.includes(slotKey);
+                              const confStyle = getConfidenceStyle(slot.confidencePercentage);
+
+                              return (
+                                <button
+                                  key={slot.id}
+                                  type="button"
+                                  onClick={() => toggleSlotSelection(cell.dateStr, slot.id)}
+                                  className={`w-full text-left px-1.5 py-1 rounded-md text-[10px] font-medium transition-all flex items-center justify-between gap-1 group/bar ${
+                                    isCancelled
+                                      ? 'bg-destructive/15 border border-destructive/40 text-destructive line-through opacity-75 hover:opacity-100'
+                                      : `${confStyle.bg} border ${confStyle.border} ${confStyle.text} hover:brightness-125`
+                                  } ${
+                                    isSelected
+                                      ? 'ring-2 ring-amber-400 bg-warning/20 text-white shadow-md shadow-amber-500/25'
+                                      : ''
+                                  }`}
+                                  title={`${cell.dateStr}: ${slot.from}–${slot.until} (${slot.confidencePercentage}% prob, ±${slot.precisionMinutes}m). ${
+                                    isCancelled ? '🚫 CANCELADO.' : 'Activo.'
+                                  } Clic para ${isSelected ? 'deseleccionar' : 'seleccionar para cancelar o restaurar'}.`}
+                                >
+                                  <div className="flex items-center gap-1 min-w-0 truncate">
+                                    {isSelected ? (
+                                      <span className="text-warning font-bold shrink-0 text-[10px]">
+                                        ✓
+                                      </span>
+                                    ) : isCancelled ? (
+                                      <span className="text-destructive font-bold shrink-0 text-[10px]">
+                                        🚫
+                                      </span>
+                                    ) : (
+                                      <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                                    )}
+                                    <span className="font-mono font-semibold truncate leading-none">
+                                      {slot.from}–{slot.until}
+                                    </span>
+                                  </div>
+
+                                  <span className="text-[9px] font-bold opacity-80 shrink-0 leading-none">
+                                    {slot.confidencePercentage}%
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Day Cell Footer: Reason note if present */}
+                        {override?.reason && (
+                          <div
+                            className="mt-1 pt-0.5 border-t border-border/70 text-[9px] text-muted-foreground truncate"
+                            title={override.reason}
+                          >
+                            💬 {override.reason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
+
+              {/* Calendar Color Legend */}
+              <div className="p-2.5 rounded-md bg-background/45 border border-border/70 flex flex-wrap items-center gap-3 text-[11px]">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-success" />
+                  <span className="text-muted-foreground">90–95%</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-primary" />
+                  <span className="text-muted-foreground">75%</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-cyan-500" />
+                  <span className="text-muted-foreground">50%</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-destructive" />
+                  <span className="text-destructive">Cancelada</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded ring-2 ring-amber-400 bg-warning/30" />
+                  <span className="text-warning font-semibold">Selec.</span>
+                </div>
+              </div>
+
+              {/* Month Exceptions Summary Table/List */}
+              {monthOverrides.length > 0 && (
+                <div className="p-3.5 rounded-md bg-background/45 border border-border/70 space-y-2.5">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4 text-primary" />
+                    <span>Excepciones ({monthOverrides.length})</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    {monthOverrides.map((ov) => {
+                      const dayKey = getDayOfWeekKey(ov.date);
+                      const isNotPlaying = ov.status === 'not_playing';
+
+                      return (
+                        <div
+                          key={ov.date}
+                          className="p-2.5 rounded-lg bg-secondary border border-border/70 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                              <span>{ov.date}</span>
+                              <span className="text-[10px] text-muted-foreground font-normal">
+                                ({dayKey})
+                              </span>
+                            </div>
+
+                            <div className="text-[11px] mt-0.5 truncate">
+                              {isNotPlaying ? (
+                                <span className="text-destructive font-medium">🚫 No juego</span>
+                              ) : (
+                                <span className="text-warning font-medium">
+                                  🕒 {ov.availableFrom}–{ov.availableUntil} (±{ov.precisionMinutes}m)
+                                </span>
+                              )}
+                              {ov.reason && (
+                                <span className="text-muted-foreground ml-1">· {ov.reason}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreDefault(ov.date)}
+                            className="p-1.5 rounded-md hover:bg-secondary/60 text-muted-foreground hover:text-white transition-colors shrink-0"
+                            title="Restaurar rutina"
+                            aria-label={`Restaurar rutina ${ov.date}`}
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 sm:p-5 border-t border-indigo-900/40 bg-[#0d1424] flex items-center justify-between shrink-0">
-          <span className="text-xs text-slate-400 flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            Los cambios se guardan y sincronizan en tiempo real
-          </span>
-
+        <div className="p-3.5 sm:p-4 border-t border-border/70 bg-card flex items-center justify-end shrink-0">
           <button
             type="button"
             onClick={() => setShowWeeklyScheduleModal(false)}
-            className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-colors"
+            className="px-4 py-1.5 rounded-md bg-secondary/60 hover:bg-accent/70 text-foreground text-xs font-bold transition-colors"
           >
             Cerrar
           </button>

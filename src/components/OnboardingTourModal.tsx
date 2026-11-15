@@ -1,831 +1,766 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  DAYS_OF_WEEK,
-  GAME_CATEGORIES,
-  CategoryPreferenceLevel,
-  DayOfWeekKey,
-  GameRating,
-  PrecisionMinutes,
   WeeklySchedule,
+  DAYS_OF_WEEK,
+  DayOfWeekKey,
+  DayScheduleConfig,
 } from '../types/domain';
-import { createDefaultWeeklySchedule } from '../lib/matchmakingEngine';
+import { buildUnifiedGameSelectorList } from '@/lib/tasteProfileEngine';
 import { WeeklyBarsScheduleEditor } from './WeeklyBarsScheduleEditor';
+import { GamesCatalogView } from './GamesCatalogView';
 import {
-  X,
-  Zap,
+  createInitialsAvatarDataUri,
+  resizeImageFileToDataUrl,
+} from '@/lib/imageUtils';
+import {
+  User,
   Clock,
-  Dices,
-  Flame,
-  ShieldAlert,
+  Sparkles,
   ArrowRight,
   ArrowLeft,
-  CheckCircle2,
-  Sparkles,
-  Gamepad2,
-  Plus,
-  Star,
-  Heart,
-  Meh,
-  HeartCrack,
   Check,
-  CalendarCheck,
-  ChevronRight,
-  HelpCircle,
-  Users,
+  X,
+  Upload,
+  Link2,
+  RotateCcw,
+  Calendar,
+  MessageSquareQuote,
+  Pencil,
+  SkipForward,
 } from 'lucide-react';
 
-const PRECISION_OPTIONS: PrecisionMinutes[] = [5, 15, 30, 60];
+type TourStep = 1 | 2 | 3;
 
-const RATING_LABELS: Record<GameRating, { label: string; desc: string; emoji: string }> = {
-  1: { emoji: '🥱', label: 'Solo si me obligan', desc: '-15 pts de penalización en ruleta' },
-  2: { emoji: '😐', label: 'Zafa', desc: 'Sin penalización ni bonus' },
-  3: { emoji: '👍', label: 'Me copa', desc: 'Buen juego para el grupo' },
-  4: { emoji: '🔥', label: 'Juegazo', desc: 'Prioridad alta en el cruce de gustos' },
-  5: { emoji: '👑', label: 'Vicio Total', desc: '+5 pts de bonus de unanimidad' },
-};
+const TOUR_STEPS: Array<{
+  step: TourStep;
+  title: string;
+  optional?: boolean;
+}> = [
+  {
+    step: 1,
+    title: 'Perfil',
+  },
+  {
+    step: 2,
+    title: 'Juegos',
+  },
+  {
+    step: 3,
+    title: 'Horarios',
+    optional: true,
+  },
+];
 
-function getSafeInitialSchedule(userSchedule?: WeeklySchedule): WeeklySchedule {
-  if (userSchedule && Object.keys(userSchedule).length >= 7) {
-    return userSchedule;
+function getSafeInitialSchedule(existing?: WeeklySchedule): WeeklySchedule {
+  if (existing && Object.keys(existing).length === 7) {
+    return JSON.parse(JSON.stringify(existing)) as WeeklySchedule;
   }
-  if (typeof createDefaultWeeklySchedule === 'function') {
-    try {
-      return createDefaultWeeklySchedule();
-    } catch {
-      // fallback below
-    }
+
+  const fallback: Partial<WeeklySchedule> = {};
+  for (const d of DAYS_OF_WEEK) {
+    const isWeekend = d.key === 'fri' || d.key === 'sat' || d.key === 'sun';
+    const from = isWeekend ? '21:30' : '22:00';
+    const until = isWeekend ? '01:00' : '00:00';
+    const confidence = isWeekend ? 90 : 75;
+    const dayCfg: DayScheduleConfig = {
+      enabled: isWeekend || d.key === 'wed',
+      availableFrom: from,
+      availableUntil: until,
+      precisionMinutes: 15,
+      confidencePercentage: confidence,
+      slots: [
+        {
+          id: `tour_${d.key}_1`,
+          from,
+          until,
+          confidencePercentage: confidence,
+          precisionMinutes: 15,
+        },
+      ],
+    };
+    fallback[d.key as DayOfWeekKey] = dayCfg;
   }
-  return {
-    mon: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    tue: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    wed: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    thu: { enabled: true, availableFrom: '22:00', availableUntil: '01:00', precisionMinutes: 15 },
-    fri: { enabled: true, availableFrom: '22:30', availableUntil: '02:00', precisionMinutes: 15 },
-    sat: { enabled: true, availableFrom: '22:30', availableUntil: '02:30', precisionMinutes: 15 },
-    sun: { enabled: true, availableFrom: '21:30', availableUntil: '00:30', precisionMinutes: 15 },
-  };
+  return fallback as WeeklySchedule;
 }
 
 export const OnboardingTourModal: React.FC = () => {
   const {
-    showOnboardingModal,
-    setShowOnboardingModal,
     currentUser,
-    updateWeeklySchedule,
-    updateCategoryPreferences,
     games,
     preferences,
-    updateGamePreference,
-    addGame,
+    showOnboardingModal,
+    setShowOnboardingModal,
+    updateUserProfile,
+    updateWeeklySchedule,
     completeOnboarding,
   } = useApp();
 
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
+  const selectedGamesCount = useMemo(() => {
+    return buildUnifiedGameSelectorList({
+      player: currentUser,
+      allPreferences: preferences,
+      catalogGames: games,
+    }).filter((g) => g.isPlayedOrRatedByUser).length;
+  }, [currentUser, preferences, games]);
 
-  // Step 2 Draft: Weekly Schedule
-  const [draftSchedule, setDraftSchedule] = useState<WeeklySchedule>(() =>
+  const step2MinMet = selectedGamesCount >= 10;
+
+  const [currentStep, setCurrentStep] = useState<TourStep>(1);
+  const [step2ProfileRevealed, setStep2ProfileRevealed] = useState<boolean>(false);
+
+  // Step 1: General Account State
+  const [displayName, setDisplayName] = useState(currentUser.displayName);
+  const [birthDate, setBirthDate] = useState(currentUser.birthDate ?? '');
+  const [bio, setBio] = useState(currentUser.bio ?? '');
+  const [avatarUrl, setAvatarUrl] = useState(currentUser.avatarUrl);
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState(currentUser.avatarUrl);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
+
+  const initialDiscordAvatarRef = useRef<string>(currentUser.avatarUrl);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null);
+  const wasOpenRef = useRef<boolean>(false);
+  const lastUserIdRef = useRef<string>(currentUser.id);
+
+  // Step 3: Optional Weekly Schedule State
+  const [schedule, setSchedule] = useState<WeeklySchedule>(() =>
     getSafeInitialSchedule(currentUser.weeklySchedule)
   );
 
-  // Step 3 Draft: Category Preferences
-  const [draftCategoryPrefs, setDraftCategoryPrefs] = useState<Record<string, CategoryPreferenceLevel>>(() => {
-    return currentUser.categoryPreferences || {};
-  });
-
-  // Step 4 Draft: Add Game form expansion & inputs
-  const [showAddGameForm, setShowAddGameForm] = useState(false);
-  const [newGameName, setNewGameName] = useState('');
-  const [newGameCategory, setNewGameCategory] = useState(GAME_CATEGORIES[0]?.id || 'Shooter Táctico');
-  const [newGameDesc, setNewGameDesc] = useState('');
-  const [newGameMinPlayers, setNewGameMinPlayers] = useState(2);
-  const [newGameMaxPlayers, setNewGameMaxPlayers] = useState(5);
-  const [newGameCoverUrl, setNewGameCoverUrl] = useState('');
-  const [gameFilterQuery, setGameFilterQuery] = useState('');
-  const [gameCategoryFilter, setGameCategoryFilter] = useState('all');
-
-  // Keep drafts synced if user changes or modal opens
+  // Sync modal state only when opening or when the active user changes
   useEffect(() => {
-    if (showOnboardingModal) {
-      setDraftSchedule(getSafeInitialSchedule(currentUser.weeklySchedule));
-      setDraftCategoryPrefs(currentUser.categoryPreferences || {});
+    const justOpened = showOnboardingModal && !wasOpenRef.current;
+    const userSwitchedWhileOpen =
+      showOnboardingModal && lastUserIdRef.current !== currentUser.id;
+
+    if (justOpened || userSwitchedWhileOpen) {
       setCurrentStep(1);
+      setStep2ProfileRevealed(false);
+      setDisplayName(currentUser.displayName);
+      setBirthDate(currentUser.birthDate ?? '');
+      setBio(currentUser.bio ?? '');
+      setAvatarUrl(currentUser.avatarUrl);
+      setAvatarUrlDraft(currentUser.avatarUrl);
+      setShowUrlInput(false);
+      setAvatarError(null);
+      setProfileError(null);
+      initialDiscordAvatarRef.current = currentUser.avatarUrl;
+      setSchedule(getSafeInitialSchedule(currentUser.weeklySchedule));
     }
+
+    wasOpenRef.current = showOnboardingModal;
+    lastUserIdRef.current = currentUser.id;
   }, [showOnboardingModal, currentUser]);
 
-  // Filtered games catalog for Step 4 (MUST be called before early return to respect Rules of Hooks)
-  const filteredGames = useMemo(() => {
-    return games.filter((g) => {
-      const matchesSearch =
-        g.name.toLowerCase().includes(gameFilterQuery.toLowerCase()) ||
-        g.category.toLowerCase().includes(gameFilterQuery.toLowerCase());
-      const matchesCategory = gameCategoryFilter === 'all' || g.category === gameCategoryFilter;
-      return matchesSearch && matchesCategory;
-    });
-  }, [games, gameFilterQuery, gameCategoryFilter]);
+  // Scroll modal body to top on step change
+  useEffect(() => {
+    if (bodyScrollRef.current) {
+      bodyScrollRef.current.scrollTop = 0;
+    }
+  }, [currentStep]);
 
-  if (!showOnboardingModal) {
-    return null;
-  }
+  if (!showOnboardingModal) return null;
 
-  // Step 3 Category Preferences Handlers
-  const handleCategoryLevel = (categoryId: string, level: CategoryPreferenceLevel) => {
-    const updated = { ...draftCategoryPrefs, [categoryId]: level };
-    setDraftCategoryPrefs(updated);
-    updateCategoryPreferences(updated);
-  };
-
-  const handleSetAllCategories = (level: CategoryPreferenceLevel) => {
-    const updated: Record<string, CategoryPreferenceLevel> = {};
-    GAME_CATEGORIES.forEach((cat) => {
-      updated[cat.id] = level;
-    });
-    setDraftCategoryPrefs(updated);
-    updateCategoryPreferences(updated);
-  };
-
-  // Step 4 Handlers
-  const handleAddNewGame = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newGameName.trim()) return;
-
-    const created = addGame({
-      name: newGameName.trim(),
-      category: newGameCategory,
-      description: newGameDesc.trim() || undefined,
-      minPlayers: Math.max(1, newGameMinPlayers),
-      maxPlayers: Math.max(newGameMinPlayers, newGameMaxPlayers),
-      coverUrl:
-        newGameCoverUrl.trim() ||
-        'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
-      tags: [newGameCategory],
-      averageDurationMins: 90,
-    });
-
-    // Mark as played by current user with 4 stars if game returned
-    if (created && created.id) {
-      updateGamePreference(created.id, true, 4);
+  const persistProfileChanges = (): boolean => {
+    const trimmedName = displayName.trim();
+    if (!trimmedName) {
+      setProfileError('Ingresá tu apodo o nombre visible para continuar.');
+      setCurrentStep(1);
+      return false;
     }
 
-    // Reset form
-    setNewGameName('');
-    setNewGameDesc('');
-    setNewGameCoverUrl('');
-    setShowAddGameForm(false);
+    setProfileError(null);
+    updateUserProfile(
+      {
+        displayName: trimmedName,
+        discordUsername: currentUser.discordUsername,
+        avatarUrl: avatarUrl.trim() || currentUser.avatarUrl,
+        birthDate: birthDate.trim() || undefined,
+        bio: bio.trim() || undefined,
+      },
+      currentUser.id
+    );
+    return true;
   };
 
-  // Step Navigation
+  const handleStepSelect = (targetStep: TourStep) => {
+    if (currentStep === 1 && targetStep > 1) {
+      if (!persistProfileChanges()) return;
+    }
+    setCurrentStep(targetStep);
+  };
+
   const handleNext = () => {
-    if (currentStep === 2) {
-      updateWeeklySchedule(draftSchedule);
-    } else if (currentStep === 3) {
-      updateCategoryPreferences(draftCategoryPrefs);
+    if (currentStep === 1) {
+      if (!persistProfileChanges()) return;
+      setCurrentStep(2);
+      return;
     }
-
-    if (currentStep < 4) {
-      setCurrentStep((prev) => (prev + 1) as 1 | 2 | 3 | 4);
+    if (currentStep === 2) {
+      if (!step2ProfileRevealed) {
+        setStep2ProfileRevealed(true);
+        bodyScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      setCurrentStep(3);
     }
   };
 
   const handlePrev = () => {
-    if (currentStep > 1) {
-      setCurrentStep((prev) => (prev - 1) as 1 | 2 | 3 | 4);
+    if (currentStep === 2) setCurrentStep(1);
+    else if (currentStep === 3) setCurrentStep(2);
+  };
+
+  const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Elegí un archivo de imagen válido (JPG, PNG o WebP).');
+      return;
+    }
+
+    setIsProcessingAvatar(true);
+    setAvatarError(null);
+    try {
+      const resized = await resizeImageFileToDataUrl(file);
+      setAvatarUrl(resized);
+      setAvatarUrlDraft(resized);
+    } catch (err) {
+      setAvatarError(
+        err instanceof Error ? err.message : 'No se pudo procesar la imagen.'
+      );
+    } finally {
+      setIsProcessingAvatar(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const handleFinalFinish = () => {
-    updateWeeklySchedule(draftSchedule);
-    updateCategoryPreferences(draftCategoryPrefs);
-    completeOnboarding();
-    setShowOnboardingModal(false);
+  const handleApplyUrl = () => {
+    const trimmed = avatarUrlDraft.trim();
+    if (!trimmed) {
+      setAvatarError('Pegá una URL de imagen válida.');
+      return;
+    }
+    setAvatarError(null);
+    setAvatarUrl(trimmed);
+    setShowUrlInput(false);
   };
 
+  const handleRestoreInitialAvatar = () => {
+    setAvatarError(null);
+    setAvatarUrl(initialDiscordAvatarRef.current);
+    setAvatarUrlDraft(initialDiscordAvatarRef.current);
+  };
+
+  const handleSkipScheduleAndFinish = () => {
+    if (!persistProfileChanges()) return;
+    completeOnboarding();
+  };
+
+  const handleSaveScheduleAndFinish = () => {
+    if (!persistProfileChanges()) return;
+    updateWeeklySchedule(schedule, currentUser.id);
+    completeOnboarding();
+  };
+
+  const initials = (displayName || currentUser.displayName || 'BG')
+    .trim()
+    .slice(0, 2)
+    .toUpperCase();
+
+  const presetAvatars = [
+    {
+      label: 'Índigo',
+      url: createInitialsAvatarDataUri(initials, '#6366f1', '#4f46e5'),
+    },
+    {
+      label: 'Esmeralda',
+      url: createInitialsAvatarDataUri(initials, '#10b981', '#059669'),
+    },
+    {
+      label: 'Ámbar',
+      url: createInitialsAvatarDataUri(initials, '#f59e0b', '#ea580c'),
+    },
+    {
+      label: 'Fucsia',
+      url: createInitialsAvatarDataUri(initials, '#ec4899', '#9333ea'),
+    },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-[#131c31] border border-indigo-500/30 rounded-2xl shadow-2xl shadow-indigo-950/50 flex flex-col max-h-[92vh] overflow-hidden">
-        {/* Modal Header */}
-        <div className="p-4 sm:p-6 border-b border-indigo-900/40 flex items-center justify-between shrink-0 bg-[#0d1424]">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400">
-              <Sparkles className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-                <span>Tour Inicial &amp; Configuración</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-950 border border-indigo-500/30 text-indigo-300 font-semibold">
-                  Paso {currentStep} de 4
-                </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
+      <div className="w-full max-w-5xl max-h-[94vh] bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 rounded-lg shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden">
+        {/* Top Header & 3-Step Stepper */}
+        <div className="px-4 py-3 sm:px-6 sm:py-3.5 bg-card/55 backdrop-blur-md border-b border-border/70 shrink-0">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center shadow-none shrink-0">
+                <Sparkles className="w-4 h-4 text-white" strokeWidth={1.75} />
+              </div>
+              <h2 className="text-base font-extrabold text-white tracking-tight truncate">
+                Boludos Gaming
               </h2>
-              <p className="text-xs text-slate-400">
-                Configurá tu perfil de {currentUser.displayName} para matchmaking automático
-              </p>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-border/70 shrink-0">
+                {currentStep}/3
+              </span>
             </div>
+
+            <button
+              type="button"
+              onClick={() => completeOnboarding()}
+              title="Cerrar"
+              aria-label="Cerrar"
+              className="p-2 rounded-md text-muted-foreground hover:text-white hover:bg-secondary/60 transition-colors shrink-0 cursor-pointer"
+            >
+              <X className="w-4 h-4" strokeWidth={1.75} />
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowOnboardingModal(false)}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-            title="Cerrar tour"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+          {/* 3-Step Interactive Progress Bar */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {TOUR_STEPS.map((item) => {
+              const isActive = item.step === currentStep;
+              const isCompleted = item.step < currentStep;
 
-        {/* Progress Bar & Step Navigation Pills */}
-        <div className="px-4 sm:px-6 pt-3 pb-2 bg-[#0e1627] border-b border-indigo-900/30 shrink-0">
-          <div className="w-full bg-slate-800 rounded-full h-1.5 mb-3 overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-1.5 transition-all duration-300 rounded-full"
-              style={{ width: `${(currentStep / 4) * 100}%` }}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {[
-              { step: 1, label: '1. Cómo Funciona', icon: Zap },
-              { step: 2, label: '2. Rutina Semanal', icon: CalendarCheck },
-              { step: 3, label: '3. Categorías', icon: Heart },
-              { step: 4, label: '4. Tus Juegos', icon: Gamepad2 },
-            ].map((item) => {
-              const Icon = item.icon;
-              const isActive = currentStep === item.step;
-              const isPast = currentStep > item.step;
               return (
                 <button
                   key={item.step}
                   type="button"
-                  onClick={() => {
-                    if (currentStep === 2) updateWeeklySchedule(draftSchedule);
-                    if (currentStep === 3) updateCategoryPreferences(draftCategoryPrefs);
-                    setCurrentStep(item.step as 1 | 2 | 3 | 4);
-                  }}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  onClick={() => handleStepSelect(item.step)}
+                  className={`group flex items-center gap-2.5 p-2 sm:px-3 sm:py-2 rounded-md border text-left transition-all ${
                     isActive
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : isPast
-                      ? 'bg-indigo-950/70 text-indigo-300 hover:bg-indigo-900/80'
-                      : 'bg-slate-800/40 text-slate-500 hover:text-slate-300'
+                      ? 'bg-primary/15 border-primary/70 shadow-none'
+                      : isCompleted
+                      ? 'bg-success/10 border-success/35 hover:border-success/60'
+                      : 'bg-secondary/45 border-border/70 hover:border-border'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">{item.label}</span>
+                  <div
+                    className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-colors ${
+                      isActive
+                        ? 'bg-primary text-white'
+                        : isCompleted
+                        ? 'bg-success text-background'
+                        : 'bg-secondary/60 text-muted-foreground group-hover:text-foreground'
+                    }`}
+                  >
+                    {isCompleted ? (
+                      <Check className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    ) : (
+                      item.step
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                    <span
+                      className={`text-xs sm:text-sm font-bold truncate ${
+                        isActive
+                          ? 'text-white'
+                          : isCompleted
+                          ? 'text-success'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      {item.title}
+                    </span>
+                    {item.optional && (
+                      <span className="hidden md:inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-secondary/60 text-muted-foreground border border-border/70">
+                        Opcional
+                      </span>
+                    )}
+                  </div>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* Modal Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 text-slate-200">
-          {/* STEP 1: TOUR DE INSTRUCCIONES */}
+        {/* Modal Body */}
+        <div
+          ref={bodyScrollRef}
+          style={{ overflowAnchor: 'none' }}
+          className={`flex-1 overflow-y-auto scroller-thin space-y-5 ${
+            currentStep === 2
+              ? 'px-4 pb-4 pt-0 sm:px-5 sm:pb-5 sm:pt-0'
+              : 'p-4 sm:p-5'
+          }`}
+        >
+          {/* STEP 1: GENERAL ACCOUNT DATA */}
           {currentStep === 1 && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="text-center max-w-xl mx-auto mb-4">
-                <span className="text-xs uppercase font-extrabold tracking-wider text-indigo-400">
-                  Bienvenido al grupo
-                </span>
-                <h3 className="text-2xl font-black text-white mt-1">
-                  Las 4 Reglas de Oro de Boludos Gaming
-                </h3>
-                <p className="text-xs sm:text-sm text-slate-400 mt-1">
-                  Diseñado para jugar más, organizar en 5 segundos y erradicar el chamuyo con la puntualidad.
-                </p>
-              </div>
+            <div className="space-y-4 animate-step-in">
+              {profileError && (
+                <div className="p-3 rounded-md bg-destructive/15 border border-destructive/40 text-xs text-destructive font-semibold">
+                  {profileError}
+                </div>
+              )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Rule 1 */}
-                <div className="p-4 rounded-xl bg-[#0b1120] border border-indigo-500/20 hover:border-emerald-500/40 transition-all flex gap-3.5">
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shrink-0 h-fit">
-                    <CalendarCheck className="w-6 h-6" />
-                  </div>
+              {/* Profile Card Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Left Column: Avatar Picker */}
+                <div className="lg:col-span-5 bg-card/50 backdrop-blur-sm border border-border/70 rounded-md p-5 flex flex-col items-center text-center space-y-4">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessingAvatar}
+                    title="Subir foto"
+                    aria-label="Subir foto"
+                    className="relative group rounded-full focus:outline-none focus:ring-2 focus:ring-[#5865F2]"
+                  >
+                    <img
+                      src={avatarUrl}
+                      alt={displayName || 'Avatar'}
+                      onError={(e) => {
+                        e.currentTarget.src = presetAvatars[0].url;
+                      }}
+                      className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover border-4 border-primary/50 shadow-sm bg-secondary/60 group-hover:opacity-85 transition-opacity"
+                    />
+                  </button>
+
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <span>1. Horarios Default Automáticos</span>
-                    </h4>
-                    <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                      Configurás tu semana una sola vez (ej: Lun a Jue de 22:00 a 01:00) y el
-                      sistema te anota solo todos los días que jugás sin preguntarte nada.
+                    <p className="text-sm font-bold text-white">
+                      {displayName.trim() || currentUser.displayName}
                     </p>
-                    <span className="inline-block mt-2 text-[10px] font-semibold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                      ⚡ Cero preguntas de &quot;¿sale ese hoy?&quot;
-                    </span>
+                    {currentUser.discordUsername && (
+                      <p className="text-xs text-muted-foreground">
+                        @{currentUser.discordUsername}
+                      </p>
+                    )}
+                  </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadPhoto}
+                    className="hidden"
+                  />
+
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isProcessingAvatar}
+                      title="Subir foto"
+                      aria-label="Subir foto"
+                      className="p-2 rounded-md bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary transition-colors disabled:opacity-50"
+                    >
+                      <Upload className="w-4 h-4" strokeWidth={1.75} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowUrlInput((prev) => !prev)}
+                      title="Pegar URL"
+                      aria-label="Pegar URL"
+                      className="p-2 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-foreground transition-colors"
+                    >
+                      <Link2 className="w-4 h-4" strokeWidth={1.75} />
+                    </button>
+
+                    {avatarUrl !== initialDiscordAvatarRef.current && (
+                      <button
+                        type="button"
+                        onClick={handleRestoreInitialAvatar}
+                        title="Restaurar avatar"
+                        aria-label="Restaurar avatar"
+                        className="p-2 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-success transition-colors"
+                      >
+                        <RotateCcw className="w-4 h-4" strokeWidth={1.75} />
+                      </button>
+                    )}
+                  </div>
+
+                  {showUrlInput && (
+                    <div className="w-full flex gap-2 pt-1">
+                      <input
+                        type="url"
+                        value={avatarUrlDraft}
+                        onChange={(e) => setAvatarUrlDraft(e.target.value)}
+                        placeholder="https://..."
+                        className="flex-1 px-3 py-1.5 rounded-md bg-background/45 border border-border/70 text-xs text-white focus:outline-none focus:border-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplyUrl}
+                        title="Aplicar URL"
+                        aria-label="Aplicar URL"
+                        className="px-2.5 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white"
+                      >
+                        <Check className="w-4 h-4" strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  )}
+
+                  {avatarError && (
+                    <p className="text-[11px] text-destructive font-medium">
+                      {avatarError}
+                    </p>
+                  )}
+
+                  {/* Quick Initials Presets */}
+                  <div className="w-full pt-3 border-t border-border/70 flex items-center justify-center gap-2.5">
+                    {presetAvatars.map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setAvatarUrl(preset.url);
+                          setAvatarUrlDraft(preset.url);
+                          setAvatarError(null);
+                        }}
+                        title={`Avatar ${preset.label}`}
+                        aria-label={`Avatar ${preset.label}`}
+                        className={`w-9 h-9 rounded-full overflow-hidden border-2 transition-transform hover:scale-105 ${
+                          avatarUrl === preset.url
+                            ? 'border-success ring-2 ring-success'
+                            : 'border-border/70'
+                        }`}
+                      >
+                        <img
+                          src={preset.url}
+                          alt={preset.label}
+                          className="w-full h-full object-cover"
+                        />
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Rule 2 */}
-                <div className="p-4 rounded-xl bg-[#0b1120] border border-indigo-500/20 hover:border-amber-500/40 transition-all flex gap-3.5">
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0 h-fit">
-                    <ShieldAlert className="w-6 h-6" />
-                  </div>
+                {/* Right Column: Account Form Fields */}
+                <div className="lg:col-span-7 bg-card/50 backdrop-blur-sm border border-border/70 rounded-md p-5 space-y-4">
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <span>2. Botón &quot;🚫 Hoy No Juego&quot;</span>
-                    </h4>
-                    <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                      Si un día te surge un plan, cenás afuera o llegás más tarde, tocás &quot;Hoy no
-                      juego&quot; (o cambiás solo el horario de hoy). Te desanota al instante y te salvás
-                      del Tribunal.
-                    </p>
-                    <span className="inline-block mt-2 text-[10px] font-semibold text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      🛡️ Baja limpia sin penalización
-                    </span>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5">
+                      Apodo *
+                    </label>
+                    <div className="relative">
+                      <User
+                        className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2"
+                        strokeWidth={1.75}
+                      />
+                      <input
+                        type="text"
+                        value={displayName}
+                        onChange={(e) => {
+                          setDisplayName(e.target.value);
+                          if (profileError) setProfileError(null);
+                        }}
+                        maxLength={32}
+                        className="w-full pl-9 pr-3 py-2 rounded-md bg-background/45 border border-border/70 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* Rule 3 */}
-                <div className="p-4 rounded-xl bg-[#0b1120] border border-indigo-500/20 hover:border-purple-500/40 transition-all flex gap-3.5">
-                  <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 shrink-0 h-fit">
-                    <Dices className="w-6 h-6" />
-                  </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <span>3. Sincronía 1–5★ y Ruleta</span>
-                    </h4>
-                    <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                      La app cruza los juegos que tienen todos los presentes respetando el cupo mínimo
-                      y máximo. La ruleta pondera los favoritos evitando juegos que alguien califique 1★.
-                    </p>
-                    <span className="inline-block mt-2 text-[10px] font-semibold text-purple-400 bg-purple-950/80 px-2 py-0.5 rounded-full border border-purple-500/30">
-                      🎲 Sub-lobbies si sobra gente
-                    </span>
+                    <label className="block text-xs font-bold text-muted-foreground mb-1.5">
+                      Nacimiento
+                    </label>
+                    <div className="relative">
+                      <Calendar
+                        className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                        strokeWidth={1.75}
+                      />
+                      <input
+                        type="date"
+                        value={birthDate}
+                        onChange={(e) => setBirthDate(e.target.value)}
+                        max={new Date().toISOString().split('T')[0]}
+                        className="w-full pl-9 pr-3 py-2 rounded-md bg-background/45 border border-border/70 text-sm text-white focus:outline-none focus:border-primary [color-scheme:dark]"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* Rule 4 */}
-                <div className="p-4 rounded-xl bg-[#0b1120] border border-indigo-500/20 hover:border-rose-500/40 transition-all flex gap-3.5">
-                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 shrink-0 h-fit">
-                    <Flame className="w-6 h-6" />
-                  </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <span>4. El Tribunal del Humo</span>
-                    </h4>
-                    <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                      Si prometés 22:00 ±15m y no hacés check-in antes de las 22:15, perdés Karma y
-                      prioridad de cupo cuando haya más jugadores que slots disponibles en el juego.
-                    </p>
-                    <span className="inline-block mt-2 text-[10px] font-semibold text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded-full border border-rose-500/30">
-                      ⚖️ Reloj Suizo vs Fantasma Supremo
-                    </span>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+                        <MessageSquareQuote
+                          className="w-3.5 h-3.5 text-primary"
+                          strokeWidth={1.75}
+                        />
+                        <span>Bio</span>
+                      </label>
+                      <span className="text-[11px] text-muted-foreground">
+                        {bio.length}/160
+                      </span>
+                    </div>
+                    <textarea
+                      rows={3}
+                      maxLength={160}
+                      value={bio}
+                      onChange={(e) => setBio(e.target.value)}
+                      className="w-full px-3 py-2 rounded-md bg-background/45 border border-border/70 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary resize-none"
+                    />
                   </div>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <Sparkles className="w-5 h-5 text-indigo-400 shrink-0" />
-                  <span className="text-xs text-indigo-200">
-                    A continuación configuraremos tu rutina semanal, tus categorías favoritas y los
-                    juegos que jugás. Te tomará 1 minuto.
-                  </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 2: RUTINA SEMANAL DEFAULT (7 BARRAS INTERACTIVAS) */}
+          {/* STEP 2: UNIFIED GAMES CATALOG, STEAM & GAMER PROFILE REVEAL */}
           {currentStep === 2 && (
-            <div className="space-y-4 animate-in fade-in">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <CalendarCheck className="w-5 h-5 text-emerald-400" />
-                  <span>Tu Rutina Semanal — Selector de 7 Barras</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Pintá tus franjas horarias arrastrando sobre cada día. Hacé clic derecho sobre una franja para elegir la probabilidad (máx 95% en default).
-                </p>
-              </div>
-
-              <WeeklyBarsScheduleEditor
-                schedule={draftSchedule}
-                onChange={setDraftSchedule}
-                compact
+            <div>
+              <GamesCatalogView
+                embeddedInTour
+                profileRevealed={step2ProfileRevealed}
+                onProfileRevealedChange={(rev) => {
+                  if (rev && !step2MinMet) return;
+                  setStep2ProfileRevealed(rev);
+                  bodyScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
               />
             </div>
           )}
 
-          {/* STEP 3: CATEGORÍAS */}
+          {/* STEP 3: OPTIONAL WEEKLY SCHEDULE */}
           {currentStep === 3 && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Heart className="w-5 h-5 text-rose-400" />
-                    <span>Tus Preferencias por Categoría</span>
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Definí tu afinidad con cada género para orientar la ruleta y las sugerencias grupales.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSetAllCategories('like')}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-950 border border-emerald-500/30 text-emerald-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    💚 Todo me gusta
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSetAllCategories('neutral')}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    😐 Reset Neutral
-                  </button>
-                </div>
-              </div>
-
-              {/* Categories Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {GAME_CATEGORIES.map((cat) => {
-                  const currentLevel = draftCategoryPrefs[cat.id] || 'neutral';
-
-                  return (
-                    <div
-                      key={cat.id}
-                      className="p-3.5 rounded-xl bg-[#0b1120] border border-indigo-500/20 hover:border-indigo-500/40 transition-all flex flex-col justify-between gap-3"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-lg">{cat.emoji}</span>
-                          <span className="font-bold text-sm text-white">{cat.label}</span>
-                        </div>
-                        <p className="text-xs text-slate-400 leading-relaxed">{cat.description}</p>
-                      </div>
-
-                      {/* 3 Interactive Buttons */}
-                      <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => handleCategoryLevel(cat.id, 'like')}
-                          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
-                            currentLevel === 'like'
-                              ? 'bg-emerald-950 border border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/40'
-                              : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <Heart className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Me gusta</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleCategoryLevel(cat.id, 'neutral')}
-                          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
-                            currentLevel === 'neutral'
-                              ? 'bg-slate-700 border border-slate-500 text-slate-100 shadow-md'
-                              : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <Meh className="w-3.5 h-3.5 text-slate-300" />
-                          <span>Me da igual</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleCategoryLevel(cat.id, 'dislike')}
-                          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
-                            currentLevel === 'dislike'
-                              ? 'bg-rose-950 border border-rose-500 text-rose-300 shadow-md shadow-rose-950/40'
-                              : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <HeartCrack className="w-3.5 h-3.5 text-rose-400" />
-                          <span>Disgusta</span>
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 4: TUS JUEGOS & AGREGAR NUEVO */}
-          {currentStep === 4 && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Gamepad2 className="w-5 h-5 text-indigo-400" />
-                    <span>¿Qué Juegos Jugás? Calificación 1–5★</span>
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Marcá qué juegos tenés instalados y calificalos para el cruce algorítmico de la ruleta.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAddGameForm(!showAddGameForm)}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all self-start sm:self-auto"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{showAddGameForm ? 'Ocultar Formulario' : '➕ Agregar Juego Nuevo'}</span>
-                </button>
-              </div>
-
-              {/* Inline Add Game Form */}
-              {showAddGameForm && (
-                <form
-                  onSubmit={handleAddNewGame}
-                  className="p-4 rounded-xl bg-[#090f1d] border border-indigo-500/30 space-y-3.5 animate-in slide-in-from-top-2"
-                >
-                  <div className="flex items-center justify-between pb-2 border-b border-indigo-900/40">
-                    <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-indigo-400" />
-                      Agregar un Juego al Catálogo del Grupo
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddGameForm(false)}
-                      className="text-slate-500 hover:text-slate-300 text-xs"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">
-                        Nombre del Juego *
-                      </span>
-                      <input
-                        type="text"
-                        value={newGameName}
-                        onChange={(e) => setNewGameName(e.target.value)}
-                        placeholder="Ej: Left 4 Dead 2, Helldivers 2..."
-                        className="w-full px-3 py-2 rounded-lg bg-[#131c31] border border-indigo-500/20 text-white text-xs focus:outline-none focus:border-indigo-400"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">
-                        Categoría *
-                      </span>
-                      <select
-                        value={newGameCategory}
-                        onChange={(e) => setNewGameCategory(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-[#131c31] border border-indigo-500/20 text-white text-xs focus:outline-none focus:border-indigo-400"
-                      >
-                        {GAME_CATEGORIES.map((cat) => (
-                          <option key={cat.id} value={cat.id}>
-                            {cat.emoji} {cat.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">
-                        Límites de Jugadores (Mín - Máx) *
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={1}
-                          max={32}
-                          value={newGameMinPlayers}
-                          onChange={(e) => setNewGameMinPlayers(parseInt(e.target.value) || 1)}
-                          className="w-full px-3 py-2 rounded-lg bg-[#131c31] border border-indigo-500/20 text-white text-xs focus:outline-none focus:border-indigo-400"
-                          title="Mínimo"
-                        />
-                        <span className="text-slate-400 text-xs">a</span>
-                        <input
-                          type="number"
-                          min={newGameMinPlayers}
-                          max={64}
-                          value={newGameMaxPlayers}
-                          onChange={(e) => setNewGameMaxPlayers(parseInt(e.target.value) || 4)}
-                          className="w-full px-3 py-2 rounded-lg bg-[#131c31] border border-indigo-500/20 text-white text-xs focus:outline-none focus:border-indigo-400"
-                          title="Máximo"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">
-                        URL de Portada (Opcional)
-                      </span>
-                      <input
-                        type="url"
-                        value={newGameCoverUrl}
-                        onChange={(e) => setNewGameCoverUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full px-3 py-2 rounded-lg bg-[#131c31] border border-indigo-500/20 text-white text-xs focus:outline-none focus:border-indigo-400"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-semibold text-slate-300 block mb-1">
-                      Descripción breve
-                    </span>
-                    <input
-                      type="text"
-                      value={newGameDesc}
-                      onChange={(e) => setNewGameDesc(e.target.value)}
-                      placeholder="Co-op caótico de 4 jugadores contra hordas..."
-                      className="w-full px-3 py-2 rounded-lg bg-[#131c31] border border-indigo-500/20 text-white text-xs focus:outline-none focus:border-indigo-400"
-                    />
-                  </div>
-
-                  <div className="flex justify-end">
-                    <button
-                      type="submit"
-                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Guardar y Agregar a mis Juegos</span>
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Filter / Search Bar */}
-              <div className="flex flex-col sm:flex-row items-center gap-2">
-                <input
-                  type="text"
-                  value={gameFilterQuery}
-                  onChange={(e) => setGameFilterQuery(e.target.value)}
-                  placeholder="Buscar juego por nombre o categoría..."
-                  className="w-full sm:flex-1 px-3 py-2 rounded-xl bg-[#0b1120] border border-indigo-500/20 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-400"
+            <div className="space-y-4 animate-step-in">
+              <div className="flex items-center gap-2">
+                <Clock
+                  className="w-5 h-5 text-primary"
+                  strokeWidth={1.75}
                 />
-
-                <select
-                  value={gameCategoryFilter}
-                  onChange={(e) => setGameCategoryFilter(e.target.value)}
-                  className="w-full sm:w-auto px-3 py-2 rounded-xl bg-[#0b1120] border border-indigo-500/20 text-slate-200 text-xs focus:outline-none focus:border-indigo-400"
-                >
-                  <option value="all">Todas las categorías</option>
-                  {GAME_CATEGORIES.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.emoji} {c.label}
-                    </option>
-                  ))}
-                </select>
+                <h3 className="text-base font-bold text-white">Horarios</h3>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-warning/15 text-warning border border-warning/35">
+                  Opcional
+                </span>
               </div>
 
-              {/* Games Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {filteredGames.map((game) => {
-                  const pref = preferences.find(
-                    (p) => p.userId === currentUser.id && p.gameId === game.id
-                  );
-                  const plays = pref ? pref.plays : false;
-                  const currentRating = (pref ? pref.rating : 3) as GameRating;
-                  const ratingInfo = RATING_LABELS[currentRating];
-
-                  return (
-                    <div
-                      key={game.id}
-                      className={`rounded-xl border transition-all overflow-hidden flex flex-col justify-between ${
-                        plays
-                          ? 'bg-[#0b1120] border-indigo-500/40 shadow-sm shadow-indigo-950/30'
-                          : 'bg-[#070b14]/70 border-slate-800/80 opacity-70'
-                      }`}
-                    >
-                      {/* Cover & Basic Info */}
-                      <div className="relative h-24 w-full bg-slate-900 overflow-hidden">
-                        <img
-                          src={game.coverUrl}
-                          alt={game.name}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0b1120] via-transparent to-black/40" />
-
-                        <div className="absolute top-2 left-2 flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/60 backdrop-blur-md text-white border border-white/10">
-                            {game.category}
-                          </span>
-                        </div>
-
-                        <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/60 backdrop-blur-md text-slate-300 border border-white/10">
-                          <Users className="w-3 h-3 text-indigo-400" />
-                          <span>
-                            {game.minPlayers}-{game.maxPlayers}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 flex-1 flex flex-col justify-between">
-                        <div>
-                          <h4 className="font-bold text-sm text-white truncate">{game.name}</h4>
-                          <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
-                            {game.description || 'Juego cooperativo del grupo'}
-                          </p>
-                        </div>
-
-                        {/* Toggle & Star Rating */}
-                        <div className="mt-3 pt-2.5 border-t border-slate-800/80">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-semibold text-slate-300">
-                              {plays ? '✅ Lo juego' : '❌ No lo juego'}
-                            </span>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateGamePreference(game.id, !plays, currentRating)
-                              }
-                              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
-                                plays
-                                  ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
-                                  : 'bg-slate-800 text-slate-400 hover:text-white'
-                              }`}
-                            >
-                              {plays ? 'Habilitado' : 'Deshabilitado'}
-                            </button>
-                          </div>
-
-                          {plays && (
-                            <div>
-                              <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-1">
-                                  {([1, 2, 3, 4, 5] as GameRating[]).map((starVal) => (
-                                    <button
-                                      key={starVal}
-                                      type="button"
-                                      onClick={() =>
-                                        updateGamePreference(game.id, true, starVal)
-                                      }
-                                      className="p-0.5 hover:scale-125 transition-transform"
-                                      title={RATING_LABELS[starVal].label}
-                                    >
-                                      <Star
-                                        className={`w-4 h-4 ${
-                                          starVal <= currentRating
-                                            ? 'text-amber-400 fill-amber-400'
-                                            : 'text-slate-600'
-                                        }`}
-                                      />
-                                    </button>
-                                  ))}
-                                </div>
-                                <span className="text-[11px] font-bold text-amber-300">
-                                  {currentRating}★ {ratingInfo.emoji}
-                                </span>
-                              </div>
-                              <span className="text-[10px] text-slate-400 block truncate">
-                                {ratingInfo.label}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <WeeklyBarsScheduleEditor
+                schedule={schedule}
+                onChange={setSchedule}
+                compact
+              />
             </div>
           )}
         </div>
 
         {/* Modal Footer Controls */}
-        <div className="p-4 sm:p-6 border-t border-indigo-900/40 bg-[#0d1424] flex items-center justify-between shrink-0">
+        <div className="px-4 py-3 sm:px-6 sm:py-3.5 border-t border-border/70 bg-card/55 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div>
             {currentStep > 1 ? (
               <button
                 type="button"
                 onClick={handlePrev}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 transition-colors"
+                className="px-3.5 py-2 rounded-md bg-secondary/60 hover:bg-accent/70 text-foreground text-xs font-bold flex items-center gap-1.5 transition-colors"
               >
-                <ArrowLeft className="w-4 h-4" />
+                <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
                 <span>Anterior</span>
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => setShowOnboardingModal(false)}
-                className="text-xs text-slate-500 hover:text-slate-300 underline"
+                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
               >
-                Omitir y configurar después
+                Omitir
               </button>
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            {currentStep < 4 ? (
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {currentStep === 1 && (
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all"
+                className="px-4 py-2 rounded-md bg-primary hover:bg-primary/90 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-none transition-all cursor-pointer"
               >
                 <span>Siguiente</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleFinalFinish}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-indigo-600 hover:from-emerald-600 hover:to-indigo-700 active:scale-95 text-white text-xs font-extrabold flex items-center gap-2 shadow-lg shadow-emerald-500/25 transition-all"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>🚀 Guardar Todo y Entrar al Lobby</span>
-              </button>
+            )}
+
+            {currentStep === 2 &&
+              (step2ProfileRevealed ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep2ProfileRevealed(false);
+                      bodyScrollRef.current?.scrollTo({
+                        top: 0,
+                        behavior: 'smooth',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-foreground text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Pencil
+                      className="w-3.5 h-3.5 text-primary"
+                      strokeWidth={1.75}
+                    />
+                    <span>Editar</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNext}
+                    className="px-4 py-2 rounded-md bg-primary hover:bg-primary/90 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-none transition-all cursor-pointer"
+                  >
+                    <span>Siguiente</span>
+                    <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(3)}
+                    className="px-3.5 py-2 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-foreground text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <SkipForward
+                      className="w-4 h-4 text-muted-foreground"
+                      strokeWidth={1.75}
+                    />
+                    <span>Omitir</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!step2MinMet}
+                    title={!step2MinMet ? 'Mínimo 10 juegos' : 'Revelar perfil'}
+                    onClick={() => {
+                      if (!step2MinMet) return;
+                      setStep2ProfileRevealed(true);
+                      bodyScrollRef.current?.scrollTo({
+                        top: 0,
+                        behavior: 'smooth',
+                      });
+                    }}
+                    className={`px-4 py-2 rounded-md text-xs font-extrabold flex items-center gap-1.5 shadow-none transition-all ${
+                      step2MinMet
+                        ? 'cursor-pointer bg-primary hover:bg-primary/90 active:scale-95 text-white border border-transparent'
+                        : 'bg-muted text-slate-400 border border-border opacity-80 cursor-not-allowed'
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4" strokeWidth={1.75} />
+                    <span>Revelar ({selectedGamesCount}/10)</span>
+                  </button>
+                </div>
+              ))}
+
+            {currentStep === 3 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSkipScheduleAndFinish}
+                  className="px-3.5 py-2 rounded-md bg-secondary/60 hover:bg-accent/70 border border-border/70 text-foreground text-xs font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  <SkipForward
+                    className="w-4 h-4 text-muted-foreground"
+                    strokeWidth={1.75}
+                  />
+                  <span>Omitir</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveScheduleAndFinish}
+                  className="px-4 py-2 rounded-md bg-primary hover:bg-primary/90 active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-none transition-all"
+                >
+                  <Sparkles className="w-4 h-4" strokeWidth={1.75} />
+                  <span>Guardar</span>
+                </button>
+              </>
             )}
           </div>
         </div>

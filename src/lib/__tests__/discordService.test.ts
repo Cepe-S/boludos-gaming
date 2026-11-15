@@ -9,11 +9,13 @@ import {
   buildChatBroadcastLog,
   buildCheckinUpdateLog,
   buildSessionCalloutDiscordPayload,
+  buildGroupWebhookTestLog,
   dispatchDiscordWebhook,
 } from '../discordService';
 import {
   ChatMessage,
   Game,
+  GamingGroup,
   GamingSession,
   PlayerProfile,
   SanctionRecord,
@@ -67,8 +69,28 @@ const mockGhostPlayer: PlayerProfile = {
   activeTitle: '👻 Fantasma Supremo (Sin Prioridad de Cupo)',
 };
 
+const mockGroup: GamingGroup = {
+  id: 'group-test',
+  name: 'Escuadrón Nocturno',
+  description: 'Grupo de pruebas para matchmaking y webhooks.',
+  inviteCode: 'BG-TEST1',
+  createdBy: 'user-santi',
+  memberIds: ['user-santi', 'user-nacho', 'user-gonza'],
+  adminIds: ['user-santi'],
+  discordConfig: {
+    enabled: true,
+    webhookUrl: 'https://discord.com/api/webhooks/999/test_token',
+    channelName: '#vicio-nocturno',
+    guildName: 'Server Test',
+    mentionRoleId: '987654321098765432',
+    useEveryoneMention: false,
+  },
+  createdAt: '2026-11-10T18:00:00.000Z',
+};
+
 const mockSession: GamingSession = {
   id: 'sess-101',
+  groupId: 'group-test',
   title: 'Viernes de CS2 y Birra',
   date: '2026-11-13',
   mode: 'random',
@@ -186,6 +208,19 @@ describe('Discord Service & Rich Embeds (discordService)', () => {
 
       const splitField = log.embed.fields.find((f) => f.name === '🔀 Sub-Lobbies');
       expect(splitField?.value).toBe('Lobby Único');
+    });
+
+    it('attaches groupId, groupName, and Grupo embed field when passed a GamingGroup', () => {
+      const log = buildSessionCreatedLog(mockSession, mockCreator, '@BoludosGaming', mockGroup);
+
+      expect(log.groupId).toBe(mockGroup.id);
+      expect(log.groupName).toBe(mockGroup.name);
+      const groupField = log.embed.fields.find((f) => f.name === '👥 Grupo');
+      expect(groupField).toEqual({
+        name: '👥 Grupo',
+        value: mockGroup.name,
+        inline: true,
+      });
     });
   });
 
@@ -549,6 +584,65 @@ describe('Discord Service & Rich Embeds (discordService)', () => {
 
       const modeField = log.embed.fields.find((f) => f.name === '🎯 Modo');
       expect(modeField?.value).toBe('🎯 Juego Fijo');
+    });
+
+    it('attaches groupId, groupName, Grupo embed field, and group role mention when passed a GamingGroup', () => {
+      const log = buildSessionCalloutDiscordPayload(
+        sessionWithConfirmed,
+        mockCreator,
+        [{ player: mockTargetPlayer, confidencePercentage: 85 }],
+        '¡Falta uno para completar!',
+        undefined,
+        mockGroup
+      );
+
+      expect(log.groupId).toBe(mockGroup.id);
+      expect(log.groupName).toBe(mockGroup.name);
+      expect(log.content).toContain(`<@&${mockGroup.discordConfig.mentionRoleId}>`);
+      expect(log.content).toContain(`<@${mockTargetPlayer.discordId}>`);
+
+      const groupField = log.embed.fields.find((f) => f.name === '👥 Grupo');
+      expect(groupField).toEqual({
+        name: '👥 Grupo',
+        value: mockGroup.name,
+        inline: true,
+      });
+    });
+  });
+
+  describe('buildGroupWebhookTestLog', () => {
+    it('generates a valid rich embed payload scoped to a GamingGroup', () => {
+      const log = buildGroupWebhookTestLog(mockGroup, mockCreator);
+
+      expect(log.id).toMatch(/^grptest-/);
+      expect(log.eventType).toBe('chat_broadcast');
+      expect(log.groupId).toBe(mockGroup.id);
+      expect(log.groupName).toBe(mockGroup.name);
+      expect(log.deliveredToWebhook).toBe(false);
+
+      expect(log.content).toContain(`<@&${mockGroup.discordConfig.mentionRoleId}>`);
+      expect(log.content).toContain(mockGroup.name);
+      expect(log.content).toContain(`<@${mockCreator.discordId}>`);
+
+      expect(log.embed.title).toBe(`✅ Conexión Exitosa: ${mockGroup.name}`);
+      expect(log.embed.description).toContain(mockGroup.name);
+      expect(log.embed.color).toBe(0x10b981);
+      expect(log.embed.footer?.text).toContain(mockGroup.name);
+      expect(log.embed.timestamp).toBeDefined();
+
+      expect(log.embed.fields).toEqual(
+        expect.arrayContaining([
+          { name: '👥 Grupo', value: mockGroup.name, inline: true },
+          { name: '📺 Canal', value: mockGroup.discordConfig.channelName, inline: true },
+          { name: '🧑‍🤝‍🧑 Integrantes', value: '3 miembros', inline: true },
+          { name: '🔑 Código de Invitación', value: mockGroup.inviteCode, inline: true },
+          { name: '👑 Ejecutado por', value: mockCreator.displayName, inline: true },
+        ])
+      );
+
+      expect(log.buttons).toEqual([
+        { label: 'Abrir Grupo en App', actionType: 'open_app', style: 'primary' },
+      ]);
     });
   });
 

@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DAYS_OF_WEEK,
   DayOfWeekKey,
@@ -9,18 +10,11 @@ import {
 } from '../types/domain';
 import {
   Clock,
-  Sparkles,
   Zap,
   Sliders,
   Trash2,
   Copy,
-  Plus,
-  Check,
-  AlertTriangle,
   X,
-  Info,
-  CalendarCheck,
-  CalendarOff,
 } from 'lucide-react';
 
 export interface WeeklyBarsScheduleEditorProps {
@@ -29,9 +23,9 @@ export interface WeeklyBarsScheduleEditorProps {
   compact?: boolean;
 }
 
-// 12-hour window: 18:00 to 06:00 (+1 day) = 24 half-hour segments
-const TOTAL_TICKS = 24;
-const START_HOUR = 18;
+// 15-hour window: 12:00 (mediodía) to 03:00 (+1 day madrugada) = 30 half-hour segments
+const TOTAL_TICKS = 30;
+const START_HOUR = 12;
 
 const PRECISION_OPTIONS: PrecisionMinutes[] = [5, 15, 30, 60];
 
@@ -44,37 +38,37 @@ const CONFIDENCE_PRESETS: Array<{ value: number; label: string; desc: string }> 
 ];
 
 /**
- * Converts a "HH:mm" time string into tick index [0..24] relative to 18:00.
+ * Converts a "HH:mm" time string into tick index [0..30] relative to 12:00.
  */
 export function timeToTick(timeStr: string): number {
-  if (!timeStr || !timeStr.includes(':')) return 8; // fallback 22:00
+  if (!timeStr || !timeStr.includes(':')) return 20; // fallback 22:00 (tick 20)
   const [hStr, mStr] = timeStr.split(':');
   const h = parseInt(hStr, 10) || 0;
   const m = parseInt(mStr, 10) || 0;
 
-  let minsFrom18: number;
-  if (h >= 18) {
-    minsFrom18 = (h - 18) * 60 + m;
-  } else if (h <= 6) {
-    minsFrom18 = (h + 24 - 18) * 60 + m; // 00:00 -> 360m, 01:00 -> 420m, 06:00 -> 720m
+  let minsFrom12: number;
+  if (h >= 12) {
+    minsFrom12 = (h - 12) * 60 + m;
+  } else if (h <= 3) {
+    minsFrom12 = (h + 24 - 12) * 60 + m; // 00:00 -> 720m (tick 24), 03:00 -> 900m (tick 30)
   } else {
-    // daytime outside gaming window
-    minsFrom18 = h > 12 ? 0 : 720;
+    // daytime outside gaming window (04:00 to 11:59)
+    minsFrom12 = h < 8 ? 900 : 0;
   }
 
-  const tick = minsFrom18 / 30;
+  const tick = minsFrom12 / 30;
   return Math.max(0, Math.min(TOTAL_TICKS, Math.round(tick)));
 }
 
 /**
- * Converts a tick index [0..24] into a "HH:mm" 24h formatted string.
+ * Converts a tick index [0..30] into a "HH:mm" 24h formatted string.
  */
 export function tickToTime(tick: number): string {
   const clampedTick = Math.max(0, Math.min(TOTAL_TICKS, Math.round(tick)));
-  const totalMinsFrom18 = clampedTick * 30;
-  const rawHour = START_HOUR + Math.floor(totalMinsFrom18 / 60);
+  const totalMinsFrom12 = clampedTick * 30;
+  const rawHour = START_HOUR + Math.floor(totalMinsFrom12 / 60);
   const hour = rawHour % 24;
-  const mins = totalMinsFrom18 % 60;
+  const mins = totalMinsFrom12 % 60;
   return `${String(hour).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
@@ -92,11 +86,11 @@ export function getConfidenceStyle(pct: number): {
 } {
   if (pct <= 35) {
     return {
-      bg: 'bg-amber-950/50',
-      border: 'border-amber-500/60 border-dashed',
-      text: 'text-amber-200',
-      badgeBg: 'bg-amber-950/90',
-      badgeBorder: 'border-amber-500/50',
+      bg: 'bg-warning/50',
+      border: 'border-warning/60 border-dashed',
+      text: 'text-warning',
+      badgeBg: 'bg-warning/90',
+      badgeBorder: 'border-warning/50',
       glow: 'shadow-amber-500/10',
       label: 'Dudoso / Poco probable',
     };
@@ -114,22 +108,22 @@ export function getConfidenceStyle(pct: number): {
   }
   if (pct <= 84) {
     return {
-      bg: 'bg-indigo-950/60',
-      border: 'border-indigo-500/70',
-      text: 'text-indigo-200',
-      badgeBg: 'bg-indigo-950/90',
-      badgeBorder: 'border-indigo-500/50',
-      glow: 'shadow-indigo-500/25 shadow-sm',
+      bg: 'bg-primary/60',
+      border: 'border-[#5865F2]/70',
+      text: 'text-primary',
+      badgeBg: 'bg-primary/90',
+      badgeBorder: 'border-[#5865F2]/50',
+      glow: 'shadow-none',
       label: 'Probable',
     };
   }
   return {
-    bg: 'bg-emerald-950/60',
-    border: 'border-emerald-500/70',
-    text: 'text-emerald-200',
-    badgeBg: 'bg-emerald-950/90',
-    badgeBorder: 'border-emerald-500/50',
-    glow: 'shadow-emerald-500/30 shadow-md',
+    bg: 'bg-success/15',
+    border: 'border-success/70',
+    text: 'text-success',
+    badgeBg: 'bg-success/15',
+    badgeBorder: 'border-success/50',
+    glow: 'shadow-success/30 shadow-md',
     label: 'Muy probable · Casi seguro',
   };
 }
@@ -197,6 +191,8 @@ interface DragState {
 interface ContextMenuState {
   dayKey: DayOfWeekKey;
   slot: TimeSlotBlock;
+  anchorX: number;
+  anchorY: number;
   x: number;
   y: number;
 }
@@ -214,6 +210,7 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
   } | null>(null);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Ensure all 7 days have their normalized slots cached
@@ -316,7 +313,7 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
     onChange(next);
   };
 
-  // Convert mouse X client pos to tick [0..24]
+  // Convert mouse X client pos to tick [0..30]
   const getTickFromMouseEvent = useCallback((clientX: number, rect: DOMRect): number => {
     const rawX = clientX - rect.left;
     const clampedX = Math.max(0, Math.min(rect.width, rawX));
@@ -434,26 +431,66 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
     });
   };
 
-  // Open Context Menu
+  // Open Context Menu (initial estimate; refined with actual DOM dimensions in useLayoutEffect)
   const openContextMenu = (
     dayKey: DayOfWeekKey,
     slot: TimeSlotBlock,
     clientX: number,
     clientY: number
   ) => {
-    // Clamp to viewport
-    const menuWidth = 330;
-    const menuHeight = 440;
-    const clampedX = Math.max(10, Math.min(window.innerWidth - menuWidth - 16, clientX));
-    const clampedY = Math.max(10, Math.min(window.innerHeight - menuHeight - 16, clientY));
+    const margin = 12;
+    const estWidth = 330;
+    const estHeight = 480;
+    const openLeft = clientX + estWidth > window.innerWidth - margin && clientX - estWidth >= margin;
+    const openUp = clientY + estHeight > window.innerHeight - margin && clientY > window.innerHeight / 2;
+
+    const initialX = Math.max(
+      margin,
+      Math.min(window.innerWidth - estWidth - margin, openLeft ? clientX - estWidth : clientX)
+    );
+    const initialY = Math.max(
+      margin,
+      Math.min(window.innerHeight - estHeight - margin, openUp ? clientY - estHeight : clientY)
+    );
 
     setContextMenu({
       dayKey,
       slot,
-      x: clampedX,
-      y: clampedY,
+      anchorX: clientX,
+      anchorY: clientY,
+      x: initialX,
+      y: initialY,
     });
   };
+
+  // Refine context menu position using actual rendered size so it always opens toward available space
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+
+    const margin = 12;
+    const rect = contextMenuRef.current.getBoundingClientRect();
+    const { anchorX, anchorY } = contextMenu;
+
+    const spaceRight = window.innerWidth - anchorX - margin;
+    const spaceLeft = anchorX - margin;
+    let nextX =
+      spaceRight >= rect.width || spaceRight >= spaceLeft
+        ? anchorX
+        : anchorX - rect.width;
+    nextX = Math.max(margin, Math.min(window.innerWidth - rect.width - margin, nextX));
+
+    const spaceBelow = window.innerHeight - anchorY - margin;
+    const spaceAbove = anchorY - margin;
+    let nextY =
+      spaceBelow >= rect.height || spaceBelow >= spaceAbove
+        ? anchorY
+        : anchorY - rect.height;
+    nextY = Math.max(margin, Math.min(window.innerHeight - rect.height - margin, nextY));
+
+    if (Math.abs(nextX - contextMenu.x) > 1 || Math.abs(nextY - contextMenu.y) > 1) {
+      setContextMenu((prev) => (prev ? { ...prev, x: nextX, y: nextY } : null));
+    }
+  }, [contextMenu]);
 
   // Global mouse move & mouse up listeners during drag
   useEffect(() => {
@@ -514,7 +551,8 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
           fromTick = Math.max(0, Math.min(TOTAL_TICKS - 4, dragState.clickTick));
           toTick = Math.min(TOTAL_TICKS, fromTick + 4);
         } else if (toTick - fromTick < 1) {
-          toTick = fromTick + 1;
+          toTick = Math.min(TOTAL_TICKS, fromTick + 1);
+          if (toTick === fromTick) fromTick = Math.max(0, toTick - 1);
         }
 
         const newSlot: TimeSlotBlock = {
@@ -642,100 +680,105 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
   };
 
   return (
-    <div className="space-y-4 text-slate-200 select-none">
-      {/* 1. Header Hint Banner */}
-      <div className="p-3.5 rounded-xl bg-gradient-to-r from-indigo-950/60 via-purple-950/40 to-slate-900 border border-indigo-500/30 flex items-start gap-3 shadow-md">
-        <Sparkles className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-        <div className="text-xs text-indigo-200 leading-relaxed">
-          <p className="font-bold text-white mb-0.5">
-            💡 Editor Interactivo de 7 Barras Semanales
-          </p>
-          <span>
-            Arrastrá sobre cualquier barra para pintar tu horario y hacé{' '}
-            <strong className="text-amber-300">CLIC DERECHO</strong> sobre una franja para elegir
-            el <strong className="text-white">% de probabilidad</strong>, precisión horaria o{' '}
-            <strong className="text-rose-300">borrarla</strong>. Recordá que en horario default la
-            confianza máxima es <strong className="text-emerald-300">95%</strong> (100% solo al
-            confirmar la sesión del día).
-          </span>
-        </div>
-      </div>
-
-      {/* 2. Quick Presets Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-indigo-900/30">
-        <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span>Presets de 1 clic:</span>
+    <div className="space-y-3 text-foreground select-none">
+      {/* Quick Presets Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#232834]">
+        <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
+          <Zap className="w-3.5 h-3.5 text-warning" strokeWidth={1.75} />
+          <span>Presets</span>
         </span>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => handleApplyPreset('weekdays')}
-            className="px-2.5 py-1 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/30 text-indigo-300 hover:text-white text-[11px] font-semibold transition-all active:scale-95"
-            title="Aplica 22:00 a 01:00 de Lunes a Viernes"
+            className="px-2.5 py-1 rounded-md bg-[#5865F2]/15 hover:bg-[#5865F2]/25 border border-[#232834] text-primary hover:text-white text-[11px] font-semibold transition-all active:scale-95"
+            title="Aplicar 22:00–01:00 de Lun a Vie"
+            aria-label="Preset Lun–Vie 22:00–01:00"
           >
-            ⚡ Lun–Vie (22:00–01:00)
+            Lun–Vie
           </button>
           <button
             type="button"
             onClick={() => handleApplyPreset('weekend')}
-            className="px-2.5 py-1 rounded-lg bg-purple-950/80 hover:bg-purple-900 border border-purple-500/30 text-purple-300 hover:text-white text-[11px] font-semibold transition-all active:scale-95"
-            title="Aplica 22:30 a 02:30 para Viernes y Sábado"
+            className="px-2.5 py-1 rounded-md bg-primary/15 hover:bg-primary/15 border border-primary/40 text-primary hover:text-white text-[11px] font-semibold transition-all active:scale-95"
+            title="Aplicar 22:30–02:30 Vie y Sáb"
+            aria-label="Preset Vie–Sáb 22:30–02:30"
           >
-            🔥 Vie–Sáb (22:30–02:30)
+            Vie–Sáb
           </button>
           <button
             type="button"
             onClick={() => handleApplyPreset('everyday')}
-            className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/30 text-emerald-300 hover:text-white text-[11px] font-semibold transition-all active:scale-95"
-            title="Aplica 22:00 a 01:30 todos los días"
+            className="px-2.5 py-1 rounded-md bg-success/15 hover:bg-success/90 border border-success/30 text-success hover:text-white text-[11px] font-semibold transition-all active:scale-95"
+            title="Aplicar 22:00–01:30 todos los días"
+            aria-label="Preset todos los días"
           >
-            🌙 Todos los días
+            Todos
           </button>
           <button
             type="button"
             onClick={() => handleApplyPreset('reset')}
-            className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white text-[11px] font-semibold transition-all active:scale-95"
-            title="Deshabilita todos los días"
+            className="p-1.5 rounded-md bg-[#1F242E] hover:bg-[#2A303E] border border-[#232834] text-muted-foreground hover:text-destructive transition-all active:scale-95"
+            title="Limpiar todos los días"
+            aria-label="Limpiar todos los días"
           >
-            🔄 Limpiar
+            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
           </button>
         </div>
       </div>
 
       {/* 3. The 7 Timeline Rows Container */}
-      <div className="bg-[#090d16] border border-indigo-500/30 rounded-2xl p-3 sm:p-4 shadow-xl shadow-black/40 space-y-2">
+      <div className="bg-background/45 border border-[#232834] rounded-md p-3 sm:p-4 shadow-sm space-y-2">
         {/* Time Axis Header */}
-        <div className="flex items-center gap-3 pb-2 border-b border-indigo-900/40">
+        <div className="flex items-center gap-3 pb-2 border-b border-[#232834]">
           {/* Day Label Spacer */}
-          <div className="w-20 sm:w-28 shrink-0 text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">
+          <div className="w-20 sm:w-28 shrink-0 text-[10px] font-bold text-muted-foreground uppercase tracking-wider pl-1">
             Día
           </div>
 
-          {/* 24-Segment Axis Ruler */}
+          {/* 30-Segment Axis Ruler (12:00 to 03:00) */}
           <div className="relative flex-1 h-6">
             {/* Hour Markers */}
-            {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map((tick) => {
+            {[0, 4, 8, 12, 16, 20, 24, 28, 30].map((tick) => {
               const time = tickToTime(tick);
               const leftPercent = (tick / TOTAL_TICKS) * 100;
-              const isMidnight = tick === 12;
+              const isMidnight = tick === 24;
+              const isNoon = tick === 0;
+
+              let label = time;
+              if (isMidnight) label = '00:00 🌙';
+              else if (isNoon) label = '12:00 ☀️';
 
               return (
                 <div
                   key={tick}
-                  className="absolute top-0 flex flex-col items-center -translate-x-1/2 pointer-events-none"
+                  className={`absolute top-0 flex flex-col pointer-events-none ${
+                    tick === 0
+                      ? 'items-start translate-x-0'
+                      : tick === 30
+                      ? 'items-end -translate-x-full'
+                      : 'items-center -translate-x-1/2'
+                  } ${tick === 28 ? 'hidden sm:flex' : 'flex'}`}
                   style={{ left: `${leftPercent}%` }}
                 >
                   <span
-                    className={`text-[10px] font-mono font-bold leading-none ${
-                      isMidnight ? 'text-amber-300' : 'text-slate-400'
+                    className={`text-[9px] sm:text-[10px] font-mono font-bold leading-none select-none ${
+                      isMidnight
+                        ? 'text-warning'
+                        : isNoon
+                        ? 'text-warning'
+                        : 'text-muted-foreground'
                     }`}
                   >
-                    {isMidnight ? '00:00 🌙' : time}
+                    {label}
                   </span>
                   <div
                     className={`w-px h-1.5 mt-1 ${
-                      isMidnight ? 'bg-amber-400' : 'bg-slate-700'
+                      isMidnight
+                        ? 'bg-warning'
+                        : isNoon
+                        ? 'bg-warning/80'
+                        : 'bg-[#2A303E]'
                     }`}
                   />
                 </div>
@@ -755,10 +798,10 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
             return (
               <div
                 key={dayKey}
-                className={`flex items-center gap-2 sm:gap-3 p-1.5 rounded-xl border transition-all ${
+                className={`flex items-center gap-2 sm:gap-3 p-1.5 rounded-md border transition-all ${
                   isEnabled
-                    ? 'bg-[#0f172a]/90 border-indigo-500/30'
-                    : 'bg-[#0a0f1d]/50 border-slate-800/80 opacity-60'
+                    ? 'bg-card/50 border-[#232834]'
+                    : 'bg-background/70 border-[#232834] opacity-60'
                 }`}
               >
                 {/* Day Toggle Button & Label */}
@@ -767,8 +810,8 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                   onClick={() => handleToggleDay(dayKey)}
                   className={`w-20 sm:w-28 shrink-0 px-2 py-1.5 rounded-lg flex items-center justify-between text-left transition-all ${
                     isEnabled
-                      ? 'bg-indigo-600/20 border border-indigo-500/40 text-white'
-                      : 'bg-slate-800/40 border border-slate-700/50 text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#5865F2]/15 border border-[#5865F2]/40 text-white'
+                      : 'bg-secondary/70 border border-[#232834] text-muted-foreground hover:text-foreground'
                   }`}
                   title={isEnabled ? `Desactivar ${day.label}` : `Activar ${day.label}`}
                 >
@@ -778,7 +821,7 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                     </span>
                     <span
                       className={`text-[9px] font-semibold block leading-tight ${
-                        isEnabled ? 'text-emerald-400' : 'text-slate-500'
+                        isEnabled ? 'text-success' : 'text-muted-foreground'
                       }`}
                     >
                       {isEnabled ? 'Juego' : 'Descanso'}
@@ -788,8 +831,8 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                   <div
                     className={`w-4 h-4 rounded-full flex items-center justify-center border text-[9px] ${
                       isEnabled
-                        ? 'bg-emerald-500 border-emerald-400 text-black'
-                        : 'bg-slate-800 border-slate-600 text-transparent'
+                        ? 'bg-success border-success text-black'
+                        : 'bg-[#1F242E] border-border text-transparent'
                     }`}
                   >
                     ✓
@@ -806,8 +849,8 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                     compact ? 'h-9' : 'h-11'
                   } ${
                     isEnabled
-                      ? 'bg-[#0b1222] border-slate-800 hover:border-indigo-500/40'
-                      : 'bg-[#080d19] border-slate-900 cursor-not-allowed opacity-50'
+                      ? 'bg-background/45 border-[#232834] hover:border-[#5865F2]/40'
+                      : 'bg-background/45 border-[#232834] cursor-not-allowed opacity-50'
                   }`}
                   title={
                     isEnabled
@@ -816,34 +859,44 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                   }
                 >
                   {/* Background Half-Hour Grid lines */}
-                  <div className="absolute inset-0 flex pointer-events-none">
-                    {Array.from({ length: TOTAL_TICKS }).map((_, idx) => (
-                      <div
-                        key={idx}
-                        className={`flex-1 h-full border-r ${
-                          idx === 11
-                            ? 'border-amber-500/30' // Midnight separator
-                            : idx % 2 === 1
-                            ? 'border-slate-800/60' // Hour border
-                            : 'border-slate-800/20' // 30-min subtle tick
-                        }`}
-                      />
-                    ))}
+                  <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                    {Array.from({ length: TOTAL_TICKS + 1 }).map((_, tick) => {
+                      if (tick === 0 || tick === TOTAL_TICKS) return null;
+                      const isMidnight = tick === 24;
+                      const isHour = tick % 2 === 0;
+                      const leftPct = (tick / TOTAL_TICKS) * 100;
+
+                      return (
+                        <div
+                          key={tick}
+                          style={{ left: `${leftPct}%` }}
+                          className={`absolute top-0 bottom-0 w-px ${
+                            isMidnight
+                              ? 'bg-warning/50 z-10 shadow-[0_0_8px_rgba(251,191,36,0.4)]'
+                              : isHour
+                              ? 'bg-secondary'
+                              : 'bg-[#1F242E]/40'
+                          }`}
+                        />
+                      );
+                    })}
                   </div>
 
                   {/* Empty state hint */}
                   {isEnabled && slots.length === 0 && (
-                    <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500 font-medium pointer-events-none">
-                      Arrastrá aquí para añadir tu franja horaria
+                    <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-600 font-medium pointer-events-none">
+                      Sin franja
                     </div>
                   )}
 
                   {/* Render Existing Slot Blocks */}
                   {isEnabled &&
                     slots.map((slot) => {
-                      const startTick = timeToTick(slot.from);
-                      const endTick = timeToTick(slot.until);
-                      const duration = Math.max(1, endTick - startTick);
+                      const rawStart = timeToTick(slot.from);
+                      const rawEnd = timeToTick(slot.until);
+                      const startTick = Math.min(TOTAL_TICKS - 1, Math.max(0, rawStart));
+                      const endTick = Math.min(TOTAL_TICKS, Math.max(startTick + 1, rawEnd));
+                      const duration = endTick - startTick;
 
                       const leftPct = (startTick / TOTAL_TICKS) * 100;
                       const widthPct = (duration / TOTAL_TICKS) * 100;
@@ -884,7 +937,7 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                             <span className="hidden sm:inline text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-black/50 text-white/90 shrink-0">
                               {slot.confidencePercentage}%
                             </span>
-                            <span className="hidden md:inline text-[9px] font-semibold text-slate-300 shrink-0">
+                            <span className="hidden md:inline text-[9px] font-semibold text-muted-foreground shrink-0">
                               (±{slot.precisionMinutes}m)
                             </span>
                           </div>
@@ -896,8 +949,9 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                               e.stopPropagation();
                               openContextMenu(dayKey, slot, e.clientX, e.clientY);
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 rounded bg-black/60 hover:bg-black text-slate-300 hover:text-white transition-opacity shrink-0"
-                            title="Opciones de franja (Clic derecho)"
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded bg-black/60 hover:bg-black text-muted-foreground hover:text-white transition-opacity shrink-0"
+                            title="Editar franja"
+                            aria-label="Editar franja"
                           >
                             <Sliders className="w-2.5 h-2.5" />
                           </button>
@@ -923,7 +977,7 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                           ((dragPreview.endTick - dragPreview.startTick) / TOTAL_TICKS) * 100
                         }%`,
                       }}
-                      className="absolute top-1 bottom-1 rounded-md border-2 border-dashed border-indigo-400 bg-indigo-500/25 pointer-events-none z-20 flex items-center justify-center text-[10px] font-mono font-bold text-white shadow-lg"
+                      className="absolute top-1 bottom-1 rounded-md border-2 border-dashed border-primary bg-primary/25 pointer-events-none z-20 flex items-center justify-center text-[10px] font-mono font-bold text-white shadow-none"
                     >
                       {tickToTime(dragPreview.startTick)} – {tickToTime(dragPreview.endTick)}
                     </div>
@@ -935,74 +989,64 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
         </div>
       </div>
 
-      {/* 4. Floating Right-Click Custom Context Menu */}
-      {contextMenu && (
-        <>
-          {/* Backdrop to dismiss */}
-          <div
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]"
-            onClick={() => setContextMenu(null)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setContextMenu(null);
-            }}
-          />
+      {/* 4. Floating Right-Click Custom Context Menu (Portal so modals never clip or offset fixed coords) */}
+      {contextMenu &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            {/* Backdrop to dismiss */}
+            <div
+              className="fixed inset-0 z-[9998] bg-black/40 "
+              onClick={() => setContextMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu(null);
+              }}
+            />
 
-          {/* Context Menu Card */}
-          <div
-            style={{
-              top: `${contextMenu.y}px`,
-              left: `${contextMenu.x}px`,
-            }}
-            className="fixed z-50 w-[330px] bg-[#11192d] border border-indigo-500/40 rounded-2xl shadow-2xl shadow-black/80 p-4 space-y-4 text-slate-200 animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
+            {/* Context Menu Card */}
+            <div
+              ref={contextMenuRef}
+              style={{
+                top: `${contextMenu.y}px`,
+                left: `${contextMenu.x}px`,
+              }}
+              className="fixed z-[9999] w-[330px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-24px)] overflow-y-auto bg-secondary/55 border border-[#5865F2]/40 rounded-md shadow-none p-4 space-y-4 text-foreground animate-in fade-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
             {/* Context Menu Header */}
-            <div className="flex items-start justify-between border-b border-indigo-900/40 pb-2.5">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block">
-                  Configurar Franja Horaria
+            <div className="flex items-center justify-between border-b border-[#232834] pb-2">
+              <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                <span>
+                  {DAYS_OF_WEEK.find((d) => d.key === contextMenu.dayKey)?.label} ·{' '}
+                  {contextMenu.slot.from}–{contextMenu.slot.until}
                 </span>
-                <h4 className="text-sm font-bold text-white flex items-center gap-1.5 mt-0.5">
-                  <Clock className="w-4 h-4 text-indigo-400" />
-                  <span>
-                    {DAYS_OF_WEEK.find((d) => d.key === contextMenu.dayKey)?.label} ·{' '}
-                    {contextMenu.slot.from} a {contextMenu.slot.until}
-                  </span>
-                </h4>
-              </div>
+              </h4>
 
               <button
                 type="button"
                 onClick={() => setContextMenu(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                className="p-1 text-muted-foreground hover:text-white rounded-md hover:bg-[#1F242E] transition-colors"
+                title="Cerrar"
+                aria-label="Cerrar"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Informative Rule Notice */}
-            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 flex items-start gap-2 text-[10px] text-amber-200 leading-relaxed">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-              <span>
-                En horario default la confianza máxima es <strong>95%</strong> (100% solo al
-                confirmar la sesión del día).
-              </span>
-            </div>
-
             {/* Confidence Percentage Selector */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-300">Probabilidad de Asistir:</span>
+                <span className="font-bold text-muted-foreground">Probabilidad</span>
                 <span
-                  className={`font-extrabold px-2 py-0.5 rounded-full text-xs border ${
+                  className={`font-extrabold px-2 py-0.5 rounded-full text-[11px] border ${
                     getConfidenceStyle(contextMenu.slot.confidencePercentage).badgeBg
                   } ${getConfidenceStyle(contextMenu.slot.confidencePercentage).badgeBorder} ${
                     getConfidenceStyle(contextMenu.slot.confidencePercentage).text
                   }`}
                 >
-                  {contextMenu.slot.confidencePercentage}% ·{' '}
-                  {getConfidenceStyle(contextMenu.slot.confidencePercentage).label}
+                  {contextMenu.slot.confidencePercentage}%
                 </span>
               </div>
 
@@ -1018,11 +1062,11 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                     confidencePercentage: parseInt(e.target.value, 10),
                   })
                 }
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                className="w-full h-1.5 bg-[#1F242E] rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
 
               {/* Quick Preset Pills */}
-              <div className="grid grid-cols-2 gap-1.5 pt-1">
+              <div className="grid grid-cols-5 gap-1 pt-0.5">
                 {CONFIDENCE_PRESETS.map((preset) => (
                   <button
                     key={preset.value}
@@ -1030,32 +1074,32 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                     onClick={() =>
                       handleUpdateSlotInContextMenu({ confidencePercentage: preset.value })
                     }
-                    className={`px-2 py-1.5 rounded-lg text-[10px] font-bold text-left transition-all ${
+                    title={`${preset.label} — ${preset.desc}`}
+                    className={`py-1 rounded text-[10px] font-bold text-center transition-all ${
                       contextMenu.slot.confidencePercentage === preset.value
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/40 border border-indigo-400'
-                        : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                        ? 'bg-[#5865F2] text-white border border-primary'
+                        : 'bg-[#1F242E] text-muted-foreground hover:text-foreground border border-[#232834]'
                     }`}
                   >
-                    <div>{preset.label}</div>
-                    <div className="text-[9px] opacity-75 font-normal">{preset.desc}</div>
+                    {preset.value}%
                   </button>
                 ))}
               </div>
             </div>
 
             {/* Precision Selector */}
-            <div className="space-y-1.5 pt-1 border-t border-indigo-900/30">
-              <span className="text-xs font-bold text-slate-300 block">Precisión Horaria:</span>
+            <div className="space-y-1.5 pt-2 border-t border-[#232834]">
+              <span className="text-xs font-bold text-muted-foreground block">Margen</span>
               <div className="grid grid-cols-4 gap-1.5">
                 {PRECISION_OPTIONS.map((prec) => (
                   <button
                     key={prec}
                     type="button"
                     onClick={() => handleUpdateSlotInContextMenu({ precisionMinutes: prec })}
-                    className={`py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    className={`py-1 rounded-md text-xs font-bold transition-all ${
                       contextMenu.slot.precisionMinutes === prec
-                        ? 'bg-amber-500/25 border border-amber-500/60 text-amber-300'
-                        : 'bg-slate-800/70 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                        ? 'bg-warning/25 border border-warning/60 text-warning'
+                        : 'bg-[#1F242E] text-muted-foreground hover:text-foreground border border-[#232834]'
                     }`}
                   >
                     ±{prec}m
@@ -1065,28 +1109,29 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
             </div>
 
             {/* Quick Copy Actions */}
-            <div className="space-y-1.5 pt-1 border-t border-indigo-900/30">
-              <span className="text-[11px] font-bold text-slate-400 block">
-                📋 Copiar este horario a:
+            <div className="space-y-1.5 pt-2 border-t border-[#232834]">
+              <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1">
+                <Copy className="w-3 h-3" />
+                <span>Copiar a</span>
               </span>
-              <div className="flex flex-col gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 <button
                   type="button"
                   onClick={() =>
                     handleCopySlotToDays(['mon', 'tue', 'wed', 'thu', 'fri'])
                   }
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+                  className="px-2 py-1 rounded-md bg-secondary/55 hover:bg-[#1F242E] border border-[#232834] text-muted-foreground hover:text-white text-[11px] font-semibold transition-colors"
+                  title="Copiar a Lunes–Viernes"
                 >
-                  <Copy className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Copiar a Lun–Vie</span>
+                  Lun–Vie
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCopySlotToDays(['sat', 'sun'])}
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+                  className="px-2 py-1 rounded-md bg-secondary/55 hover:bg-[#1F242E] border border-[#232834] text-muted-foreground hover:text-white text-[11px] font-semibold transition-colors"
+                  title="Copiar a Sábado–Domingo"
                 >
-                  <Copy className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Copiar a Fin de Semana (Sáb–Dom)</span>
+                  Sáb–Dom
                 </button>
                 <button
                   type="button"
@@ -1101,27 +1146,30 @@ export const WeeklyBarsScheduleEditor: React.FC<WeeklyBarsScheduleEditorProps> =
                       'sun',
                     ])
                   }
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+                  className="px-2 py-1 rounded-md bg-secondary/55 hover:bg-[#1F242E] border border-[#232834] text-muted-foreground hover:text-white text-[11px] font-semibold transition-colors"
+                  title="Copiar a toda la semana"
                 >
-                  <Copy className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Copiar a toda la semana</span>
+                  Semana
                 </button>
               </div>
             </div>
 
-            {/* Red Prominent Delete Action */}
-            <div className="pt-2 border-t border-indigo-900/30">
+            {/* Delete Action */}
+            <div className="pt-2 border-t border-[#232834]">
               <button
                 type="button"
                 onClick={handleDeleteSlotInContextMenu}
-                className="w-full py-2.5 px-3 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-300 hover:text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-rose-950/50"
+                className="w-full py-2 px-3 rounded-md bg-destructive/15 hover:bg-destructive/90 border border-destructive/50 text-destructive hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
+                title="Borrar franja horaria"
+                aria-label="Borrar franja horaria"
               >
-                <Trash2 className="w-4 h-4 text-rose-400" />
-                <span>🗑️ Borrar franja horaria</span>
+                <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                <span>Borrar</span>
               </button>
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );

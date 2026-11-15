@@ -1,80 +1,62 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
-import { ChatMessage } from '../types/domain';
+import React, { useEffect, useRef, useState } from 'react';
+import { useApp } from '@/context/AppContext';
+import { ChatMessage } from '@/types/domain';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import {
-  X,
-  Send,
-  MessageSquare,
   Bot,
-  Flame,
-  CornerDownRight,
-  Sparkles,
-  Paperclip,
-  Smile,
-  Hash,
-  Gamepad2,
   Calendar,
-  Check,
+  CornerDownRight,
+  Gamepad2,
+  MessageSquare,
+  Paperclip,
+  Send,
+  Smile,
+  X,
 } from 'lucide-react';
 
-export interface GlobalChatDrawerProps {
+interface GlobalChatDrawerProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const COMMON_REACTIONS = ['🔥', '😂', '💨', '🫡', '🎮'];
+const COMMON_REACTIONS = ['🔥', '😂', '💀', '🍻', '🫡'];
 
-export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({ isOpen, onClose }) => {
+export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({
+  isOpen,
+  onClose,
+}) => {
   const {
     chatMessages,
     sendChatMessage,
     toggleMessageReaction,
-    players,
     currentUser,
+    players,
     sessions,
     activeSessionId,
     discordConfig,
   } = useApp();
 
   const [inputText, setInputText] = useState('');
+  const [replyingToMessage, setReplyingToMessage] =
+    useState<ChatMessage | null>(null);
+  const [attachedSessionId, setAttachedSessionId] = useState<string | null>(
+    null
+  );
   const [forwardToDiscord, setForwardToDiscord] = useState(true);
-  const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
-  const [attachedSessionId, setAttachedSessionId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom when messages update or drawer opens
   useEffect(() => {
     if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      window.setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
     }
-  }, [chatMessages, isOpen]);
-
-  // Focus textarea when replying
-  useEffect(() => {
-    if (replyingToMessage) {
-      textareaRef.current?.focus();
-    }
-  }, [replyingToMessage]);
-
-  // Close on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  // Active session helper
-  const currentSession = useMemo(() => {
-    return sessions.find((s) => s.id === (attachedSessionId || activeSessionId));
-  }, [sessions, attachedSessionId, activeSessionId]);
-
-  if (!isOpen) return null;
+  }, [isOpen, chatMessages.length]);
 
   const handleSendMessage = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -93,7 +75,11 @@ export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({ isOpen, onCl
     setAttachedSessionId(null);
   };
 
-  const handleKeyDownInTextarea = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // IME-safe Enter handling per Modern Web Guidance
+  const handleKeyDownInTextarea = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -108,13 +94,12 @@ export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({ isOpen, onCl
     textareaRef.current?.focus();
   };
 
-  const getKarmaColorClass = (score: number) => {
-    if (score >= 80) return 'text-emerald-400 bg-emerald-950/60 border-emerald-500/30';
-    if (score >= 50) return 'text-amber-400 bg-amber-950/60 border-amber-500/30';
-    return 'text-rose-400 bg-rose-950/60 border-rose-500/30';
+  const getKarmaBadgeVariant = (score: number): 'success' | 'warning' | 'destructive' => {
+    if (score >= 80) return 'success';
+    if (score >= 50) return 'warning';
+    return 'destructive';
   };
 
-  // Render text with highlighted @mentions
   const renderMessageContent = (content: string) => {
     const parts = content.split(/(@\w+|@todos|@everyone)/g);
     return parts.map((part, idx) => {
@@ -122,7 +107,7 @@ export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({ isOpen, onCl
         return (
           <span
             key={idx}
-            className="inline-block px-1.5 py-0.2 rounded font-semibold text-xs bg-indigo-500/25 text-indigo-300 border border-indigo-500/40"
+            className="inline-block px-1 py-0 rounded font-semibold text-xs bg-primary/25 text-primary border border-primary/40"
           >
             {part}
           </span>
@@ -133,382 +118,359 @@ export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({ isOpen, onCl
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden animate-in fade-in duration-200">
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
-      />
-
-      {/* Slide-over panel */}
-      <div className="absolute inset-y-0 right-0 max-w-full flex pl-6 sm:pl-10">
-        <div className="w-screen max-w-lg bg-[#090d16] border-l border-indigo-900/60 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-300">
-          {/* Header */}
-          <div className="p-4 sm:p-5 border-b border-indigo-950/80 bg-[#131c31]/90 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-500/50 flex items-center justify-center text-indigo-300 shadow-md">
-                <MessageSquare className="w-5 h-5 text-indigo-400" />
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base sm:text-lg font-black text-white">
-                    Chat Global de la Manada
-                  </h2>
-                  <span className="flex h-2 w-2 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                  <span className="flex items-center gap-1 text-[#5865F2] font-semibold">
-                    <Bot className="w-3.5 h-3.5" />
-                    #{discordConfig.channelName.replace('#', '') || 'boludos-gaming'}
-                  </span>
-                  <span>•</span>
-                  <span>{players.length} amigos conectados</span>
-                </div>
-              </div>
+    <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-lg p-0 flex flex-col bg-card/65 backdrop-blur-xl border-l border-white/12 gap-0"
+      >
+        <SheetHeader className="p-4 border-b border-border/70 bg-card/50 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-3 pr-8">
+            <div className="w-9 h-9 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary shrink-0">
+              <MessageSquare className="w-4 h-4" strokeWidth={1.75} />
             </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <SheetTitle>Chat Global</SheetTitle>
+                <span className="inline-block w-2 h-2 rounded-full bg-success" />
+              </div>
+              <SheetDescription className="flex items-center gap-2 text-[11px]">
+                <span className="inline-flex items-center gap-1 text-primary font-medium">
+                  <Bot className="w-3 h-3" strokeWidth={1.75} />#
+                  {discordConfig.channelName.replace('#', '') ||
+                    'boludos-gaming'}
+                </span>
+                <span>·</span>
+                <span>{players.length}</span>
+              </SheetDescription>
+            </div>
+          </div>
+        </SheetHeader>
 
+        {/* Quick online avatars mention bar */}
+        <div className="px-4 py-2 bg-background/40 border-b border-border/70 flex items-center gap-1.5 overflow-x-auto shrink-0">
+          {players.map((p) => (
             <button
-              onClick={onClose}
-              className="p-2 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              key={p.id}
+              type="button"
+              className="relative group cursor-pointer shrink-0"
+              onClick={() => insertMention(`@${p.displayName}`)}
+              title={`@${p.displayName} (${p.karmaScore}%)`}
+              aria-label={`Mencionar a ${p.displayName}`}
             >
-              <X className="w-5 h-5" />
+              <img
+                src={p.avatarUrl}
+                alt={p.displayName}
+                className="w-7 h-7 rounded-full object-cover border border-border group-hover:border-primary transition-colors"
+              />
+              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-success ring-1 ring-background" />
             </button>
-          </div>
+          ))}
+        </div>
 
-          {/* Online friends bar */}
-          <div className="px-4 py-2 bg-[#0c1220] border-b border-slate-800/80 flex items-center gap-2 overflow-x-auto text-xs flex-shrink-0">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex-shrink-0">
-              Online:
-            </span>
-            <div className="flex items-center gap-1.5">
-              {players.map((p) => (
-                <div
-                  key={p.id}
-                  className="relative group cursor-pointer"
-                  onClick={() => insertMention(`@${p.displayName}`)}
-                  title={`Mencionar a ${p.displayName} (${p.karmaScore}% Karma)`}
-                >
-                  <img
-                    src={p.avatarUrl}
-                    alt={p.displayName}
-                    className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-700 group-hover:ring-indigo-400 transition-all"
-                  />
-                  <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 ring-1 ring-[#0c1220]" />
-                </div>
-              ))}
+        {/* Message List */}
+        <div className="flex-1 p-4 overflow-y-auto space-y-3.5 bg-background/25">
+          {chatMessages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
+              <Smile className="w-7 h-7 mb-2 opacity-60" strokeWidth={1.75} />
+              <p className="font-medium text-foreground text-xs">
+                Sin mensajes
+              </p>
             </div>
-          </div>
+          ) : (
+            chatMessages.map((msg) => {
+              const author = players.find((p) => p.id === msg.userId);
+              const isMe = msg.userId === currentUser.id;
+              const repliedMsg = msg.replyToId
+                ? chatMessages.find((m) => m.id === msg.replyToId)
+                : null;
+              const repliedAuthor = repliedMsg
+                ? players.find((p) => p.id === repliedMsg.userId)
+                : null;
+              const linkedSession = msg.linkedSessionId
+                ? sessions.find((s) => s.id === msg.linkedSessionId)
+                : null;
 
-          {/* Message List */}
-          <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-[#090d16]/60">
-            {chatMessages.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
-                <Smile className="w-10 h-10 text-slate-600 mb-2" />
-                <p className="font-bold text-white text-sm">El chat está tranquilo</p>
-                <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                  Mandá un mensaje para coordinar la partida de hoy o arrobar a los pibes.
-                </p>
-              </div>
-            ) : (
-              chatMessages.map((msg) => {
-                const author = players.find((p) => p.id === msg.userId);
-                const isMe = msg.userId === currentUser.id;
-                const repliedMsg = msg.replyToId
-                  ? chatMessages.find((m) => m.id === msg.replyToId)
-                  : null;
-                const repliedAuthor = repliedMsg
-                  ? players.find((p) => p.id === repliedMsg.userId)
-                  : null;
-                const linkedSession = msg.linkedSessionId
-                  ? sessions.find((s) => s.id === msg.linkedSessionId)
-                  : null;
+              return (
+                <div
+                  key={msg.id}
+                  className={cn(
+                    'flex flex-col space-y-1 text-xs group',
+                    isMe ? 'items-end' : 'items-start'
+                  )}
+                >
+                  {repliedMsg && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pl-2 border-l-2 border-primary/50 max-w-xs truncate">
+                      <CornerDownRight
+                        className="w-3 h-3 text-primary shrink-0"
+                        strokeWidth={1.75}
+                      />
+                      <span className="font-medium text-foreground">
+                        @{repliedAuthor?.displayName || 'Amigo'}:
+                      </span>
+                      <span className="italic truncate">{repliedMsg.content}</span>
+                    </div>
+                  )}
 
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col space-y-1.5 text-xs group animate-in fade-in duration-150 ${
-                      isMe ? 'items-end' : 'items-start'
-                    }`}
-                  >
-                    {/* Replying quote if present */}
-                    {repliedMsg && (
-                      <div
-                        className={`flex items-center gap-1.5 text-[11px] text-slate-400 pl-2 border-l-2 border-indigo-500/50 max-w-xs truncate ${
-                          isMe ? 'self-end' : 'self-start'
-                        }`}
-                      >
-                        <CornerDownRight className="w-3 h-3 text-indigo-400 flex-shrink-0" />
-                        <span className="font-semibold text-slate-300">
-                          @{repliedAuthor?.displayName || 'Alguien'}:
-                        </span>
-                        <span className="italic truncate">{repliedMsg.content}</span>
-                      </div>
+                  <div className="flex items-start gap-2 max-w-[90%]">
+                    {!isMe && (
+                      <img
+                        src={
+                          author?.avatarUrl ||
+                          'https://api.dicebear.com/7.x/bottts/svg?seed=friend'
+                        }
+                        alt={author?.displayName || 'Usuario'}
+                        className="w-7 h-7 rounded-full object-cover border border-border shrink-0 mt-0.5"
+                      />
                     )}
 
-                    <div className="flex items-start gap-2.5 max-w-[90%]">
-                      {!isMe && (
-                        <img
-                          src={
-                            author?.avatarUrl ||
-                            'https://api.dicebear.com/7.x/bottts/svg?seed=friend'
-                          }
-                          alt={author?.displayName || 'Usuario'}
-                          className="w-8 h-8 rounded-xl object-cover ring-1 ring-slate-700 flex-shrink-0 mt-0.5"
-                        />
-                      )}
-
-                      <div>
-                        {/* Author name & header */}
-                        <div
-                          className={`flex items-center gap-1.5 mb-1 ${
-                            isMe ? 'justify-end' : 'justify-start'
-                          }`}
-                        >
-                          <span className="font-bold text-white text-xs">
-                            {isMe ? 'Vos' : author?.displayName || 'Amigo'}
+                    <div className="space-y-1 min-w-0">
+                      <div
+                        className={cn(
+                          'flex items-center gap-1.5',
+                          isMe ? 'justify-end' : 'justify-start'
+                        )}
+                      >
+                        <span className="font-semibold text-foreground text-xs">
+                          {isMe ? 'Vos' : author?.displayName || 'Amigo'}
+                        </span>
+                        {author && (
+                          <Badge
+                            variant={getKarmaBadgeVariant(author.karmaScore)}
+                            className="text-[9px] px-1 py-0 font-mono"
+                          >
+                            {author.karmaScore}K
+                          </Badge>
+                        )}
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {msg.createdAt
+                            ? new Date(msg.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : ''}
+                        </span>
+                        {msg.forwardedToDiscord && (
+                          <span title="Espejado en Discord" className="inline-flex">
+                            <Bot className="w-3 h-3 text-primary" strokeWidth={1.75} />
                           </span>
-                          {author && (
-                            <span
-                              className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getKarmaColorClass(
-                                author.karmaScore
-                              )}`}
-                            >
-                              {author.karmaScore}%
-                            </span>
-                          )}
-                          <span className="text-[10px] text-slate-400">
-                            {msg.createdAt
-                              ? new Date(msg.createdAt).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : ''}
-                          </span>
-
-                          {msg.forwardedToDiscord && (
-                            <span
-                              className="text-[10px] text-[#5865F2] font-semibold flex items-center gap-0.5"
-                              title="Reenviado al canal de Discord"
-                            >
-                              <Bot className="w-3 h-3" />
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Bubble */}
-                        <div
-                          className={`p-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
-                            isMe
-                              ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-tr-none shadow-md shadow-indigo-600/20'
-                              : 'bg-[#131c31] text-slate-200 border border-slate-800 rounded-tl-none shadow-md'
-                          }`}
-                        >
-                          {renderMessageContent(msg.content)}
-
-                          {/* Linked session mini card */}
-                          {linkedSession && (
-                            <div className="mt-2.5 p-2 rounded-xl bg-black/40 border border-indigo-400/30 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <Gamepad2 className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                                <div>
-                                  <span className="font-bold text-xs text-white block truncate max-w-[170px]">
-                                    {linkedSession.title}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {linkedSession.date} • {linkedSession.status.toUpperCase()}
-                                  </span>
-                                </div>
-                              </div>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200">
-                                Sesión
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Reactions Row & Actions */}
-                        <div
-                          className={`flex items-center gap-1 mt-1.5 flex-wrap ${
-                            isMe ? 'justify-end' : 'justify-start'
-                          }`}
-                        >
-                          {/* Existing reaction badges */}
-                          {msg.reactions &&
-                            msg.reactions.map((r, rIdx) => {
-                              const hasReacted = r.userIds.includes(currentUser.id);
-                              return (
-                                <button
-                                  key={rIdx}
-                                  type="button"
-                                  onClick={() => toggleMessageReaction(msg.id, r.emoji)}
-                                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border transition-all ${
-                                    hasReacted
-                                      ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-                                      : 'bg-[#131c31] border-slate-800 text-slate-400 hover:text-white'
-                                  }`}
-                                >
-                                  <span>{r.emoji}</span>
-                                  <span className="text-[10px]">{r.userIds.length}</span>
-                                </button>
-                              );
-                            })}
-
-                          {/* Quick Emoji Picker Buttons on hover */}
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-[#090d16] p-0.5 rounded-full border border-slate-800">
-                            {COMMON_REACTIONS.map((emoji) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                onClick={() => toggleMessageReaction(msg.id, emoji)}
-                                className="w-6 h-6 flex items-center justify-center hover:scale-125 transition-transform text-xs"
-                                title={`Reaccionar con ${emoji}`}
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => setReplyingToMessage(msg)}
-                              className="px-1.5 text-[10px] font-semibold text-slate-400 hover:text-white"
-                              title="Responder"
-                            >
-                              Responder
-                            </button>
-                          </div>
-                        </div>
+                        )}
                       </div>
 
-                      {isMe && (
-                        <img
-                          src={currentUser.avatarUrl}
-                          alt={currentUser.displayName}
-                          className="w-8 h-8 rounded-xl object-cover ring-1 ring-indigo-500/40 flex-shrink-0 mt-0.5"
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+                      <div
+                        className={cn(
+                          'p-2.5 rounded-md text-xs leading-relaxed border',
+                          isMe
+                            ? 'bg-primary/20 border-primary/40 text-foreground'
+                            : 'bg-card/65 backdrop-blur-xs border-border/80 text-foreground'
+                        )}
+                      >
+                        {renderMessageContent(msg.content)}
 
-          {/* Quick Mention Pills Bar */}
-          <div className="px-4 py-2 bg-[#0c1220] border-t border-slate-800/80 flex items-center gap-1.5 overflow-x-auto text-xs flex-shrink-0">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex-shrink-0">
-              Mencionar:
+                        {linkedSession && (
+                          <div className="mt-2 p-2 rounded bg-background border border-border flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Gamepad2
+                                className="w-3.5 h-3.5 text-warning shrink-0"
+                                strokeWidth={1.75}
+                              />
+                              <div className="min-w-0">
+                                <span className="font-semibold text-[11px] text-foreground block truncate max-w-[160px]">
+                                  {linkedSession.title}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  <Calendar className="w-2.5 h-2.5" strokeWidth={1.75} />
+                                  {linkedSession.date}
+                                </span>
+                              </div>
+                            </div>
+                            <Badge variant="default" className="text-[9px]">
+                              Sesión
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Reactions */}
+                      <div
+                        className={cn(
+                          'flex items-center gap-1 flex-wrap',
+                          isMe ? 'justify-end' : 'justify-start'
+                        )}
+                      >
+                        {msg.reactions?.map((r, rIdx) => {
+                          const hasReacted = r.userIds.includes(currentUser.id);
+                          return (
+                            <button
+                              key={rIdx}
+                              type="button"
+                              onClick={() => toggleMessageReaction(msg.id, r.emoji)}
+                              className={cn(
+                                'inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-medium cursor-pointer transition-colors',
+                                hasReacted
+                                  ? 'bg-primary/20 border-primary/50 text-primary'
+                                  : 'bg-card border-border text-muted-foreground hover:text-foreground'
+                              )}
+                            >
+                              <span>{r.emoji}</span>
+                              <span className="text-[10px] font-mono">
+                                {r.userIds.length}
+                              </span>
+                            </button>
+                          );
+                        })}
+
+                        <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5 bg-card px-1 py-0.5 rounded border border-border">
+                          {COMMON_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => toggleMessageReaction(msg.id, emoji)}
+                              title={`Reaccionar ${emoji}`}
+                              aria-label={`Reaccionar ${emoji}`}
+                              className="w-5 h-5 flex items-center justify-center hover:scale-110 transition-transform text-xs cursor-pointer"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setReplyingToMessage(msg)}
+                            title="Responder"
+                            aria-label="Responder"
+                            className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer"
+                          >
+                            <CornerDownRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {isMe && (
+                      <img
+                        src={currentUser.avatarUrl}
+                        alt={currentUser.displayName}
+                        className="w-7 h-7 rounded-full object-cover border border-primary/50 shrink-0 mt-0.5"
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Mention Pills Bar */}
+        <div className="px-4 py-1.5 bg-card/45 border-t border-border/70 flex items-center gap-1.5 overflow-x-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => insertMention('@todos')}
+            className="px-2 py-0.5 rounded bg-primary/15 border border-primary/40 text-primary text-[10px] font-semibold shrink-0 cursor-pointer"
+          >
+            @todos
+          </button>
+          {players.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => insertMention(`@${p.displayName}`)}
+              className="px-2 py-0.5 rounded bg-background border border-border text-muted-foreground hover:text-foreground text-[10px] shrink-0 cursor-pointer"
+            >
+              @{p.displayName}
+            </button>
+          ))}
+        </div>
+
+        {/* Reply Preview */}
+        {replyingToMessage && (
+          <div className="px-4 py-1.5 bg-secondary border-t border-border flex items-center justify-between text-xs shrink-0">
+            <span className="truncate text-muted-foreground">
+              <strong className="text-foreground">
+                @{players.find((p) => p.id === replyingToMessage.userId)
+                  ?.displayName || 'Amigo'}
+              </strong>
+              : &ldquo;{replyingToMessage.content}&rdquo;
             </span>
             <button
               type="button"
-              onClick={() => insertMention('@todos')}
-              className="px-2 py-0.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-[11px] font-bold border border-indigo-500/40 flex-shrink-0"
+              onClick={() => setReplyingToMessage(null)}
+              title="Cancelar respuesta"
+              aria-label="Cancelar respuesta"
+              className="p-1 text-muted-foreground hover:text-foreground ml-2 cursor-pointer"
             >
-              @todos
+              <X className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
-            {players.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => insertMention(`@${p.displayName}`)}
-                className="px-2 py-0.5 rounded-lg bg-[#131c31] hover:bg-slate-800 text-slate-300 hover:text-white text-[11px] font-medium border border-slate-800 flex-shrink-0"
-              >
-                @{p.displayName}
-              </button>
-            ))}
           </div>
+        )}
 
-          {/* Active Reply Banner */}
-          {replyingToMessage && (
-            <div className="px-4 py-2 bg-indigo-950/60 border-t border-indigo-900/60 flex items-center justify-between text-xs text-indigo-200 flex-shrink-0">
-              <div className="flex items-center gap-2 truncate">
-                <CornerDownRight className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                <span className="truncate">
-                  Respondiendo a{' '}
-                  <strong className="text-white">
-                    {players.find((p) => p.id === replyingToMessage.userId)?.displayName || 'Amigo'}
-                  </strong>
-                  : &ldquo;{replyingToMessage.content}&rdquo;
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setReplyingToMessage(null)}
-                className="text-xs text-slate-400 hover:text-white ml-2 flex-shrink-0"
-              >
-                ✕ Cancelar
-              </button>
-            </div>
-          )}
-
-          {/* Controls Bar: Attach session & Discord forward checkbox */}
-          <div className="px-4 py-2 bg-[#131c31] border-t border-slate-800 flex items-center justify-between text-xs text-slate-300 flex-shrink-0">
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forwardToDiscord}
-                onChange={(e) => setForwardToDiscord(e.target.checked)}
-                className="w-3.5 h-3.5 rounded bg-slate-800 border-slate-700 text-[#5865F2] focus:ring-0"
-              />
-              <span className="flex items-center gap-1 text-[11px]">
-                <Bot className="w-3.5 h-3.5 text-[#5865F2]" />
-                <span>Reenviar a Discord</span>
-              </span>
-            </label>
-
-            {/* Session attach button */}
-            {sessions.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (attachedSessionId) {
-                    setAttachedSessionId(null);
-                  } else {
-                    setAttachedSessionId(activeSessionId || sessions[0]?.id || null);
-                  }
-                }}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-colors ${
-                  attachedSessionId
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-slate-800/80 text-slate-400 hover:text-white border-slate-700'
-                }`}
-                title="Adjuntar tarjeta de la sesión actual al mensaje"
-              >
-                <Paperclip className="w-3 h-3" />
-                <span>{attachedSessionId ? 'Sesión Adjunta ✓' : 'Adjuntar Sesión'}</span>
-              </button>
+        {/* Controls Bar */}
+        <div className="px-4 py-1.5 bg-card/55 border-t border-border/70 flex items-center justify-between gap-2 text-xs shrink-0">
+          <Button
+            type="button"
+            size="icon"
+            variant={forwardToDiscord ? 'secondary' : 'ghost'}
+            onClick={() => setForwardToDiscord((prev) => !prev)}
+            title={forwardToDiscord ? 'Reenviar a Discord: ON' : 'Reenviar a Discord: OFF'}
+            aria-label="Reenviar a Discord"
+            aria-pressed={forwardToDiscord}
+            className={cn(
+              'h-7 w-7',
+              forwardToDiscord
+                ? 'border border-primary/60 bg-primary/15 text-primary'
+                : 'text-muted-foreground'
             )}
-          </div>
+          >
+            <Bot className="w-4 h-4" strokeWidth={1.75} />
+          </Button>
 
-          {/* Input Box Footer */}
-          <div className="p-4 bg-[#0c1220] border-t border-slate-800/80 flex-shrink-0">
-            <form onSubmit={handleSendMessage} className="flex items-end gap-2">
-              <textarea
-                ref={textareaRef}
-                rows={2}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={handleKeyDownInTextarea}
-                placeholder="Escribí un mensaje... (Enter para enviar, Shift+Enter para salto de línea)"
-                className="flex-1 px-3.5 py-2.5 rounded-2xl bg-[#090d16] border border-slate-700 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
-              />
-
-              <button
-                type="submit"
-                disabled={!inputText.trim()}
-                className="w-11 h-11 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                title="Enviar mensaje"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
-          </div>
+          {sessions.length > 0 && (
+            <Button
+              type="button"
+              size="icon"
+              variant={attachedSessionId ? 'amber' : 'outline'}
+              onClick={() =>
+                setAttachedSessionId(
+                  attachedSessionId
+                    ? null
+                    : activeSessionId || sessions[0]?.id || null
+                )
+              }
+              title={attachedSessionId ? 'Quitar sesión adjunta' : 'Adjuntar sesión activa'}
+              aria-label={attachedSessionId ? 'Quitar sesión adjunta' : 'Adjuntar sesión activa'}
+              aria-pressed={Boolean(attachedSessionId)}
+              className="h-7 w-7"
+            >
+              <Paperclip className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </Button>
+          )}
         </div>
-      </div>
-    </div>
+
+        {/* Message Composer */}
+        <form
+          onSubmit={handleSendMessage}
+          className="p-3 bg-background/50 backdrop-blur-md border-t border-border/70 flex items-end gap-2 shrink-0"
+        >
+          <textarea
+            ref={textareaRef}
+            rows={2}
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={handleKeyDownInTextarea}
+            placeholder="Mensaje..."
+            className="flex-1 px-3 py-2 rounded-md bg-card/60 border border-border text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+          />
+          <Button
+            type="submit"
+            size="icon"
+            disabled={!inputText.trim()}
+            title="Enviar mensaje"
+            aria-label="Enviar mensaje"
+            className="h-10 w-10 shrink-0"
+          >
+            <Send className="w-4 h-4" strokeWidth={1.75} />
+          </Button>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 };

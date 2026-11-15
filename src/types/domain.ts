@@ -115,6 +115,7 @@ export interface DailyScheduleOverride {
   precisionMinutes?: PrecisionMinutes;
   confidencePercentage?: number; // 10 to 95 (unless confirmed on a session)
   slots?: TimeSlotBlock[];
+  cancelledSlotIds?: string[]; // Specific weekly slot IDs cancelled for this date
   reason?: string;
   updatedAt: string;
 }
@@ -128,6 +129,7 @@ export interface EffectiveDailySchedule {
   precisionMinutes: PrecisionMinutes;
   confidencePercentage: number; // < 100 in default mode (e.g. 25, 50, 75, 90)
   slots: TimeSlotBlock[];
+  cancelledSlotIds?: string[];
   reason?: string;
 }
 
@@ -137,6 +139,8 @@ export interface PlayerProfile {
   discordUsername: string;
   displayName: string;
   avatarUrl: string;
+  birthDate?: string;
+  bio?: string;
   karmaScore: number; // 0 to 100
   sessionsPlayed: number;
   hoursPlayed: number;
@@ -151,6 +155,8 @@ export interface PlayerProfile {
   weeklySchedule?: WeeklySchedule;
   dailyOverrides?: Record<string, DailyScheduleOverride>; // keyed by YYYY-MM-DD
   categoryPreferences?: Record<string, CategoryPreferenceLevel>; // keyed by category id
+  steamProfile?: PlayerSteamProfile;
+  tasteProfile?: PlayerTasteProfile;
 }
 
 export interface Game {
@@ -171,6 +177,8 @@ export interface UserGamePreference {
   gameId: string;
   plays: boolean;
   rating: GameRating; // 1 = Solo si obligan, 2 = Zafa, 3 = Me copa, 4 = Juegazo, 5 = Vicio Total
+  hoursPlayed?: number;
+  recentHoursPlayed?: number;
 }
 
 export interface AttendanceVote {
@@ -203,8 +211,32 @@ export interface SessionCalloutRecord {
   notifiedUserIds: string[];
 }
 
+export interface GroupDiscordConfig {
+  enabled: boolean;
+  webhookUrl: string;
+  channelName: string;
+  guildName: string;
+  mentionRoleId: string;
+  useEveryoneMention: boolean;
+}
+
+export interface GamingGroup {
+  id: string;
+  name: string;
+  description: string;
+  avatarUrl?: string;
+  inviteCode: string;
+  createdBy: string;
+  memberIds: string[];
+  adminIds: string[];
+  discordConfig: GroupDiscordConfig;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface GamingSession {
   id: string;
+  groupId: string;
   title: string;
   date: string; // YYYY-MM-DD
   mode: SessionMode;
@@ -291,6 +323,7 @@ export interface SanctionRecord {
   id: string;
   userId: string;
   sessionId: string;
+  groupId?: string;
   sessionTitle: string;
   date: string;
   type: 'late' | 'no_show' | 'on_time_bonus';
@@ -309,6 +342,7 @@ export interface ChatReaction {
 export interface ChatMessage {
   id: string;
   userId: string;
+  groupId?: string;
   content: string;
   mentions: string[]; // userIds or 'everyone'
   replyToId?: string;
@@ -354,6 +388,8 @@ export interface DiscordButtonAction {
 export interface DiscordNotificationLog {
   id: string;
   eventType: DiscordEventType;
+  groupId?: string;
+  groupName?: string;
   content: string; // includes <@discord_id> mentions
   embed: DiscordEmbedPayload;
   buttons: DiscordButtonAction[];
@@ -373,6 +409,9 @@ export interface DiscordIntegrationConfig {
   mentionRoleId: string; // e.g. @BoludosGaming or @here
   useEveryoneMention: boolean;
   events: Record<DiscordEventType, boolean>;
+  steamApiKey?: string;
+  igdbClientId?: string;
+  igdbClientSecret?: string;
 }
 
 export interface PushNotificationAlert {
@@ -383,4 +422,245 @@ export interface PushNotificationAlert {
   createdAt: string;
   targetUserIds: string[];
   sessionId?: string;
+}
+
+export type TasteDimensionKey =
+  | 'tactical_shooter'
+  | 'arena_hero_shooter'
+  | 'battle_royale'
+  | 'moba'
+  | 'rts_strategy'
+  | 'survival_craft'
+  | 'coop_horror'
+  | 'coop_pve_action'
+  | 'rpg_narrative'
+  | 'party_social'
+  | 'sports_racing'
+  | 'roguelike_deckbuilder'
+  | 'intensity_high'
+  | 'chill_relaxed'
+  | 'tactical_depth'
+  | 'mechanical_skill'
+  | 'short_session'
+  | 'long_campaign'
+  | 'pvp_competitive'
+  | 'pve_cooperative'
+  | 'social_deduction_chaos'
+  | 'squad_coordination'
+  | 'asymmetric_roles'
+  | 'sandbox_freedom'
+  | 'dark_gritty'
+  | 'scifi_futuristic'
+  | 'fantasy_medieval'
+  | 'realistic_military'
+  | 'stylized_colorful'
+  | 'horror_tension'
+  | 'open_world_exploration'
+  | 'progression_loot';
+
+export interface SteamOwnedGame {
+  appId: number;
+  igdbId?: number;
+  name: string;
+  playtimeHours: number;
+  playtimeRecentHours: number;
+  manualHoursOverride?: number;
+  manualRecentHoursOverride?: number;
+  headerImageUrl: string;
+  iconUrl?: string;
+  lastPlayedAt?: string;
+  genres: string[];
+  tags: string[];
+  tagVotes?: Record<string, number>;
+  isMultiplayer: boolean;
+  minPlayers: number;
+  maxPlayers: number;
+  suggestedRating: GameRating;
+  userRating?: GameRating;
+  playsOverride?: boolean;
+  burnedOut?: boolean;
+  selectedForCatalog?: boolean;
+  source?: 'igdb' | 'steam' | 'curated';
+}
+
+export interface PlayerSteamProfile {
+  steamId64: string;
+  profileUrl: string;
+  personaName: string;
+  avatarUrl: string;
+  lastSyncedAt: string;
+  totalHours: number;
+  considerableGamesCount: number;
+  ownedGames: SteamOwnedGame[];
+}
+
+export interface PodiumGameEntry {
+  rank: 1 | 2 | 3;
+  gameId: string;
+  steamAppId?: number;
+  name: string;
+  coverUrl: string;
+  category: string;
+  tags: string[];
+  minPlayers: number;
+  maxPlayers: number;
+  isMultiplayer: boolean;
+  source: 'steam' | 'catalog' | 'external';
+  hoursPlayed?: number;
+  recentHoursPlayed?: number;
+}
+
+export type ExternalGamePlatform =
+  | 'Steam (Otra cuenta / Verde)'
+  | 'Riot Games'
+  | 'Epic Games'
+  | 'Battle.net'
+  | 'EA App'
+  | 'Xbox Game Pass'
+  | 'Otro Launcher';
+
+export interface ExternalRatedGame {
+  gameId: string;
+  steamAppId?: number;
+  igdbId?: number;
+  name: string;
+  platform: ExternalGamePlatform;
+  coverUrl: string;
+  category: string;
+  tags: string[];
+  tagVotes?: Record<string, number>;
+  minPlayers: number;
+  maxPlayers: number;
+  isMultiplayer: boolean;
+  rating: GameRating;
+  hoursPlayedEstimate?: number;
+  recentHoursPlayed?: number;
+  burnedOut?: boolean;
+  source?: 'igdb' | 'steam' | 'curated';
+}
+
+// ============================================================================
+// PVJ-6D: MODELO DE PERFILADO VECTORIAL DE JUGADORES EN 6 DIMENSIONES
+// ============================================================================
+
+export type PvjDimensionKey =
+  | 'D1_agonia'
+  | 'D2_ingenio'
+  | 'D3_expresion'
+  | 'D4_narrativa'
+  | 'D5_acumulacion'
+  | 'D6_sinergia';
+
+export type PvjClassificationType = 'PURE' | 'COMPOUND' | 'POLYMATH';
+
+export type PvjVector6D = Record<PvjDimensionKey, number>;
+
+export interface PvjTopInfluencingGame {
+  app_id: number;
+  name: string;
+  hours: number;
+  recent_hours?: number;
+  specificity_omega: number;
+  effective_weight_W: number;
+  dominant_dimension: PvjDimensionKey;
+  dominant_dimension_label?: string;
+  vector_g?: PvjVector6D;
+}
+
+export interface PvjPlayerCategorizationResult {
+  steam_id: string;
+  valid_games_analyzed: number;
+  total_hours_analyzed: number;
+  pending_hours_games_count?: number;
+  vectors: {
+    relative_distribution_P: PvjVector6D;
+    radar_scores_S: PvjVector6D;
+  };
+  classification: {
+    type: PvjClassificationType;
+    primary_dimension: PvjDimensionKey;
+    secondary_dimension: PvjDimensionKey | null;
+    archetype_name: string;
+    confidence_score: number;
+    archetype_emoji?: string;
+    archetype_description?: string;
+  };
+  top_influencing_games: PvjTopInfluencingGame[];
+}
+
+export interface PlayerTasteProfile {
+  topMultiplayerGames: PodiumGameEntry[];
+  topSingleplayerGames: PodiumGameEntry[];
+  externalGames: ExternalRatedGame[];
+  catalogGameHours?: Record<string, { hoursPlayed: number; recentHoursPlayed?: number }>;
+  featureVector?: Partial<Record<TasteDimensionKey, number>>;
+  topDimensions?: Array<{ key: TasteDimensionKey; label: string; score: number }>;
+  pvjProfile?: PvjPlayerCategorizationResult;
+  updatedAt: string;
+}
+
+export interface PlayerAffinityBreakdown {
+  userId: string;
+  displayName: string;
+  avatarUrl: string;
+  affinityScore: number; // 0 to 100
+  matchingReasons: string[];
+  ownsOrPlays: boolean;
+  burnedOut: boolean;
+}
+
+export interface GroupGameRecommendation {
+  id: string;
+  name: string;
+  coverUrl: string;
+  category: string;
+  description: string;
+  tags: string[];
+  minPlayers: number;
+  maxPlayers: number;
+  groupArithmeticScore: number; // Equal-weight arithmetic mean across all target players
+  recommendationType: 'ready_to_play' | 'discovery';
+  catalogGameId?: string;
+  sharedDimensions: string[];
+  explanation: string;
+  playerBreakdowns: PlayerAffinityBreakdown[];
+}
+
+export type UnifiedSelectorSource =
+  | 'steam_owned'
+  | 'external_rated'
+  | 'catalog'
+  | 'igdb_discovery'
+  | 'knowledge_base'
+  | 'live_search';
+
+export interface UnifiedSelectorGame {
+  key: string;
+  name: string;
+  coverUrl: string;
+  category: string;
+  tags: string[];
+  tagVotes?: Record<string, number>;
+  genres: string[];
+  minPlayers: number;
+  maxPlayers: number;
+  isMultiplayer: boolean;
+  platform: string;
+  source: UnifiedSelectorSource;
+  steamAppId?: number;
+  igdbId?: number;
+  catalogGameId?: string;
+  externalGameId?: string;
+  ownedOnSteam: boolean;
+  playtimeHours: number;
+  playtimeRecentHours: number;
+  isPlayedOrRatedByUser: boolean;
+  effectiveRating: GameRating;
+  hasExplicitUserRating: boolean;
+  burnedOut: boolean;
+  inClubCatalog: boolean;
+  tasteAffinityPct: number;
+  likelihoodScore: number;
+  likelihoodBadge: string;
+  needsHoursInput?: boolean;
 }

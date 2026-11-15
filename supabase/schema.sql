@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   discord_username TEXT,
   display_name TEXT NOT NULL,
   avatar_url TEXT,
+  birth_date TEXT DEFAULT NULL,
+  bio TEXT DEFAULT NULL,
   karma_score INTEGER NOT NULL DEFAULT 80 CHECK (karma_score >= 0 AND karma_score <= 100),
   sessions_played INTEGER NOT NULL DEFAULT 0 CHECK (sessions_played >= 0),
   hours_played NUMERIC(6, 2) NOT NULL DEFAULT 0 CHECK (hours_played >= 0),
@@ -36,6 +38,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   weekly_schedule JSONB NOT NULL DEFAULT '{}'::JSONB,
   daily_overrides JSONB NOT NULL DEFAULT '{}'::JSONB,
   category_preferences JSONB NOT NULL DEFAULT '{}'::JSONB,
+  steam_profile JSONB DEFAULT NULL,
+  taste_profile JSONB DEFAULT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -69,10 +74,33 @@ CREATE TABLE IF NOT EXISTS user_game_preferences (
 );
 
 -- ------------------------------------------------------------------------------
--- 4. GAMING SESSIONS
+-- 4. GAMING GROUPS (Members, Invite Codes & Per-Group Discord Webhook)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT DEFAULT NULL,
+  invite_code TEXT NOT NULL UNIQUE,
+  created_by TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+  member_ids TEXT[] NOT NULL DEFAULT '{}',
+  admin_ids TEXT[] NOT NULL DEFAULT '{}',
+  discord_webhook_url TEXT NOT NULL DEFAULT '',
+  discord_channel_name TEXT NOT NULL DEFAULT 'general-gaming',
+  discord_guild_name TEXT NOT NULL DEFAULT '',
+  discord_mention_role_id TEXT NOT NULL DEFAULT '',
+  discord_use_everyone BOOLEAN NOT NULL DEFAULT FALSE,
+  discord_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ------------------------------------------------------------------------------
+-- 5. GAMING SESSIONS (Strictly Scoped to a Group)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   scheduled_date DATE NOT NULL,
   mode TEXT NOT NULL CHECK (mode IN ('fixed', 'random')),
@@ -127,6 +155,7 @@ CREATE TABLE IF NOT EXISTS sanctions (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
   user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
   session_title TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('late', 'no_show', 'on_time_bonus')),
   promised_time TEXT NOT NULL,
@@ -143,6 +172,7 @@ CREATE TABLE IF NOT EXISTS sanctions (
 CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
   user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   mentions TEXT[] NOT NULL DEFAULT '{}',
   reply_to_id TEXT REFERENCES chat_messages(id) ON DELETE SET NULL,
@@ -170,8 +200,12 @@ CREATE TABLE IF NOT EXISTS discord_config (
     "late_ping": true,
     "sanction_issued": true,
     "chat_broadcast": true,
-    "checkin_update": true
+    "checkin_update": true,
+    "session_callout": true
   }'::JSONB,
+  steam_api_key TEXT DEFAULT NULL,
+  igdb_client_id TEXT DEFAULT NULL,
+  igdb_client_secret TEXT DEFAULT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -241,6 +275,9 @@ $$;
 -- Indexes on foreign keys for optimal query performance
 CREATE INDEX IF NOT EXISTS idx_games_added_by ON games(added_by);
 CREATE INDEX IF NOT EXISTS idx_preferences_game_id ON user_game_preferences(game_id);
+CREATE INDEX IF NOT EXISTS idx_groups_invite_code ON groups(invite_code);
+CREATE INDEX IF NOT EXISTS idx_groups_created_by ON groups(created_by);
+CREATE INDEX IF NOT EXISTS idx_sessions_group_id ON sessions(group_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_selected_game_id ON sessions(selected_game_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_roulette_winner_id ON sessions(roulette_winner_game_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_created_by ON sessions(created_by);
@@ -249,7 +286,9 @@ CREATE INDEX IF NOT EXISTS idx_votes_voter_id ON attendance_votes(voter_id);
 CREATE INDEX IF NOT EXISTS idx_votes_target_user_id ON attendance_votes(target_user_id);
 CREATE INDEX IF NOT EXISTS idx_sanctions_user_id ON sanctions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sanctions_session_id ON sanctions(session_id);
+CREATE INDEX IF NOT EXISTS idx_sanctions_group_id ON sanctions(group_id);
 CREATE INDEX IF NOT EXISTS idx_chat_user_id ON chat_messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_group_id ON chat_messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_chat_reply_to_id ON chat_messages(reply_to_id);
 CREATE INDEX IF NOT EXISTS idx_chat_linked_session_id ON chat_messages(linked_session_id);
 
@@ -265,6 +304,7 @@ EXECUTE FUNCTION apply_sanction_karma_delta();
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE games ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_game_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_votes ENABLE ROW LEVEL SECURITY;
@@ -287,6 +327,11 @@ CREATE POLICY "Public Read Preferences" ON user_game_preferences FOR SELECT USIN
 CREATE POLICY "Public Insert Preferences" ON user_game_preferences FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public Update Preferences" ON user_game_preferences FOR UPDATE USING (true);
 CREATE POLICY "Public Delete Preferences" ON user_game_preferences FOR DELETE USING (true);
+
+CREATE POLICY "Public Read Groups" ON groups FOR SELECT USING (true);
+CREATE POLICY "Public Insert Groups" ON groups FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Groups" ON groups FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Groups" ON groups FOR DELETE USING (true);
 
 CREATE POLICY "Public Read Sessions" ON sessions FOR SELECT USING (true);
 CREATE POLICY "Public Insert Sessions" ON sessions FOR INSERT WITH CHECK (true);
@@ -334,6 +379,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   profiles,
   games,
   user_game_preferences,
+  groups,
   sessions,
   session_participants,
   attendance_votes,
@@ -368,14 +414,20 @@ VALUES (
 -- ------------------------------------------------------------------------------
 -- INITIAL SEED: POPULAR GAMES
 -- ------------------------------------------------------------------------------
-INSERT INTO games (id, name, cover_url, min_players, max_players, category, tags, average_duration_mins)
+INSERT INTO games (id, name, description, cover_url, min_players, max_players, category, tags, average_duration_mins, added_by)
 VALUES
-  ('cs2', 'Counter-Strike 2', 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80', 2, 5, 'Tactical Shooter', ARRAY['Competitivo', 'FPS', 'Clásico'], 45),
-  ('aoe2', 'Age of Empires II: DE', 'https://images.unsplash.com/photo-1579373903781-fd5c0c30c4cd?w=600&auto=format&fit=crop&q=80', 2, 8, 'RTS', ARRAY['Estrategia', 'Clásico', 'Larga Duración'], 90),
-  ('helldivers2', 'Helldivers 2', 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80', 1, 4, 'Co-op Shooter', ARRAY['Cooperativo', 'Acción', 'Democracia'], 40),
-  ('lethal-company', 'Lethal Company', 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80', 2, 4, 'Survival Horror', ARRAY['Risas', 'Cooperativo', 'Terror'], 30),
-  ('dota2', 'Dota 2', 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop&q=80', 2, 5, 'MOBA', ARRAY['Competitivo', 'Estrategia', 'Tóxico'], 50),
-  ('phasmophobia', 'Phasmophobia', 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80', 1, 4, 'Psychological Horror', ARRAY['Cooperativo', 'Terror', 'Fantasmas'], 35),
-  ('rocket-league', 'Rocket League', 'https://images.unsplash.com/photo-1563089145-599997674d42?w=600&auto=format&fit=crop&q=80', 1, 6, 'Sports / Action', ARRAY['Fútbol con autos', 'Rápido', 'Casual'], 15),
-  ('bg3', 'Baldur''s Gate 3', 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=600&auto=format&fit=crop&q=80', 1, 4, 'CRPG', ARRAY['Rol', 'Cooperativo', 'Historia'], 120)
+  ('cs2', 'Counter-Strike 2', 'Shooter táctico 5v5 por rondas de plantar/desactivar la bomba. Clásico indiscutido de las noches competitivas.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/730/header.jpg', 2, 5, 'Shooter Táctico', ARRAY['Competitivo', 'FPS', 'Clásico'], 45, NULL),
+  ('aoe2', 'Age of Empires II: DE', 'Estrategia en tiempo real medieval para hasta 8 amigos: levantar imperios, juntar recursos y mandarse con todo en Imperial.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/813780/header.jpg', 2, 8, 'RTS', ARRAY['Estrategia', 'Clásico', 'Larga Duración'], 90, NULL),
+  ('helldivers2', 'Helldivers 2', 'Escuadrón cooperativo de hasta 4 soldados repartiendo democracia intergaláctica contra hordas de bichos y autómatas.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/553850/header.jpg', 1, 4, 'Co-op Acción', ARRAY['Cooperativo', 'Acción', 'Democracia'], 40, NULL),
+  ('lethal-company', 'Lethal Company', 'Terror cooperativo y comedia involuntaria: 4 chatarreros entrando a lunas abandonadas con chat de voz por proximidad.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1966720/header.jpg', 2, 4, 'Co-op Horror', ARRAY['Risas', 'Cooperativo', 'Terror'], 30, NULL),
+  ('dota2', 'Dota 2', 'Batallas intensas 5v5 de estrategia, héroes, teamfights y defensa del Ancestro.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/570/header.jpg', 2, 5, 'MOBA', ARRAY['Competitivo', 'Estrategia', 'Tóxico'], 50, NULL),
+  ('phasmophobia', 'Phasmophobia', 'Investigación paranormal cooperativa para 4 amigos cazando fantasmas con micrófono abierto.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/739630/header.jpg', 1, 4, 'Co-op Horror', ARRAY['Cooperativo', 'Terror', 'Fantasmas'], 35, NULL),
+  ('rocket-league', 'Rocket League', 'Fútbol acrobático con autos propulsados por cohetes en partidos rápidos de 5 minutos.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/252950/header.jpg', 1, 6, 'Deportes / Autos', ARRAY['Fútbol con autos', 'Rápido', 'Casual'], 15, NULL),
+  ('bg3', 'Baldur''s Gate 3', 'Campaña épica de rol cooperativo basada en Dungeons & Dragons con decisiones grupales y combate táctico.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1086940/header.jpg', 1, 4, 'RPG / Aventura', ARRAY['Rol', 'Cooperativo', 'Historia'], 120, NULL),
+  ('among-us', 'Among Us', 'Deducción social, traiciones y discusiones a los gritos en Discord para lobbies de 4 a 15 jugadores.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/945360/header.jpg', 4, 15, 'Party Casual', ARRAY['Party', 'Impostor', 'Grupo Grande'], 20, NULL),
+  ('golf-friends', 'Golf With Your Friends', 'Mini-golf caótico con colisiones activadas para hasta 12 amigos al mismo tiempo.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/431240/header.jpg', 2, 12, 'Party Casual', ARRAY['Casual', 'Risas', 'Grupo Grande'], 25, NULL),
+  ('lol', 'League of Legends', 'El clásico MOBA 5v5 en la Grieta del Invocador o ARAMs rápidos con los pibes.', 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop&q=80', 1, 5, 'MOBA', ARRAY['5v5', 'Grieta', 'ARAM'], 35, NULL),
+  ('peak', 'PEAK', 'Escalada cooperativa caótica para hasta 4 amigos donde una mala agarrada tira a todo el equipo.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3527290/header.jpg', 1, 4, 'Co-op Acción', ARRAY['Co-op', 'Escalada', 'Risas'], 45, NULL),
+  ('project-zomboid', 'Project Zomboid', 'Simulador definitivo de supervivencia zombie para grupos grandes: armar base, saquear y sobrevivir.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/108600/header.jpg', 1, 16, 'Survival Sandbox', ARRAY['Supervivencia', 'Zombies', 'Grupo Grande'], 90, NULL),
+  ('valorant', 'Valorant', 'Shooter táctico 5v5 con agentes de habilidades únicas y puntería milimétrica.', 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80', 1, 5, 'Shooter Táctico', ARRAY['FPS', '5v5', 'Habilidades'], 40, NULL)
 ON CONFLICT (id) DO NOTHING;

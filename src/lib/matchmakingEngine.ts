@@ -593,10 +593,12 @@ export function getEffectiveDailySchedule(
         precisionMinutes: override.precisionMinutes || dayConfig?.precisionMinutes || 15,
         confidencePercentage: 0,
         slots: [],
+        cancelledSlotIds: override.cancelledSlotIds,
         reason: override.reason,
       };
     }
 
+    const baseSlots = normalizeDaySlots(dayConfig, dayKey);
     const conf = clampDefaultConfidence(
       override.confidencePercentage ?? dayConfig?.confidencePercentage ?? 75
     );
@@ -605,10 +607,35 @@ export function getEffectiveDailySchedule(
     const overridePrec = override.precisionMinutes || dayConfig?.precisionMinutes || 15;
 
     let slots: TimeSlotBlock[];
-    if (override.slots && override.slots.length > 0) {
-      slots = override.slots.map((s) => ({
+    const hasExplicitSlots = override.slots !== undefined;
+    const hasCancelledSlotIds = Boolean(override.cancelledSlotIds && override.cancelledSlotIds.length > 0);
+
+    if (hasExplicitSlots) {
+      const cancelled = new Set(override.cancelledSlotIds || []);
+      slots = (override.slots || [])
+        .filter((s) => !cancelled.has(s.id))
+        .map((s) => ({
+          ...s,
+          confidencePercentage: clampDefaultConfidence(s.confidencePercentage),
+        }));
+    } else if (hasCancelledSlotIds) {
+      slots = baseSlots.filter((slot) => !override.cancelledSlotIds!.includes(slot.id));
+    } else if (override.availableFrom || override.availableUntil) {
+      slots = [
+        {
+          id: `slot-override-${dateStr}-1`,
+          from: overrideFrom,
+          until: overrideUntil,
+          confidencePercentage: conf,
+          precisionMinutes: overridePrec,
+        },
+      ];
+    } else if (baseSlots.length > 0) {
+      slots = baseSlots.map((s) => ({
         ...s,
-        confidencePercentage: clampDefaultConfidence(s.confidencePercentage),
+        confidencePercentage: override.confidencePercentage !== undefined
+          ? clampDefaultConfidence(override.confidencePercentage)
+          : s.confidencePercentage,
       }));
     } else {
       slots = [
@@ -622,16 +649,47 @@ export function getEffectiveDailySchedule(
       ];
     }
 
-    const maxConf = Math.max(...slots.map((s) => s.confidencePercentage));
+    if ((hasExplicitSlots || hasCancelledSlotIds) && slots.length === 0) {
+      return {
+        plays: false,
+        source: 'override',
+        dayKey,
+        availableFrom: dayConfig.availableFrom,
+        availableUntil: dayConfig.availableUntil,
+        precisionMinutes: dayConfig.precisionMinutes,
+        confidencePercentage: 0,
+        slots: [],
+        cancelledSlotIds: override.cancelledSlotIds,
+        reason: override.reason || 'Todas las franjas canceladas',
+      };
+    }
+
+    if (slots.length === 0) {
+      return {
+        plays: false,
+        source: 'override',
+        dayKey,
+        availableFrom: dayConfig.availableFrom,
+        availableUntil: dayConfig.availableUntil,
+        precisionMinutes: dayConfig.precisionMinutes,
+        confidencePercentage: 0,
+        slots: [],
+        cancelledSlotIds: override.cancelledSlotIds,
+        reason: override.reason || 'Todas las franjas canceladas',
+      };
+    }
+
+    const maxConf = Math.max(...slots.map((s) => clampDefaultConfidence(s.confidencePercentage)));
     return {
       plays: true,
       source: 'override',
       dayKey,
-      availableFrom: slots[0]?.from || overrideFrom,
-      availableUntil: slots[slots.length - 1]?.until || overrideUntil,
-      precisionMinutes: slots[0]?.precisionMinutes || overridePrec,
+      availableFrom: slots[0].from,
+      availableUntil: slots[slots.length - 1].until,
+      precisionMinutes: slots[0].precisionMinutes,
       confidencePercentage: maxConf,
       slots,
+      cancelledSlotIds: override.cancelledSlotIds,
       reason: override.reason,
     };
   }
@@ -688,7 +746,8 @@ export function isPlayerInvitedToSession(
  */
 export function getProbableAvailablePlayersForSession(
   session: GamingSession,
-  players: PlayerProfile[]
+  players: PlayerProfile[],
+  groupMemberIds?: string[]
 ): Array<{
   player: PlayerProfile;
   effective: EffectiveDailySchedule;
@@ -702,7 +761,13 @@ export function getProbableAvailablePlayersForSession(
     participant?: SessionParticipant;
   }> = [];
 
+  const groupMemberSet = groupMemberIds ? new Set(groupMemberIds) : null;
+
   for (const player of players) {
+    if (groupMemberSet && !groupMemberSet.has(player.id)) {
+      continue;
+    }
+
     if (!isPlayerInvitedToSession(session, player.id)) {
       continue;
     }
@@ -750,12 +815,19 @@ export function getProbableAvailablePlayersForSession(
 export function reconcileAutoParticipantsForSession(
   session: GamingSession,
   players: PlayerProfile[],
-  nowIso?: string
+  nowIso?: string,
+  groupMemberIds?: string[]
 ): GamingSession {
   const timestamp = nowIso || new Date().toISOString();
   const updatedParticipants: SessionParticipant[] = [];
+  const groupMemberSet = groupMemberIds ? new Set(groupMemberIds) : null;
 
   for (const player of players) {
+    // 0. Must belong to session's group when groupMemberIds filter is provided
+    if (groupMemberSet && !groupMemberSet.has(player.id)) {
+      continue;
+    }
+
     // 1. Must be invited or creator
     if (!isPlayerInvitedToSession(session, player.id)) {
       continue;
@@ -826,7 +898,8 @@ export function reconcileAutoParticipantsForSession(
  */
 export function reconcileSessionParticipantsWithSchedules(
   session: GamingSession,
-  players: PlayerProfile[]
+  players: PlayerProfile[],
+  groupMemberIds?: string[]
 ): SessionParticipant[] {
-  return reconcileAutoParticipantsForSession(session, players).participants;
+  return reconcileAutoParticipantsForSession(session, players, undefined, groupMemberIds).participants;
 }

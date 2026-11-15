@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -14,19 +15,36 @@ import {
   DiscordEventType,
   DiscordIntegrationConfig,
   DiscordNotificationLog,
+  ExternalGamePlatform,
+  ExternalRatedGame,
   Game,
   GameRating,
+  GamingGroup,
   GamingSession,
+  GroupDiscordConfig,
   PlayerProfile,
+  PlayerSteamProfile,
+  PlayerTasteProfile,
   PrecisionMinutes,
   PushNotificationAlert,
   SanctionRecord,
   SessionCalloutRecord,
   SessionParticipant,
+  TasteDimensionKey,
+  UnifiedSelectorGame,
   UserGamePreference,
   WeeklySchedule,
 } from '../types/domain';
 import { AppContextValue } from '../types/context';
+import { fetchSteamProfileLibrary } from '../lib/steamService';
+import {
+  MAX_AUTO_SELECTED_STEAM_GAMES,
+  buildPlayerTasteVector,
+  isConsiderableSteamGame,
+  isNonGameSteamApp,
+  normalizeGameName,
+} from '../lib/tasteProfileEngine';
+import { computePlayerPvj6dProfile } from '../lib/playerCategorizationEngine';
 import {
   calculateGameSynchrony,
   calculateScheduleOverlap,
@@ -44,6 +62,7 @@ import {
 import {
   buildChatBroadcastLog,
   buildCheckinUpdateLog,
+  buildGroupWebhookTestLog,
   buildLatePingLog,
   buildPlayerJoinedLog,
   buildRouletteWinnerLog,
@@ -62,6 +81,7 @@ import {
 import { isDiscordOAuthProviderEnabled, isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 import {
   dbCreateSession,
+  dbDeleteGroup,
   dbDeleteParticipant,
   dbInsertChatMessage,
   dbInsertGame,
@@ -71,10 +91,12 @@ import {
   dbUpdateSessionGame,
   dbUpdateSessionInvitesAndCallouts,
   dbUpsertAttendanceVote,
+  dbUpsertGroup,
   dbUpsertParticipant,
   dbUpsertPreference,
   dbUpsertProfile,
   fetchAllSupabaseData,
+  subscribeToSupabaseRealtime,
 } from '../lib/supabaseSync';
 import {
   INITIAL_DISCORD_CONFIG,
@@ -82,30 +104,48 @@ import {
 } from '../lib/mockData';
 
 const STORAGE_KEYS = {
-  CURRENT_USER_ID: 'bg_prod_v2_current_user_id',
-  IS_AUTHENTICATED: 'bg_prod_v2_is_authenticated',
-  PLAYERS: 'bg_prod_v2_players',
-  GAMES: 'bg_prod_v2_games',
-  PREFERENCES: 'bg_prod_v2_preferences',
-  SESSIONS: 'bg_prod_v2_sessions',
-  ACTIVE_SESSION_ID: 'bg_prod_v2_active_session_id',
-  SANCTIONS: 'bg_prod_v2_sanctions',
-  CHAT_MESSAGES: 'bg_prod_v2_chat_messages',
-  DISCORD_CONFIG: 'bg_prod_v2_discord_config',
-  DISCORD_LOGS: 'bg_prod_v2_discord_logs',
-  PUSH_ALERTS: 'bg_prod_v2_push_alerts',
+  CURRENT_USER_ID: 'bg_prod_v4_current_user_id',
+  IS_AUTHENTICATED: 'bg_prod_v4_is_authenticated',
+  PLAYERS: 'bg_prod_v4_players',
+  GAMES: 'bg_prod_v4_games',
+  PREFERENCES: 'bg_prod_v4_preferences',
+  SESSIONS: 'bg_prod_v4_sessions',
+  ACTIVE_SESSION_ID: 'bg_prod_v4_active_session_id',
+  SANCTIONS: 'bg_prod_v4_sanctions',
+  CHAT_MESSAGES: 'bg_prod_v4_chat_messages',
+  DISCORD_CONFIG: 'bg_prod_v4_discord_config',
+  DISCORD_LOGS: 'bg_prod_v4_discord_logs',
+  PUSH_ALERTS: 'bg_prod_v4_push_alerts',
+  GROUPS: 'bg_prod_v4_groups',
+  ACTIVE_GROUP_ID: 'bg_prod_v4_active_group_id',
+  PENDING_INVITE_CODE: 'bg_prod_v4_pending_invite_code',
 } as const;
 
-// Purge stale v1 localStorage keys so no demo/mock players persist in any browser
+const STORAGE_RESET_GEN_KEY = 'bg_prod_v4_reset_gen_1';
+let didRunInitialStorageReset = false;
+let pendingInitialSignOut: Promise<unknown> | null = null;
+
+// One-time reset guard for clean v4 production start + purge of legacy bg_v1_ keys
 if (typeof window !== 'undefined') {
   try {
-    Object.keys(localStorage).forEach((key) => {
-      if (key.startsWith('bg_v1_')) {
-        localStorage.removeItem(key);
-      }
-    });
+    const hasResetGen1 = localStorage.getItem(STORAGE_RESET_GEN_KEY) === '1';
+    if (!hasResetGen1) {
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith('bg_') || key.startsWith('sb-')) {
+          localStorage.removeItem(key);
+        }
+      });
+      localStorage.setItem(STORAGE_RESET_GEN_KEY, '1');
+      didRunInitialStorageReset = true;
+    } else {
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith('bg_v1_')) {
+          localStorage.removeItem(key);
+        }
+      });
+    }
   } catch (error) {
-    console.warn('Error purging stale bg_v1_ localStorage keys:', error);
+    console.warn('Error purging stale localStorage keys:', error);
   }
 }
 
@@ -130,6 +170,57 @@ function saveToStorage<T>(key: string, value: T): void {
   }
 }
 
+function extractInviteCodeFromInput(rawInput: string): string {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return '';
+  try {
+    if (trimmed.includes('://') || trimmed.includes('?')) {
+      const url = trimmed.includes('://')
+        ? new URL(trimmed)
+        : new URL(trimmed, 'https://boludos.local');
+      const fromQuery = url.searchParams.get('invite') || url.searchParams.get('joinGroup');
+      if (fromQuery) {
+        return fromQuery.trim().toUpperCase();
+      }
+    }
+  } catch {
+    // Fall through to regex/string parsing
+  }
+  const match = trimmed.match(/(?:invite|joinGroup)=([^&#\s]+)/i);
+  if (match && match[1]) {
+    return decodeURIComponent(match[1]).trim().toUpperCase();
+  }
+  return trimmed.toUpperCase();
+}
+
+function parseInitialInviteCodeFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const urlInvite = params.get('invite') || params.get('joinGroup');
+    if (urlInvite && urlInvite.trim()) {
+      const normalized = urlInvite.trim().toUpperCase();
+      saveToStorage(STORAGE_KEYS.PENDING_INVITE_CODE, normalized);
+      return normalized;
+    }
+  } catch (error) {
+    console.warn('Error parsing URL invite code:', error);
+  }
+  return loadFromStorage<string | null>(STORAGE_KEYS.PENDING_INVITE_CODE, null);
+}
+
+function generateUniqueInviteCode(existingGroups: GamingGroup[]): string {
+  const existing = new Set(existingGroups.map((g) => g.inviteCode.toUpperCase()));
+  for (let i = 0; i < 20; i++) {
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase().padEnd(4, 'X');
+    const candidate = `BG-${rand}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `BG-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+}
+
 const DEFAULT_FALLBACK_USER: PlayerProfile = {
   id: '',
   discordId: '',
@@ -145,6 +236,166 @@ const DEFAULT_FALLBACK_USER: PlayerProfile = {
   currentStreak: 0,
   activeTitle: '⌚ Reloj Suizo',
 };
+
+function stripNonGamesFromPlayer(player: PlayerProfile): {
+  cleanedPlayer: PlayerProfile;
+  removedAny: boolean;
+} {
+  let removedAny = false;
+
+  let nextSteamProfile = player.steamProfile;
+  if (nextSteamProfile?.ownedGames) {
+    const cleanOwned = nextSteamProfile.ownedGames.filter((g) => !isNonGameSteamApp(g));
+    if (cleanOwned.length !== nextSteamProfile.ownedGames.length) {
+      removedAny = true;
+      const totalHours =
+        Math.round(cleanOwned.reduce((acc, g) => acc + (g.playtimeHours || 0), 0) * 10) / 10;
+      const considerableGamesCount = cleanOwned.filter((g, idx) =>
+        isConsiderableSteamGame(g, idx)
+      ).length;
+      nextSteamProfile = {
+        ...nextSteamProfile,
+        totalHours,
+        considerableGamesCount,
+        ownedGames: cleanOwned,
+      };
+    }
+  }
+
+  let nextTasteProfile = player.tasteProfile;
+  if (nextTasteProfile) {
+    const origTopMp = nextTasteProfile.topMultiplayerGames || [];
+    const origTopSp = nextTasteProfile.topSingleplayerGames || [];
+    const origExt = nextTasteProfile.externalGames || [];
+
+    const cleanTopMp = origTopMp.filter((g) => !isNonGameSteamApp(g));
+    const cleanTopSp = origTopSp.filter((g) => !isNonGameSteamApp(g));
+    const cleanExt = origExt.filter((g) => !isNonGameSteamApp(g));
+
+    if (
+      cleanTopMp.length !== origTopMp.length ||
+      cleanTopSp.length !== origTopSp.length ||
+      cleanExt.length !== origExt.length
+    ) {
+      removedAny = true;
+      nextTasteProfile = {
+        ...nextTasteProfile,
+        topMultiplayerGames: cleanTopMp.slice(0, 3).map((g, idx) => ({
+          ...g,
+          rank: (idx + 1) as 1 | 2 | 3,
+        })),
+        topSingleplayerGames: cleanTopSp.slice(0, 3).map((g, idx) => ({
+          ...g,
+          rank: (idx + 1) as 1 | 2 | 3,
+        })),
+        externalGames: cleanExt,
+      };
+    }
+  }
+
+  if (!removedAny) {
+    return { cleanedPlayer: player, removedAny: false };
+  }
+
+  return {
+    cleanedPlayer: {
+      ...player,
+      steamProfile: nextSteamProfile,
+      tasteProfile: nextTasteProfile,
+    },
+    removedAny: true,
+  };
+}
+
+function recomputeTasteProfileForPlayer(
+  player: PlayerProfile,
+  allPrefs: UserGamePreference[],
+  allGames: Game[]
+): PlayerTasteProfile {
+  const { cleanedPlayer } = stripNonGamesFromPlayer(player);
+  const currentTaste: PlayerTasteProfile = cleanedPlayer.tasteProfile || {
+    topMultiplayerGames: [],
+    topSingleplayerGames: [],
+    externalGames: [],
+    updatedAt: new Date().toISOString(),
+  };
+
+  let featureVector: Partial<Record<TasteDimensionKey, number>> = {};
+  let topDimensions: Array<{ key: TasteDimensionKey; label: string; score: number }> = [];
+
+  try {
+    const vectorResult = buildPlayerTasteVector(cleanedPlayer, allPrefs, allGames) as
+      | {
+          featureVector?: Partial<Record<TasteDimensionKey, number>>;
+          topDimensions?: Array<{ key: TasteDimensionKey; label: string; score: number }>;
+        }
+      | Partial<Record<TasteDimensionKey, number>>
+      | undefined;
+
+    if (vectorResult) {
+      if ('featureVector' in vectorResult && vectorResult.featureVector) {
+        featureVector = vectorResult.featureVector;
+        topDimensions = vectorResult.topDimensions || [];
+      } else if (typeof vectorResult === 'object') {
+        featureVector = vectorResult as Partial<Record<TasteDimensionKey, number>>;
+      }
+    }
+  } catch (err) {
+    console.warn('Error in buildPlayerTasteVector:', err);
+  }
+
+  if (topDimensions.length === 0 && Object.keys(featureVector).length > 0) {
+    topDimensions = Object.entries(featureVector)
+      .map(([key, score]) => ({
+        key: key as TasteDimensionKey,
+        label: key.replace(/_/g, ' '),
+        score: Number(score) || 0,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  }
+
+  let pvjProfile = currentTaste.pvjProfile;
+  try {
+    pvjProfile = computePlayerPvj6dProfile(cleanedPlayer, allPrefs, allGames);
+  } catch (err) {
+    console.warn('Error in computePlayerPvj6dProfile:', err);
+  }
+
+  return {
+    ...currentTaste,
+    featureVector,
+    topDimensions,
+    pvjProfile,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function sanitizePlayerProfileNonGames(
+  player: PlayerProfile,
+  allPrefs: UserGamePreference[],
+  allGames: Game[]
+): { player: PlayerProfile; changed: boolean } {
+  const { cleanedPlayer, removedAny } = stripNonGamesFromPlayer(player);
+  const pvjHasNonGames = Boolean(
+    cleanedPlayer.tasteProfile?.pvjProfile?.top_influencing_games?.some((g) =>
+      isNonGameSteamApp({ appId: g.app_id, name: g.name })
+    )
+  );
+
+  if (!removedAny && !pvjHasNonGames) {
+    return { player, changed: false };
+  }
+
+  const updatedTaste = recomputeTasteProfileForPlayer(cleanedPlayer, allPrefs, allGames);
+  return {
+    player: {
+      ...cleanedPlayer,
+      tasteProfile: updatedTaste,
+    },
+    changed: true,
+  };
+}
 
 const AppContext = createContext<AppContextValue | null>(null);
 
@@ -175,6 +426,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(false);
   const [showWeeklyScheduleModal, setShowWeeklyScheduleModal] = useState<boolean>(false);
+  const autoOpenedTourUserIdsRef = useRef<Set<string>>(new Set());
+  const activeSessionUserRef = useRef<{ userId: string; isAuthenticated: boolean }>({
+    userId: currentUserId,
+    isAuthenticated,
+  });
+  activeSessionUserRef.current = { userId: currentUserId, isAuthenticated };
 
   const currentUser = useMemo(() => {
     return players.find((p) => p.id === currentUserId) || players[0] || DEFAULT_FALLBACK_USER;
@@ -196,10 +453,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadFromStorage(STORAGE_KEYS.PREFERENCES, [])
   );
 
-  // Sessions State - default to empty array
-  const [sessions, setSessions] = useState<GamingSession[]>(() =>
-    loadFromStorage(STORAGE_KEYS.SESSIONS, [])
+  // Gaming Groups State
+  const [groups, setGroups] = useState<GamingGroup[]>(() => {
+    const storedGroups = loadFromStorage<GamingGroup[]>(STORAGE_KEYS.GROUPS, []);
+    if (storedGroups.length > 0) {
+      return storedGroups;
+    }
+    const storedPlayers = loadFromStorage<PlayerProfile[]>(STORAGE_KEYS.PLAYERS, []);
+    const storedSessions = loadFromStorage<GamingSession[]>(STORAGE_KEYS.SESSIONS, []);
+    if (storedPlayers.length > 0 || storedSessions.length > 0) {
+      const legacyDiscord = loadFromStorage<DiscordIntegrationConfig>(
+        STORAGE_KEYS.DISCORD_CONFIG,
+        INITIAL_DISCORD_CONFIG
+      );
+      return [
+        {
+          id: 'group-boludos-og',
+          name: 'Boludos Gaming OG',
+          description: 'Grupo principal del club — sesiones, ruleta y Tribunal del Humo.',
+          inviteCode: 'BG-CLUB1',
+          createdBy: storedPlayers[0]?.id || '',
+          memberIds: storedPlayers.map((p) => p.id),
+          adminIds: storedPlayers[0] ? [storedPlayers[0].id] : [],
+          discordConfig: {
+            enabled: legacyDiscord.enabled,
+            webhookUrl: legacyDiscord.webhookUrl,
+            channelName: legacyDiscord.channelName,
+            guildName: legacyDiscord.guildName,
+            mentionRoleId: legacyDiscord.mentionRoleId,
+            useEveryoneMention: legacyDiscord.useEveryoneMention,
+          },
+          createdAt: new Date().toISOString(),
+        },
+      ];
+    }
+    return [];
+  });
+
+  const [activeGroupIdState, setActiveGroupIdState] = useState<string | null>(() =>
+    loadFromStorage<string | null>(STORAGE_KEYS.ACTIVE_GROUP_ID, null)
   );
+
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(() =>
+    parseInitialInviteCodeFromUrl()
+  );
+
+  const userGroups = useMemo(() => {
+    if (!currentUserId) return [];
+    return groups.filter((g) => g.memberIds.includes(currentUserId));
+  }, [groups, currentUserId]);
+
+  const activeGroup = useMemo(() => {
+    if (userGroups.length === 0) return null;
+    if (activeGroupIdState) {
+      const matched = userGroups.find((g) => g.id === activeGroupIdState);
+      if (matched) return matched;
+    }
+    return userGroups[0] || null;
+  }, [userGroups, activeGroupIdState]);
+
+  const resolvedActiveGroupId = activeGroup?.id || null;
+
+  const pendingInviteGroup = useMemo(() => {
+    if (!pendingInviteCode) return null;
+    const normalized = pendingInviteCode.trim().toUpperCase();
+    return groups.find((g) => g.inviteCode.toUpperCase() === normalized) || null;
+  }, [pendingInviteCode, groups]);
+
+  // Sessions State - default to empty array, sanitizing legacy localStorage sessions lacking groupId
+  const [sessions, setSessions] = useState<GamingSession[]>(() => {
+    const stored = loadFromStorage<GamingSession[]>(STORAGE_KEYS.SESSIONS, []);
+    return stored.map((s) => ({
+      ...s,
+      groupId: s.groupId || 'group-boludos-og',
+    }));
+  });
 
   const [activeSessionId, setActiveSessionIdState] = useState<string>(() =>
     loadFromStorage(STORAGE_KEYS.ACTIVE_SESSION_ID, '')
@@ -248,21 +576,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await fetchAllSupabaseData();
       if (!data || !isMounted) return;
 
-      // Update state with Supabase tables while preserving any newly created active session profile not yet flushed
+      // Update state with Supabase tables while preserving only an active local profile not yet flushed
       setPlayers((prev) => {
-        if (data.players.length === 0 && prev.length > 0) {
+        if (data.players.length === 0 && prev.length === 0) {
           return prev;
         }
         const merged = [...data.players];
-        for (const localP of prev) {
-          if (!merged.some((dbP) => dbP.id === localP.id)) {
-            merged.push(localP);
-          }
+        const activeLocal = prev.find((localP) => localP.id === currentUserId);
+        if (activeLocal && !merged.some((dbP) => dbP.id === activeLocal.id)) {
+          merged.push(activeLocal);
         }
         return merged;
       });
       if (data.games.length > 0) setGames(data.games);
       setPreferences(data.preferences);
+      setGroups(data.groups);
       setSessions(data.sessions);
       setActiveSessionIdState((prev) =>
         data.sessions.some((s) => s.id === prev) ? prev : (data.sessions[0]?.id || '')
@@ -274,116 +602,175 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     hydrate();
 
-    const channel = supabase
-      .channel('boludos-gaming-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public' },
-        () => {
-          hydrate();
-        }
-      )
-      .subscribe();
+    const unsubscribe = subscribeToSupabaseRealtime(() => {
+      hydrate();
+    });
 
     return () => {
       isMounted = false;
-      supabase?.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
   // Listen for Supabase Discord OAuth sessions
   useEffect(() => {
-    if (!supabase) return;
+    const sbClient = supabase;
+    if (!sbClient) return;
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const user = session.user;
-        const userId = user.id;
-        const meta = (user.user_metadata || {}) as Record<string, unknown>;
-        const customClaims = (meta.custom_claims as Record<string, unknown> | undefined) || {};
-        const displayName = String(
-          customClaims.global_name ||
-            meta.full_name ||
-            meta.name ||
-            user.email?.split('@')[0] ||
-            'Gamer'
-        );
-        const discordUsername = String(
-          meta.preferred_username || meta.name || displayName.toLowerCase().replace(/\s+/g, '_')
-        );
-        const discordId = String(meta.provider_id || meta.sub || '');
-        const avatarUrl = String(
-          meta.avatar_url ||
-            `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${encodeURIComponent(displayName)}`
-        );
+    let isCancelled = false;
+    let subscription: { unsubscribe: () => void } | null = null;
 
-        setPlayers((prevPlayers) => {
-          const existing = prevPlayers.find((p) => p.id === userId);
-          if (existing) {
-            dbUpsertProfile(existing).catch(console.warn);
+    const attachAuthListener = async () => {
+      if (didRunInitialStorageReset) {
+        if (!pendingInitialSignOut) {
+          pendingInitialSignOut = sbClient.auth.signOut({ scope: 'local' }).catch((err) => {
+            console.warn('Error clearing cached Supabase auth session on clean reset:', err);
+          });
+        }
+        await pendingInitialSignOut;
+        didRunInitialStorageReset = false;
+      }
+
+      if (isCancelled) return;
+
+      const { data } = sbClient.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          const user = session.user;
+          const userId = user.id;
+          const isSameActiveUser =
+            activeSessionUserRef.current.isAuthenticated &&
+            activeSessionUserRef.current.userId === userId;
+
+          // Ignore token refresh / tab-focus re-emissions when user is already active in app
+          if (isSameActiveUser && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
+            return;
+          }
+          const meta = (user.user_metadata || {}) as Record<string, unknown>;
+          const customClaims = (meta.custom_claims as Record<string, unknown> | undefined) || {};
+          const displayName = String(
+            customClaims.global_name ||
+              meta.full_name ||
+              meta.name ||
+              user.email?.split('@')[0] ||
+              'Gamer'
+          );
+          const discordUsername = String(
+            meta.preferred_username || meta.name || displayName.toLowerCase().replace(/\s+/g, '_')
+          );
+          const discordId = String(meta.provider_id || meta.sub || '');
+          const avatarUrl = String(
+            meta.avatar_url ||
+              `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${encodeURIComponent(displayName)}`
+          );
+
+          setPlayers((prevPlayers) => {
+            const existing = prevPlayers.find((p) => p.id === userId);
+            if (existing) {
+              dbUpsertProfile(existing).catch(console.warn);
+              setTimeout(() => {
+                setCurrentUserId(userId);
+                setIsAuthenticated(true);
+                if (
+                  !existing.onboardingCompleted &&
+                  !isSameActiveUser &&
+                  !autoOpenedTourUserIdsRef.current.has(userId)
+                ) {
+                  autoOpenedTourUserIdsRef.current.add(userId);
+                  setShowOnboardingModal(true);
+                }
+              }, 0);
+              return prevPlayers;
+            }
+
+            const newProfile: PlayerProfile = {
+              id: userId,
+              discordId,
+              discordUsername,
+              displayName,
+              avatarUrl,
+              karmaScore: 100,
+              sessionsPlayed: 0,
+              hoursPlayed: 0,
+              onTimeCount: 0,
+              lateCount: 0,
+              noShowCount: 0,
+              currentStreak: 0,
+              activeTitle: '⌚ Reloj Suizo',
+              isOnline: true,
+              pushEnabled: true,
+              onboardingCompleted: false,
+              weeklySchedule: createDefaultWeeklySchedule(),
+              dailyOverrides: {},
+              categoryPreferences: {
+                'Shooter Táctico': 'like',
+                'MOBA': 'neutral',
+                'Co-op Horror': 'like',
+                'Co-op Acción': 'like',
+                'Survival Sandbox': 'like',
+                'RTS': 'neutral',
+                'Party Casual': 'like',
+                'Deportes / Autos': 'neutral',
+                'RPG / Aventura': 'like',
+              },
+            };
+
+            dbUpsertProfile(newProfile).catch(console.warn);
             setTimeout(() => {
               setCurrentUserId(userId);
               setIsAuthenticated(true);
-              if (!existing.onboardingCompleted) {
+              if (!autoOpenedTourUserIdsRef.current.has(userId)) {
+                autoOpenedTourUserIdsRef.current.add(userId);
                 setShowOnboardingModal(true);
               }
             }, 0);
-            return prevPlayers;
-          }
-
-          const newProfile: PlayerProfile = {
-            id: userId,
-            discordId,
-            discordUsername,
-            displayName,
-            avatarUrl,
-            karmaScore: 100,
-            sessionsPlayed: 0,
-            hoursPlayed: 0,
-            onTimeCount: 0,
-            lateCount: 0,
-            noShowCount: 0,
-            currentStreak: 0,
-            activeTitle: '⌚ Reloj Suizo',
-            isOnline: true,
-            pushEnabled: true,
-            onboardingCompleted: false,
-            weeklySchedule: createDefaultWeeklySchedule(),
-            dailyOverrides: {},
-            categoryPreferences: {
-              'Shooter Táctico': 'like',
-              'MOBA': 'neutral',
-              'Co-op Horror': 'like',
-              'Co-op Acción': 'like',
-              'Survival Sandbox': 'like',
-              'RTS': 'neutral',
-              'Party Casual': 'like',
-              'Deportes / Autos': 'neutral',
-              'RPG / Aventura': 'like',
-            },
-          };
-
-          dbUpsertProfile(newProfile).catch(console.warn);
-          setTimeout(() => {
-            setCurrentUserId(userId);
-            setIsAuthenticated(true);
-            setShowOnboardingModal(true);
-          }, 0);
-          syncChannel?.postMessage({
-            type: 'SYNC_PLAYERS',
-            payload: [...prevPlayers, newProfile],
+            syncChannel?.postMessage({
+              type: 'SYNC_PLAYERS',
+              payload: [...prevPlayers, newProfile],
+            });
+            return [...prevPlayers, newProfile];
           });
-          return [...prevPlayers, newProfile];
-        });
+        }
+      });
+
+      if (isCancelled) {
+        data.subscription.unsubscribe();
+        return;
       }
-    });
+      subscription = data.subscription;
+    };
+
+    attachAuthListener();
 
     return () => {
-      subscription.unsubscribe();
+      isCancelled = true;
+      subscription?.unsubscribe();
     };
   }, [syncChannel]);
+
+  // Auto-sanitize existing profiles loaded from localStorage / Supabase to purge non-game utilities (e.g., Wallpaper Engine)
+  useEffect(() => {
+    if (players.length === 0) return;
+
+    let anyChanged = false;
+    const changedPlayers: PlayerProfile[] = [];
+    const sanitizedPlayers = players.map((p) => {
+      const res = sanitizePlayerProfileNonGames(p, preferences, games);
+      if (res.changed) {
+        anyChanged = true;
+        changedPlayers.push(res.player);
+        return res.player;
+      }
+      return p;
+    });
+
+    if (!anyChanged) return;
+
+    setPlayers(sanitizedPlayers);
+    changedPlayers.forEach((cp) => {
+      dbUpsertProfile(cp).catch(console.warn);
+    });
+    syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: sanitizedPlayers });
+  }, [players, preferences, games, syncChannel]);
 
   // Save changes to localStorage
   useEffect(() => {
@@ -405,6 +792,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.PREFERENCES, preferences);
   }, [preferences]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.GROUPS, groups);
+  }, [groups]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.ACTIVE_GROUP_ID, activeGroupIdState);
+  }, [activeGroupIdState]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (pendingInviteCode) {
+      saveToStorage(STORAGE_KEYS.PENDING_INVITE_CODE, pendingInviteCode);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.PENDING_INVITE_CODE);
+    }
+  }, [pendingInviteCode]);
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.SESSIONS, sessions);
@@ -446,6 +850,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         case 'SYNC_PLAYERS':
           setPlayers(data.payload);
           break;
+        case 'SYNC_GROUPS':
+          setGroups(data.payload);
+          break;
         case 'SYNC_SESSIONS':
           setSessions(data.payload);
           break;
@@ -466,6 +873,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           break;
         case 'SYNC_ALL':
           if (data.payload.players) setPlayers(data.payload.players);
+          if (data.payload.groups) setGroups(data.payload.groups);
           if (data.payload.sessions) setSessions(data.payload.sessions);
           if (data.payload.preferences) setPreferences(data.payload.preferences);
           if (data.payload.sanctions) setSanctions(data.payload.sanctions);
@@ -512,15 +920,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [syncChannel]
   );
 
-  // Helper to log and dispatch to Discord Webhook
+  // Helper to log and dispatch to Discord Webhook (group-scoped with optional global fallback)
   const dispatchDiscordPipeline = useCallback(
-    async (log: DiscordNotificationLog) => {
-      let logWithStatus = { ...log };
+    async (log: DiscordNotificationLog, targetGroupId?: string) => {
+      const resolvedGroupId = targetGroupId || log.groupId;
+      const targetGroup = resolvedGroupId
+        ? groups.find((g) => g.id === resolvedGroupId)
+        : undefined;
 
-      if (discordConfig.enabled && discordConfig.events[log.eventType] && discordConfig.webhookUrl) {
-        const result = await dispatchDiscordWebhook(discordConfig.webhookUrl, log);
+      const enrichedLog: DiscordNotificationLog = {
+        ...log,
+        groupId: targetGroup?.id || log.groupId,
+        groupName: targetGroup?.name || log.groupName,
+      };
+
+      let logWithStatus: DiscordNotificationLog = { ...enrichedLog };
+      const eventAllowed = discordConfig.events[enrichedLog.eventType] ?? true;
+
+      if (targetGroup) {
+        const groupWebhook = targetGroup.discordConfig.webhookUrl.trim();
+        if (targetGroup.discordConfig.enabled && groupWebhook) {
+          if (eventAllowed) {
+            const result = await dispatchDiscordWebhook(groupWebhook, enrichedLog);
+            logWithStatus = {
+              ...enrichedLog,
+              deliveredToWebhook: result.ok,
+              webhookError: result.error,
+            };
+          }
+        } else if (
+          !groupWebhook &&
+          discordConfig.enabled &&
+          discordConfig.webhookUrl.trim() &&
+          eventAllowed
+        ) {
+          const result = await dispatchDiscordWebhook(discordConfig.webhookUrl, enrichedLog);
+          logWithStatus = {
+            ...enrichedLog,
+            deliveredToWebhook: result.ok,
+            webhookError: result.error,
+          };
+        } else if (!targetGroup.discordConfig.enabled) {
+          logWithStatus = {
+            ...enrichedLog,
+            deliveredToWebhook: false,
+            webhookError: `Webhook de Discord deshabilitado para "${targetGroup.name}"`,
+          };
+        } else {
+          logWithStatus = {
+            ...enrichedLog,
+            deliveredToWebhook: false,
+            webhookError: 'El grupo no tiene un Webhook de Discord configurado',
+          };
+        }
+      } else if (discordConfig.enabled && eventAllowed && discordConfig.webhookUrl.trim()) {
+        const result = await dispatchDiscordWebhook(discordConfig.webhookUrl, enrichedLog);
         logWithStatus = {
-          ...log,
+          ...enrichedLog,
           deliveredToWebhook: result.ok,
           webhookError: result.error,
         };
@@ -532,60 +988,375 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return next;
       });
     },
-    [discordConfig, syncChannel]
+    [groups, discordConfig, syncChannel]
   );
+
+  // Reconcile open sessions strictly scoped to their group members
+  const reconcileGroupOpenSessions = useCallback(
+    (group: GamingGroup, currentPlayers: PlayerProfile[]) => {
+      const memberSet = new Set(group.memberIds);
+      const groupPlayers = currentPlayers.filter((p) => memberSet.has(p.id));
+
+      setSessions((prevSessions) => {
+        const updatedSessions = prevSessions.map((sess) => {
+          if (sess.groupId !== group.id || sess.status === 'finished') return sess;
+          const reconciled = reconcileAutoParticipantsForSession(
+            sess,
+            groupPlayers,
+            undefined,
+            group.memberIds
+          );
+          const nextIds = new Set(reconciled.participants.map((p) => p.userId));
+          for (const oldP of sess.participants) {
+            if (!nextIds.has(oldP.userId)) {
+              dbDeleteParticipant(sess.id, oldP.userId).catch(console.warn);
+            }
+          }
+          for (const p of reconciled.participants) {
+            dbUpsertParticipant(sess.id, p).catch(console.warn);
+          }
+          return reconciled;
+        });
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
+        return updatedSessions;
+      });
+    },
+    [syncChannel]
+  );
+
+  const reconcileSessionsScopedToGroups = useCallback(
+    (updatedPlayers: PlayerProfile[], filterDate?: string) => {
+      setSessions((prevSessions) => {
+        const updatedSessions = prevSessions.map((sess) => {
+          if (sess.status === 'finished') return sess;
+          if (filterDate && sess.date !== filterDate) return sess;
+
+          const sessGroup = groups.find((g) => g.id === sess.groupId);
+          const groupPlayers = sessGroup
+            ? updatedPlayers.filter((p) => sessGroup.memberIds.includes(p.id))
+            : updatedPlayers;
+
+          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
+            sess,
+            groupPlayers,
+            sessGroup?.memberIds
+          );
+          const currentIds = new Set(reconciledParticipants.map((p) => p.userId));
+          for (const oldP of sess.participants) {
+            if (!currentIds.has(oldP.userId)) {
+              dbDeleteParticipant(sess.id, oldP.userId).catch(console.warn);
+            }
+          }
+          for (const p of reconciledParticipants) {
+            dbUpsertParticipant(sess.id, p).catch(console.warn);
+          }
+          return { ...sess, participants: reconciledParticipants };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
+        return updatedSessions;
+      });
+    },
+    [groups, syncChannel]
+  );
+
+  // 0. Gaming Groups & Unified App+Group Invites
+  const setActiveGroupId = useCallback((groupId: string | null) => {
+    setActiveGroupIdState(groupId);
+  }, []);
+
+  const getGroupInviteLink = useCallback((inviteCode: string): string => {
+    if (typeof window === 'undefined') {
+      return `?invite=${encodeURIComponent(inviteCode)}`;
+    }
+    return `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(inviteCode)}`;
+  }, []);
+
+  const createGroup = useCallback(
+    (params: {
+      name: string;
+      description?: string;
+      avatarUrl?: string;
+      memberIds?: string[];
+      discordConfig?: Partial<GroupDiscordConfig>;
+    }): GamingGroup => {
+      const nowIso = new Date().toISOString();
+      const creatorId = currentUserId;
+      const memberIds = Array.from(
+        new Set([...(params.memberIds || []), ...(creatorId ? [creatorId] : [])])
+      );
+      const adminIds = creatorId ? [creatorId] : [];
+      const inviteCode = generateUniqueInviteCode(groups);
+
+      const newGroup: GamingGroup = {
+        id: `group-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: params.name.trim() || 'Nuevo Grupo Gaming',
+        description: params.description?.trim() || '',
+        avatarUrl: params.avatarUrl?.trim() || undefined,
+        inviteCode,
+        createdBy: creatorId,
+        memberIds,
+        adminIds,
+        discordConfig: {
+          enabled: params.discordConfig?.enabled ?? true,
+          webhookUrl: params.discordConfig?.webhookUrl?.trim() || '',
+          channelName: params.discordConfig?.channelName?.trim() || 'general-gaming',
+          guildName: params.discordConfig?.guildName?.trim() || '',
+          mentionRoleId: params.discordConfig?.mentionRoleId?.trim() || '',
+          useEveryoneMention: params.discordConfig?.useEveryoneMention ?? false,
+        },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const nextGroups = [newGroup, ...groups];
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+      setActiveGroupIdState(newGroup.id);
+      dbUpsertGroup(newGroup).catch(console.warn);
+
+      return newGroup;
+    },
+    [currentUserId, groups, syncChannel]
+  );
+
+  const updateGroup = useCallback(
+    (groupId: string, patch: Partial<Omit<GamingGroup, 'id' | 'createdAt'>>) => {
+      const existing = groups.find((g) => g.id === groupId);
+      if (!existing) return;
+
+      const updatedGroup: GamingGroup = {
+        ...existing,
+        ...patch,
+        discordConfig: patch.discordConfig
+          ? { ...existing.discordConfig, ...patch.discordConfig }
+          : existing.discordConfig,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+      dbUpsertGroup(updatedGroup).catch(console.warn);
+
+      if (patch.memberIds) {
+        reconcileGroupOpenSessions(updatedGroup, players);
+      }
+    },
+    [groups, players, syncChannel, reconcileGroupOpenSessions]
+  );
+
+  const deleteGroup = useCallback(
+    (groupId: string) => {
+      const nextGroups = groups.filter((g) => g.id !== groupId);
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+
+      setSessions((prev) => {
+        const nextSessions = prev.filter((s) => s.groupId !== groupId);
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: nextSessions });
+        return nextSessions;
+      });
+
+      setActiveGroupIdState((prev) => (prev === groupId ? null : prev));
+      dbDeleteGroup(groupId).catch(console.warn);
+    },
+    [groups, syncChannel]
+  );
+
+  const joinGroupByInviteCode = useCallback(
+    (inviteCode: string, userId?: string): { ok: boolean; group?: GamingGroup; error?: string } => {
+      const targetUserId = userId || currentUserId;
+      if (!targetUserId) {
+        return { ok: false, error: 'Debés iniciar sesión para unirte a un grupo.' };
+      }
+
+      const normalizedCode = extractInviteCodeFromInput(inviteCode);
+      if (!normalizedCode) {
+        return { ok: false, error: 'Ingresá un código o link de invitación válido.' };
+      }
+
+      const targetGroup = groups.find((g) => g.inviteCode.toUpperCase() === normalizedCode);
+      if (!targetGroup) {
+        return { ok: false, error: 'No encontramos ningún grupo con ese código de invitación.' };
+      }
+
+      const alreadyMember = targetGroup.memberIds.includes(targetUserId);
+      const updatedGroup: GamingGroup = alreadyMember
+        ? targetGroup
+        : {
+            ...targetGroup,
+            memberIds: [...targetGroup.memberIds, targetUserId],
+            updatedAt: new Date().toISOString(),
+          };
+
+      if (!alreadyMember) {
+        const nextGroups = groups.map((g) => (g.id === updatedGroup.id ? updatedGroup : g));
+        setGroups(nextGroups);
+        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+        dbUpsertGroup(updatedGroup).catch(console.warn);
+
+        reconcileGroupOpenSessions(updatedGroup, players);
+
+        const joiningPlayer = players.find((p) => p.id === targetUserId) || currentUser;
+        triggerNotificationPipeline(
+          {
+            title: `👋 Nuevo integrante en ${updatedGroup.name}`,
+            body: `${joiningPlayer.displayName} se unió al grupo con el código ${updatedGroup.inviteCode}.`,
+            tag: `group_join_${updatedGroup.id}_${targetUserId}`,
+            targetUserIds: updatedGroup.memberIds,
+          },
+          'ping'
+        );
+      }
+
+      setActiveGroupIdState(updatedGroup.id);
+      return { ok: true, group: updatedGroup };
+    },
+    [
+      currentUserId,
+      currentUser,
+      groups,
+      players,
+      syncChannel,
+      reconcileGroupOpenSessions,
+      triggerNotificationPipeline,
+    ]
+  );
+
+  const addMemberToGroup = useCallback(
+    (groupId: string, userId: string) => {
+      const targetGroup = groups.find((g) => g.id === groupId);
+      if (!targetGroup || targetGroup.memberIds.includes(userId)) return;
+
+      const updatedGroup: GamingGroup = {
+        ...targetGroup,
+        memberIds: [...targetGroup.memberIds, userId],
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+      dbUpsertGroup(updatedGroup).catch(console.warn);
+
+      reconcileGroupOpenSessions(updatedGroup, players);
+    },
+    [groups, players, syncChannel, reconcileGroupOpenSessions]
+  );
+
+  const removeMemberFromGroup = useCallback(
+    (groupId: string, userId: string) => {
+      const targetGroup = groups.find((g) => g.id === groupId);
+      if (!targetGroup || !targetGroup.memberIds.includes(userId)) return;
+
+      const updatedGroup: GamingGroup = {
+        ...targetGroup,
+        memberIds: targetGroup.memberIds.filter((id) => id !== userId),
+        adminIds: targetGroup.adminIds.filter((id) => id !== userId),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+      dbUpsertGroup(updatedGroup).catch(console.warn);
+
+      reconcileGroupOpenSessions(updatedGroup, players);
+    },
+    [groups, players, syncChannel, reconcileGroupOpenSessions]
+  );
+
+  const testGroupDiscordWebhook = useCallback(
+    async (groupId: string): Promise<{ ok: boolean; error?: string }> => {
+      const group = groups.find((g) => g.id === groupId);
+      if (!group) {
+        return { ok: false, error: 'Grupo no encontrado' };
+      }
+      if (!group.discordConfig.webhookUrl || !group.discordConfig.webhookUrl.trim()) {
+        return {
+          ok: false,
+          error: 'El grupo no tiene una URL de Webhook de Discord configurada',
+        };
+      }
+
+      const testLog = buildGroupWebhookTestLog(group, currentUser);
+      const result = await dispatchDiscordWebhook(group.discordConfig.webhookUrl, testLog);
+      const finalLog: DiscordNotificationLog = {
+        ...testLog,
+        deliveredToWebhook: result.ok,
+        webhookError: result.error,
+      };
+
+      setDiscordLogs((prev) => {
+        const next = [finalLog, ...prev].slice(0, 100);
+        syncChannel?.postMessage({ type: 'SYNC_DISCORD_LOGS', payload: next });
+        return next;
+      });
+
+      return result;
+    },
+    [groups, currentUser, syncChannel]
+  );
+
+  // Auto-join pending invite code once authenticated and groups are loaded
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserId || !pendingInviteCode || groups.length === 0) {
+      return;
+    }
+
+    const normalized = pendingInviteCode.trim().toUpperCase();
+    const matchedGroup = groups.find((g) => g.inviteCode.toUpperCase() === normalized);
+    if (!matchedGroup) return;
+
+    joinGroupByInviteCode(normalized, currentUserId);
+    setPendingInviteCode(null);
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.PENDING_INVITE_CODE);
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('invite') || url.searchParams.has('joinGroup')) {
+          url.searchParams.delete('invite');
+          url.searchParams.delete('joinGroup');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch (err) {
+        console.warn('Error cleaning invite URL params:', err);
+      }
+    }
+  }, [isAuthenticated, currentUserId, pendingInviteCode, groups, joinGroupByInviteCode]);
 
   // 1. Current User, Welcome Screen & Auth
-  const switchActivePlayer = useCallback(
-    (userId: string) => {
-      const target = players.find((p) => p.id === userId);
-      if (target) {
-        setCurrentUserId(userId);
-        setIsAuthenticated(true);
-      }
-    },
-    [players]
-  );
-
-  const loginAsProfile = useCallback(
-    (userId: string) => {
-      const target = players.find((p) => p.id === userId);
-      if (target) {
-        setCurrentUserId(userId);
-        setIsAuthenticated(true);
-        if (!target.onboardingCompleted) {
-          setShowOnboardingModal(true);
-        }
-      }
-    },
-    [players]
-  );
-
   const createAndLoginProfile = useCallback(
     (params: {
       displayName: string;
-      discordUsername: string;
+      discordUsername?: string;
       discordId?: string;
       avatarUrl?: string;
     }): PlayerProfile => {
-      const cleanUsername = params.discordUsername.trim().toLowerCase().replace(/^@/, '');
-      const existing = players.find(
-        (p) => p.discordUsername.trim().toLowerCase().replace(/^@/, '') === cleanUsername
-      );
+      const cleanUsername = (params.discordUsername || '').trim().toLowerCase().replace(/^@/, '');
+      const cleanDisplayName = params.displayName.trim();
+      const existing = cleanUsername
+        ? players.find(
+            (p) => p.discordUsername.trim().toLowerCase().replace(/^@/, '') === cleanUsername
+          )
+        : players.find(
+            (p) => p.displayName.trim().toLowerCase() === cleanDisplayName.toLowerCase()
+          );
 
-      // If user already exists in players, log in as them directly
+      // Do not allow hijacking or logging into an existing player's profile without Discord OAuth
       if (existing) {
-        loginAsProfile(existing.id);
-        return existing;
+        throw new Error(
+          cleanUsername
+            ? 'Ese usuario de Discord ya está registrado. Ingresá con Discord OAuth2.'
+            : 'Ese apodo ya está registrado.'
+        );
       }
 
-      const cleanDisplayName = params.displayName.trim();
       const newProfile: PlayerProfile = {
-        id: params.discordId ? `user-${params.discordId}` : `user-${Date.now()}`,
-        discordId:
-          params.discordId?.trim() ||
-          `${Math.floor(100000000000000000 + Math.random() * 900000000000000000)}`,
-        discordUsername: params.discordUsername.trim().replace(/^@/, ''),
+        id: params.discordId?.trim() ? `user-${params.discordId.trim()}` : `user-${Date.now()}`,
+        discordId: params.discordId?.trim() || '',
+        discordUsername: (params.discordUsername || '').trim().replace(/^@/, ''),
         displayName: cleanDisplayName,
         avatarUrl:
           params.avatarUrl?.trim() ||
@@ -624,21 +1395,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dbUpsertProfile(newProfile).catch(console.warn);
 
       // Reconcile active sessions so they are automatically enrolled
-      setSessions((prevSessions) => {
-        const updatedSessions = prevSessions.map((sess) => {
-          if (sess.status === 'finished') return sess;
-          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
-            sess,
-            updatedPlayers
-          );
-          for (const p of reconciledParticipants) {
-            dbUpsertParticipant(sess.id, p).catch(console.warn);
-          }
-          return { ...sess, participants: reconciledParticipants };
-        });
-        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
-        return updatedSessions;
-      });
+      reconcileSessionsScopedToGroups(updatedPlayers);
 
       setCurrentUserId(newProfile.id);
       setIsAuthenticated(true);
@@ -646,7 +1403,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return newProfile;
     },
-    [players, syncChannel, loginAsProfile]
+    [players, reconcileSessionsScopedToGroups]
   );
 
   const logout = useCallback(async () => {
@@ -663,10 +1420,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginWithDiscord = useCallback(async () => {
     const oauthEnabled = await isDiscordOAuthProviderEnabled();
     if (oauthEnabled && supabase) {
+      const baseRedirectUrl = `${window.location.origin}${window.location.pathname}`;
+      const redirectTo = pendingInviteCode
+        ? `${baseRedirectUrl}?invite=${encodeURIComponent(pendingInviteCode)}`
+        : baseRedirectUrl;
       await supabase.auth.signInWithOAuth({
         provider: 'discord',
         options: {
-          redirectTo: `${window.location.origin}${window.location.pathname}`,
+          redirectTo,
         },
       });
     } else {
@@ -674,7 +1435,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         'El proveedor OAuth2 de Discord aún no fue activado en el panel de Supabase (Authentication -> Providers -> Discord).'
       );
     }
-  }, []);
+  }, [pendingInviteCode]);
+
+  const updateUserProfile = useCallback(
+    (
+      patch: Partial<Pick<PlayerProfile, 'displayName' | 'discordUsername' | 'avatarUrl' | 'birthDate' | 'bio'>>,
+      userId?: string
+    ) => {
+      const targetUserId = userId || currentUserId;
+      let updatedProfile: PlayerProfile | undefined;
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== targetUserId) return p;
+          updatedProfile = {
+            ...p,
+            ...(patch.displayName !== undefined ? { displayName: patch.displayName.trim() || p.displayName } : {}),
+            ...(patch.discordUsername !== undefined ? { discordUsername: patch.discordUsername.trim() } : {}),
+            ...(patch.avatarUrl !== undefined ? { avatarUrl: patch.avatarUrl.trim() || p.avatarUrl } : {}),
+            ...(patch.birthDate !== undefined ? { birthDate: patch.birthDate || undefined } : {}),
+            ...(patch.bio !== undefined ? { bio: patch.bio.trim() || undefined } : {}),
+          };
+          return updatedProfile;
+        });
+
+        if (updatedProfile) {
+          dbUpsertProfile(updatedProfile).catch(console.warn);
+          syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        }
+
+        return nextPlayers;
+      });
+    },
+    [currentUserId, syncChannel]
+  );
 
   const completeOnboarding = useCallback(() => {
     const updatedCurrentUser: PlayerProfile = {
@@ -690,25 +1484,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
     dbUpsertProfile(updatedCurrentUser).catch(console.warn);
 
-    // Reconcile all open sessions with reconcileSessionParticipantsWithSchedules
-    setSessions((prevSessions) => {
-      const updatedSessions = prevSessions.map((sess) => {
-        if (sess.status === 'finished') return sess;
-        const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
-          sess,
-          updatedPlayers
-        );
-        for (const p of reconciledParticipants) {
-          dbUpsertParticipant(sess.id, p).catch(console.warn);
-        }
-        return { ...sess, participants: reconciledParticipants };
-      });
-      syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
-      return updatedSessions;
-    });
+    // Reconcile all open sessions strictly scoped to the user's groups
+    reconcileSessionsScopedToGroups(updatedPlayers);
 
     setShowOnboardingModal(false);
-  }, [currentUser, players, syncChannel]);
+  }, [currentUser, players, reconcileSessionsScopedToGroups]);
 
   // Weekly Schedule, Daily Overrides & "Hoy No Juego"
   const updateWeeklySchedule = useCallback(
@@ -730,30 +1510,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
       dbUpsertProfile(targetUpdated).catch(console.warn);
 
-      // Reconcile open sessions
-      setSessions((prevSessions) => {
-        const updatedSessions = prevSessions.map((sess) => {
-          if (sess.status === 'finished') return sess;
-          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
-            sess,
-            updatedPlayers
-          );
-          const currentIds = new Set(reconciledParticipants.map((p) => p.userId));
-          for (const oldP of sess.participants) {
-            if (!currentIds.has(oldP.userId)) {
-              dbDeleteParticipant(sess.id, oldP.userId).catch(console.warn);
-            }
-          }
-          for (const p of reconciledParticipants) {
-            dbUpsertParticipant(sess.id, p).catch(console.warn);
-          }
-          return { ...sess, participants: reconciledParticipants };
-        });
-        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
-        return updatedSessions;
-      });
+      // Reconcile open sessions strictly scoped to the user's groups
+      reconcileSessionsScopedToGroups(updatedPlayers);
     },
-    [currentUserId, players, syncChannel]
+    [currentUserId, players, syncChannel, reconcileSessionsScopedToGroups]
   );
 
   const setDailyOverride = useCallback(
@@ -787,30 +1547,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
       dbUpsertProfile(targetUpdated).catch(console.warn);
 
-      // Immediately runs reconcileSessionParticipantsWithSchedules on any session matching date
-      setSessions((prevSessions) => {
-        const updatedSessions = prevSessions.map((sess) => {
-          if (sess.date !== date || sess.status === 'finished') return sess;
-          const reconciledParticipants = reconcileSessionParticipantsWithSchedules(
-            sess,
-            updatedPlayers
-          );
-          const currentIds = new Set(reconciledParticipants.map((p) => p.userId));
-          for (const oldP of sess.participants) {
-            if (!currentIds.has(oldP.userId)) {
-              dbDeleteParticipant(sess.id, oldP.userId).catch(console.warn);
-            }
-          }
-          for (const p of reconciledParticipants) {
-            dbUpsertParticipant(sess.id, p).catch(console.warn);
-          }
-          return { ...sess, participants: reconciledParticipants };
-        });
-        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updatedSessions });
-        return updatedSessions;
-      });
+      // Immediately runs group-scoped schedule reconciliation on any session matching date
+      reconcileSessionsScopedToGroups(updatedPlayers, date);
     },
-    [currentUserId, players, syncChannel]
+    [currentUserId, players, syncChannel, reconcileSessionsScopedToGroups]
   );
 
   const toggleTodayNotPlaying = useCallback(
@@ -821,6 +1561,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const currentOverride = targetPlayer.dailyOverrides?.[todayStr];
       const isCurrentlyNotPlaying = currentOverride?.status === 'not_playing';
 
+      const targetGroups = groups.filter((g) => g.memberIds.includes(targetId));
+      const scopedTargetUserIds =
+        targetGroups.length > 0
+          ? Array.from(new Set(targetGroups.flatMap((g) => g.memberIds)))
+          : players.map((p) => p.id);
+
       if (isCurrentlyNotPlaying) {
         // Clear override (restores automatic enrollment)
         setDailyOverride(todayStr, null, targetId);
@@ -830,7 +1576,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             title: `✅ ${targetPlayer.displayName} vuelve a jugar hoy`,
             body: 'Canceló el aviso de ausencia. Su horario habitual se reactivó automáticamente.',
             tag: `not_playing_cancel_${todayStr}_${targetId}`,
-            targetUserIds: players.map((p) => p.id),
+            targetUserIds: scopedTargetUserIds,
           },
           'ping'
         );
@@ -851,20 +1597,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             title: `🏳️ ${targetPlayer.displayName} avisó que hoy no juega`,
             body: `${notPlayingReason}. Baja confirmada sin penalización de karma.`,
             tag: `not_playing_${todayStr}_${targetId}`,
-            targetUserIds: players.map((p) => p.id),
+            targetUserIds: scopedTargetUserIds,
           },
           'message'
         );
 
-        const discordLog: DiscordNotificationLog = {
-          id: `log-not-playing-${Date.now()}`,
+        const buildAbsentLog = (group?: GamingGroup): DiscordNotificationLog => ({
+          id: `log-not-playing-${Date.now()}${group ? `-${group.id}` : ''}`,
           eventType: 'checkin_update',
+          groupId: group?.id,
+          groupName: group?.name,
           content: `🏳️ **Baja Confirmada:** <@${targetPlayer.discordId}> (${targetPlayer.displayName}) avisó que hoy no juega.`,
           embed: {
             title: '🏳️ Aviso de Ausencia Anticipado',
             description: `${targetPlayer.displayName} avisó con antelación que no podrá estar hoy. Se liberó su cupo sin restar karma.`,
             color: 0x64748b,
             fields: [
+              ...(group ? [{ name: '👥 Grupo', value: group.name, inline: true }] : []),
               { name: 'Motivo', value: notPlayingReason, inline: true },
               { name: 'Fecha', value: todayStr, inline: true },
               { name: 'Karma', value: `${targetPlayer.karmaScore} (Intacto)`, inline: true },
@@ -875,14 +1624,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           buttons: [{ label: 'Ver Sesión', actionType: 'open_app', style: 'secondary' }],
           createdAt: new Date().toISOString(),
           deliveredToWebhook: false,
-        };
-        dispatchDiscordPipeline(discordLog);
+        });
+
+        if (targetGroups.length > 0) {
+          for (const grp of targetGroups) {
+            dispatchDiscordPipeline(buildAbsentLog(grp), grp.id);
+          }
+        } else {
+          dispatchDiscordPipeline(buildAbsentLog());
+        }
       }
     },
     [
       currentUserId,
       currentUser,
       players,
+      groups,
       setDailyOverride,
       triggerNotificationPipeline,
       dispatchDiscordPipeline,
@@ -894,38 +1651,187 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const targetId = userId || currentUserId;
       let targetUpdated: PlayerProfile | undefined;
 
-      const updatedPlayers = players.map((p) => {
-        if (p.id === targetId) {
-          targetUpdated = { ...p, categoryPreferences: prefs };
-          return targetUpdated;
+      setPlayers((prevPlayers) => {
+        const updatedPlayers = prevPlayers.map((p) => {
+          if (p.id === targetId) {
+            const intermediate = { ...p, categoryPreferences: prefs };
+            const updatedTaste = recomputeTasteProfileForPlayer(intermediate, preferences, games);
+            targetUpdated = { ...intermediate, tasteProfile: updatedTaste };
+            return targetUpdated;
+          }
+          return p;
+        });
+
+        if (targetUpdated) {
+          syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
+          dbUpsertProfile(targetUpdated).catch(console.warn);
         }
-        return p;
+
+        return updatedPlayers;
       });
-
-      if (!targetUpdated) return;
-
-      setPlayers(updatedPlayers);
-      syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
-      dbUpsertProfile(targetUpdated).catch(console.warn);
     },
-    [currentUserId, players, syncChannel]
+    [currentUserId, preferences, games, syncChannel]
   );
 
   // 2. Games & Preferences (1-5★)
   const updateGamePreference = useCallback(
-    (gameId: string, plays: boolean, rating: GameRating) => {
-      const nextPref = { userId: currentUserId, gameId, plays, rating };
-      setPreferences((prev) => {
-        const filtered = prev.filter(
-          (p) => !(p.userId === currentUserId && p.gameId === gameId)
-        );
-        const updated = [...filtered, nextPref];
-        syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: updated });
-        return updated;
+    (
+      gameId: string,
+      plays: boolean,
+      rating: GameRating,
+      hoursPlayed?: number,
+      recentHoursPlayed?: number
+    ) => {
+      const existingPref = preferences.find(
+        (p) => p.userId === currentUserId && p.gameId === gameId
+      );
+      const resolvedHoursPlayed = hoursPlayed ?? existingPref?.hoursPlayed;
+      const resolvedRecentHoursPlayed =
+        recentHoursPlayed ?? existingPref?.recentHoursPlayed;
+
+      const targetCatGame = games.find((g) => g.id === gameId);
+      const targetNormName = targetCatGame ? normalizeGameName(targetCatGame.name) : '';
+      const targetSteamTag = targetCatGame?.tags.find((t) => t.startsWith('steam:'));
+      const parsedTargetAppId = targetSteamTag ? Number(targetSteamTag.slice(6)) : undefined;
+      const targetSteamAppId =
+        parsedTargetAppId !== undefined && Number.isFinite(parsedTargetAppId)
+          ? parsedTargetAppId
+          : undefined;
+
+      const nextPref: UserGamePreference = {
+        userId: currentUserId,
+        gameId,
+        plays,
+        rating,
+        ...(resolvedHoursPlayed !== undefined ? { hoursPlayed: resolvedHoursPlayed } : {}),
+        ...(resolvedRecentHoursPlayed !== undefined
+          ? { recentHoursPlayed: resolvedRecentHoursPlayed }
+          : {}),
+      };
+      const filtered = preferences.filter(
+        (p) => !(p.userId === currentUserId && p.gameId === gameId)
+      );
+      const updatedPrefs: UserGamePreference[] = [...filtered, nextPref];
+
+      setPreferences(updatedPrefs);
+      syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: updatedPrefs });
+      dbUpsertPreference({ userId: currentUserId, gameId, plays, rating }).catch(console.warn);
+
+      // Keep taste profile featureVector & PVJ-6D fresh, and sync hours across catalog/Steam/external/podium
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== currentUserId) return p;
+          const baseTaste: PlayerTasteProfile = p.tasteProfile || {
+            topMultiplayerGames: [],
+            topSingleplayerGames: [],
+            externalGames: [],
+            updatedAt: new Date().toISOString(),
+          };
+          const prevCatalogHours = baseTaste.catalogGameHours || {};
+          const nextCatalogHours =
+            resolvedHoursPlayed !== undefined || resolvedRecentHoursPlayed !== undefined
+              ? {
+                  ...prevCatalogHours,
+                  [gameId]: {
+                    hoursPlayed:
+                      resolvedHoursPlayed ?? prevCatalogHours[gameId]?.hoursPlayed ?? 0,
+                    ...(resolvedRecentHoursPlayed !== undefined ||
+                    prevCatalogHours[gameId]?.recentHoursPlayed !== undefined
+                      ? {
+                          recentHoursPlayed:
+                            resolvedRecentHoursPlayed ??
+                            prevCatalogHours[gameId]?.recentHoursPlayed ??
+                            0,
+                        }
+                      : {}),
+                  },
+                }
+              : prevCatalogHours;
+
+          const hasHourPatch =
+            resolvedHoursPlayed !== undefined || resolvedRecentHoursPlayed !== undefined;
+
+          const matchesTarget = (name: string, appId?: number): boolean => {
+            if (targetSteamAppId !== undefined && appId === targetSteamAppId) return true;
+            return Boolean(targetNormName && normalizeGameName(name) === targetNormName);
+          };
+
+          const nextSteamProfile =
+            hasHourPatch && targetCatGame && p.steamProfile
+              ? {
+                  ...p.steamProfile,
+                  ownedGames: p.steamProfile.ownedGames.map((og) => {
+                    if (!matchesTarget(og.name, og.appId)) return og;
+                    return {
+                      ...og,
+                      ...(resolvedHoursPlayed !== undefined
+                        ? { manualHoursOverride: resolvedHoursPlayed }
+                        : {}),
+                      ...(resolvedRecentHoursPlayed !== undefined
+                        ? { manualRecentHoursOverride: resolvedRecentHoursPlayed }
+                        : {}),
+                    };
+                  }),
+                }
+              : p.steamProfile;
+
+          const nextExternalGames =
+            hasHourPatch && targetCatGame
+              ? (baseTaste.externalGames || []).map((ext) => {
+                  if (!matchesTarget(ext.name, ext.steamAppId)) return ext;
+                  return {
+                    ...ext,
+                    ...(resolvedHoursPlayed !== undefined
+                      ? { hoursPlayedEstimate: resolvedHoursPlayed }
+                      : {}),
+                    ...(resolvedRecentHoursPlayed !== undefined
+                      ? { recentHoursPlayed: resolvedRecentHoursPlayed }
+                      : {}),
+                  };
+                })
+              : baseTaste.externalGames || [];
+
+          const syncPodiumHours = (entries: typeof baseTaste.topMultiplayerGames) =>
+            hasHourPatch && targetCatGame
+              ? entries.map((pe) => {
+                  if (!matchesTarget(pe.name, pe.steamAppId)) return pe;
+                  return {
+                    ...pe,
+                    ...(resolvedHoursPlayed !== undefined
+                      ? { hoursPlayed: resolvedHoursPlayed }
+                      : {}),
+                    ...(resolvedRecentHoursPlayed !== undefined
+                      ? { recentHoursPlayed: resolvedRecentHoursPlayed }
+                      : {}),
+                  };
+                })
+              : entries;
+
+          const intermediatePlayer: PlayerProfile = {
+            ...p,
+            steamProfile: nextSteamProfile,
+            tasteProfile: {
+              ...baseTaste,
+              topMultiplayerGames: syncPodiumHours(baseTaste.topMultiplayerGames || []),
+              topSingleplayerGames: syncPodiumHours(baseTaste.topSingleplayerGames || []),
+              externalGames: nextExternalGames,
+              catalogGameHours: nextCatalogHours,
+            },
+          };
+          const updatedTaste = recomputeTasteProfileForPlayer(
+            intermediatePlayer,
+            updatedPrefs,
+            games
+          );
+          const updatedP = { ...intermediatePlayer, tasteProfile: updatedTaste };
+          dbUpsertProfile(updatedP).catch(console.warn);
+          return updatedP;
+        });
+        syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        return nextPlayers;
       });
-      dbUpsertPreference(nextPref).catch(console.warn);
     },
-    [currentUserId, syncChannel]
+    [currentUserId, games, preferences, syncChannel]
   );
 
   const addGame = useCallback(
@@ -936,6 +1842,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addedBy: currentUserId,
       };
 
+      const nextGamesSnapshot = [...games, newGame];
       setGames((prev) => {
         const updated = [...prev, newGame];
         syncChannel?.postMessage({ type: 'SYNC_ALL', payload: { games: updated } });
@@ -943,12 +1850,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       dbInsertGame(newGame).catch(console.warn);
 
-      const defaultPref = {
+      const defaultPref: UserGamePreference = {
         userId: currentUserId,
         gameId: newGame.id,
         plays: true,
         rating: 4 as GameRating,
       };
+      const nextPrefsSnapshot = [...preferences, defaultPref];
       // Add default preference for current user
       setPreferences((prev) => {
         const updated = [...prev, defaultPref];
@@ -956,6 +1864,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       });
       dbUpsertPreference(defaultPref).catch(console.warn);
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== currentUserId) return p;
+          const updatedTaste = recomputeTasteProfileForPlayer(
+            p,
+            nextPrefsSnapshot,
+            nextGamesSnapshot
+          );
+          const updatedP = { ...p, tasteProfile: updatedTaste };
+          dbUpsertProfile(updatedP).catch(console.warn);
+          return updatedP;
+        });
+        syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        return nextPlayers;
+      });
 
       triggerNotificationPipeline(
         {
@@ -969,7 +1893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return newGame;
     },
-    [currentUser, currentUserId, players, syncChannel, triggerNotificationPipeline]
+    [currentUser, currentUserId, games, players, preferences, syncChannel, triggerNotificationPipeline]
   );
 
   // 3. Sessions & Matchmaking
@@ -988,14 +1912,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       availableUntil: string;
       precisionMinutes: PrecisionMinutes;
       invitedUserIds?: string[];
+      groupId?: string;
     }): GamingSession => {
+      const targetGroupId =
+        params.groupId || resolvedActiveGroupId || userGroups[0]?.id || 'group-boludos-og';
+
+      let targetGroup = groups.find((g) => g.id === targetGroupId);
+      let autoCreatedGroup: GamingGroup | undefined;
+
+      if (!targetGroup) {
+        const defaultMembers = players.some((p) => p.id === currentUserId)
+          ? players.map((p) => p.id)
+          : [currentUserId];
+        autoCreatedGroup = {
+          id: targetGroupId,
+          name: targetGroupId === 'group-boludos-og' ? 'Los Boludos OG' : 'Nuevo Grupo',
+          description: 'Grupo privado para coordinar sesiones, horarios y alertas de Discord.',
+          inviteCode:
+            targetGroupId === 'group-boludos-og'
+              ? 'BG-CLUB1'
+              : generateUniqueInviteCode(groups),
+          createdBy: currentUserId,
+          memberIds: defaultMembers,
+          adminIds: [currentUserId],
+          discordConfig: {
+            enabled: discordConfig.enabled,
+            webhookUrl: discordConfig.webhookUrl,
+            channelName: discordConfig.channelName,
+            guildName: discordConfig.guildName,
+            mentionRoleId: discordConfig.mentionRoleId,
+            useEveryoneMention: discordConfig.useEveryoneMention,
+          },
+          createdAt: new Date().toISOString(),
+        };
+        targetGroup = autoCreatedGroup;
+
+        setGroups((prev) => {
+          if (prev.some((g) => g.id === autoCreatedGroup!.id)) return prev;
+          const nextGroups = [autoCreatedGroup!, ...prev];
+          syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+          return nextGroups;
+        });
+        setActiveGroupIdState(targetGroupId);
+      }
+
+      const groupMemberIds = Array.from(new Set([...targetGroup.memberIds, currentUserId]));
+      const groupPlayers = players.filter((p) => groupMemberIds.includes(p.id));
+
       const invitedUserIds =
         params.invitedUserIds && params.invitedUserIds.length > 0
-          ? Array.from(new Set([...params.invitedUserIds, currentUserId]))
+          ? Array.from(
+              new Set([
+                ...params.invitedUserIds.filter((id) => groupMemberIds.includes(id)),
+                currentUserId,
+              ])
+            )
           : undefined;
 
       const baseSession: GamingSession = {
         id: `session-${Date.now()}`,
+        groupId: targetGroupId,
         title: params.title,
         date: params.date,
         mode: params.mode,
@@ -1010,8 +1986,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         callouts: [],
       };
 
-      // Automatically enroll only invited players with compatible schedules
-      const reconciled = reconcileAutoParticipantsForSession(baseSession, players);
+      // Automatically enroll only group members (and optional invites) with compatible schedules
+      const reconciled = reconcileAutoParticipantsForSession(
+        baseSession,
+        groupPlayers,
+        undefined,
+        groupMemberIds
+      );
       const autoParticipants = [...reconciled.participants];
 
       // Ensure session creator's custom schedule parameters are preserved with 100% confirmed status
@@ -1045,25 +2026,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       });
 
-      dbCreateSession(newSession).catch(console.warn);
+      if (autoCreatedGroup) {
+        dbUpsertGroup(autoCreatedGroup)
+          .then(() => dbCreateSession(newSession))
+          .catch(console.warn);
+      } else {
+        dbCreateSession(newSession).catch(console.warn);
+      }
       setActiveSessionIdState(newSession.id);
 
       // Discord Rich Embed & Webhook
-      const discordLog = buildSessionCreatedLog(
-        newSession,
-        currentUser,
-        discordConfig.mentionRoleId || '@everyone'
-      );
-      dispatchDiscordPipeline(discordLog);
+      const mentionRole = targetGroup.discordConfig.useEveryoneMention
+        ? '@everyone'
+        : targetGroup.discordConfig.mentionRoleId || discordConfig.mentionRoleId || '@everyone';
+      const discordLog = buildSessionCreatedLog(newSession, currentUser, mentionRole, targetGroup);
+      dispatchDiscordPipeline(discordLog, targetGroupId);
 
-      // Push Notification
+      // Push Notification scoped to group members
       triggerNotificationPipeline(
         {
-          title: '🎮 Nueva Sesión Creada',
+          title: `🎮 Nueva Sesión en ${targetGroup.name}`,
           body: `${currentUser.displayName} convocó a "${params.title}" para las ${params.availableFrom} (±${params.precisionMinutes}m). Hay ${autoParticipants.length} jugadores convocados.`,
           tag: `session_${newSession.id}`,
           sessionId: newSession.id,
-          targetUserIds: players.map((p) => p.id),
+          targetUserIds: groupMemberIds,
         },
         'ping'
       );
@@ -1073,7 +2059,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [
       currentUserId,
       currentUser,
-      discordConfig.mentionRoleId,
+      groups,
+      resolvedActiveGroupId,
+      userGroups,
+      discordConfig,
       players,
       syncChannel,
       dispatchDiscordPipeline,
@@ -1096,6 +2085,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const targetUserId = params.userId || currentUserId;
       const targetPlayer = players.find((p) => p.id === targetUserId) || currentUser;
       const isConfirmed = params.confirmAttendance !== false;
+      const sessionSnapshot = sessions.find((s) => s.id === sessionId);
+      const snapshotGroup = sessionSnapshot
+        ? groups.find((g) => g.id === sessionSnapshot.groupId)
+        : undefined;
 
       setSessions((prev) => {
         const updated = prev.map((sess) => {
@@ -1131,14 +2124,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const updatedSession = { ...sess, participants: newParticipants };
           dbUpsertParticipant(sessionId, participantData).catch(console.warn);
 
-          // Build Discord Log
+          const targetGroup = groups.find((g) => g.id === updatedSession.groupId);
           const log = buildPlayerJoinedLog(
             updatedSession,
             targetPlayer,
             params.precisionMinutes,
-            params.availableFrom
+            params.availableFrom,
+            targetGroup
           );
-          dispatchDiscordPipeline(log);
+          dispatchDiscordPipeline(log, updatedSession.groupId);
 
           return updatedSession;
         });
@@ -1153,7 +2147,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: `${targetPlayer.displayName} declaró ${params.availableFrom} (±${params.precisionMinutes}m).`,
           tag: `session_join_${sessionId}`,
           sessionId,
-          targetUserIds: players.map((p) => p.id),
+          targetUserIds: snapshotGroup ? snapshotGroup.memberIds : players.map((p) => p.id),
         },
         'ping'
       );
@@ -1162,6 +2156,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUserId,
       currentUser,
       players,
+      sessions,
+      groups,
       syncChannel,
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
@@ -1172,6 +2168,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     (sessionId: string, userId?: string) => {
       const targetUserId = userId || currentUserId;
       const targetPlayer = players.find((p) => p.id === targetUserId) || currentUser;
+      const sessionSnapshot = sessions.find((s) => s.id === sessionId);
+      const snapshotGroup = sessionSnapshot
+        ? groups.find((g) => g.id === sessionSnapshot.groupId)
+        : undefined;
 
       setSessions((prev) => {
         let updatedParticipant: SessionParticipant | undefined;
@@ -1219,13 +2219,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           dbUpsertParticipant(sessionId, updatedParticipant).catch(console.warn);
           const targetSession = updated.find((s) => s.id === sessionId);
           if (targetSession) {
+            const targetGroup = groups.find((g) => g.id === targetSession.groupId);
             const log = buildPlayerJoinedLog(
               targetSession,
               targetPlayer,
               updatedParticipant.precisionMinutes,
-              updatedParticipant.availableFrom
+              updatedParticipant.availableFrom,
+              targetGroup
             );
-            dispatchDiscordPipeline(log);
+            dispatchDiscordPipeline(log, targetSession.groupId);
           }
         }
 
@@ -1239,7 +2241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: `${targetPlayer.displayName} confirmó asistencia al 100% para la sesión.`,
           tag: `session_confirm_${sessionId}`,
           sessionId,
-          targetUserIds: players.map((p) => p.id),
+          targetUserIds: snapshotGroup ? snapshotGroup.memberIds : players.map((p) => p.id),
         },
         'ping'
       );
@@ -1248,6 +2250,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUserId,
       currentUser,
       players,
+      sessions,
+      groups,
       syncChannel,
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
@@ -1264,8 +2268,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { notifiedUsers: [] };
       }
 
-      // Find probable available players for this session
-      const probableData = getProbableAvailablePlayersForSession(session, players);
+      const targetGroup = groups.find((g) => g.id === session.groupId);
+      const groupMemberIds = targetGroup?.memberIds;
+      const groupPlayers = targetGroup
+        ? players.filter((p) => targetGroup.memberIds.includes(p.id))
+        : players;
+
+      // Find probable available players strictly within this session's group
+      const probableData = getProbableAvailablePlayersForSession(
+        session,
+        groupPlayers,
+        groupMemberIds
+      );
       const probableMap = new Map<string, { player: PlayerProfile; confidencePercentage: number }>();
 
       for (const item of probableData) {
@@ -1277,10 +2291,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // Plus any participant in session.participants whose confirmationStatus !== 'confirmed'
+      // Plus any group participant in session.participants whose confirmationStatus !== 'confirmed'
       for (const p of session.participants) {
         if (p.userId !== currentUserId && p.confirmationStatus !== 'confirmed') {
-          const foundPlayer = players.find((pl) => pl.id === p.userId);
+          const foundPlayer = groupPlayers.find((pl) => pl.id === p.userId);
           if (foundPlayer && !probableMap.has(p.userId)) {
             probableMap.set(p.userId, {
               player: foundPlayer,
@@ -1325,9 +2339,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser,
         probableList,
         customMessage,
-        discordConfig
+        discordConfig,
+        targetGroup
       );
-      dispatchDiscordPipeline(discordLog);
+      dispatchDiscordPipeline(discordLog, session.groupId);
 
       // Push Notification
       triggerNotificationPipeline(
@@ -1348,6 +2363,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [
       sessions,
       players,
+      groups,
       currentUserId,
       currentUser,
       discordConfig,
@@ -1363,9 +2379,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updated = prev.map((sess) => {
           if (sess.id !== sessionId) return sess;
 
+          const targetGroup = groups.find((g) => g.id === sess.groupId);
+          const groupMemberIds = targetGroup?.memberIds;
+          const groupPlayers = targetGroup
+            ? players.filter((p) => targetGroup.memberIds.includes(p.id))
+            : players;
+
           const cleanedInvites =
             invitedUserIds && invitedUserIds.length > 0
-              ? Array.from(new Set([...invitedUserIds, sess.createdBy]))
+              ? Array.from(
+                  new Set([
+                    ...(groupMemberIds
+                      ? invitedUserIds.filter((id) => groupMemberIds.includes(id))
+                      : invitedUserIds),
+                    sess.createdBy,
+                  ])
+                )
               : undefined;
 
           const withUpdatedInvites: GamingSession = {
@@ -1373,7 +2402,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             invitedUserIds: cleanedInvites,
           };
 
-          const reconciled = reconcileAutoParticipantsForSession(withUpdatedInvites, players);
+          const reconciled = reconcileAutoParticipantsForSession(
+            withUpdatedInvites,
+            groupPlayers,
+            undefined,
+            groupMemberIds
+          );
 
           // Delete any participants that were removed
           const currentIds = new Set(reconciled.participants.map((p) => p.userId));
@@ -1399,7 +2433,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       });
     },
-    [players, syncChannel]
+    [players, groups, syncChannel]
   );
 
   const leaveSession = useCallback(
@@ -1427,11 +2461,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const session = sessions.find((s) => s.id === sessionId);
       if (!session) return null;
 
+      const targetGroup = groups.find((g) => g.id === session.groupId);
+      const groupPlayers = targetGroup
+        ? players.filter((p) => targetGroup.memberIds.includes(p.id))
+        : players;
+
       const synchronyResults = calculateGameSynchrony(
         games,
         preferences,
         session.participants,
-        players,
+        groupPlayers,
         session.allowSplitLobbies
       );
 
@@ -1460,18 +2499,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         session,
         winningGame,
         synchronyScore,
-        session.participants.length
+        session.participants.length,
+        targetGroup
       );
-      dispatchDiscordPipeline(discordLog);
+      dispatchDiscordPipeline(discordLog, session.groupId);
 
-      // Push Notification with fanfare
+      // Push Notification with fanfare scoped to group members
       triggerNotificationPipeline(
         {
           title: `🎉 ¡Ganó ${winningGame.name}!`,
           body: `La ruleta ponderada eligió ${winningGame.name} con ${synchronyScore}% de sincronía grupal.`,
           tag: `roulette_${sessionId}`,
           sessionId,
-          targetUserIds: session.participants.map((p) => p.userId),
+          targetUserIds: targetGroup
+            ? targetGroup.memberIds
+            : session.participants.map((p) => p.userId),
         },
         'roulette'
       );
@@ -1483,6 +2525,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       games,
       preferences,
       players,
+      groups,
       syncChannel,
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
@@ -1509,6 +2552,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     (sessionId: string, simulatedTime?: string, userId?: string) => {
       const targetUserId = userId || currentUserId;
       const targetPlayer = players.find((p) => p.id === targetUserId) || currentUser;
+      const sessionSnapshot = sessions.find((s) => s.id === sessionId);
+      const snapshotGroup = sessionSnapshot
+        ? groups.find((g) => g.id === sessionSnapshot.groupId)
+        : undefined;
 
       const currentTime = simulatedTime || formatMinutesToTime(new Date().getHours() * 60 + new Date().getMinutes());
 
@@ -1524,6 +2571,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           participant.precisionMinutes,
           currentTime
         );
+        const targetGroup = groups.find((g) => g.id === targetSession.groupId);
 
         // Update player's stats & title
         setPlayers((prevPlayers) => {
@@ -1546,6 +2594,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               id: `sanction-${Date.now()}`,
               userId: targetUserId,
               sessionId,
+              groupId: targetSession.groupId,
               sessionTitle: targetSession.title,
               date: targetSession.date,
               type: evaluation.status === 'on_time' ? 'on_time_bonus' : 'late',
@@ -1573,9 +2622,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               evaluation.status,
               currentTime,
               evaluation.karmaDelta,
-              newKarma
+              newKarma,
+              targetGroup
             );
-            dispatchDiscordPipeline(discordLog);
+            dispatchDiscordPipeline(discordLog, targetSession.groupId);
 
             return {
               ...player,
@@ -1620,7 +2670,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: `Registró presencia a las ${currentTime}. Estado: ${simulatedTime ? 'Simulado' : 'Confirmado'}.`,
           tag: `checkin_${sessionId}_${targetUserId}`,
           sessionId,
-          targetUserIds: players.map((p) => p.id),
+          targetUserIds: snapshotGroup ? snapshotGroup.memberIds : players.map((p) => p.id),
         },
         'ping'
       );
@@ -1629,6 +2679,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUserId,
       currentUser,
       players,
+      sessions,
+      groups,
       syncChannel,
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
@@ -1646,6 +2698,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const session = sessions.find((s) => s.id === sessionId);
       if (!targetPlayer) return;
 
+      const targetGroup = session ? groups.find((g) => g.id === session.groupId) : undefined;
       const karmaDelta = type === 'no_show' ? -25 : -10;
       const newKarma = Math.min(100, Math.max(0, targetPlayer.karmaScore + karmaDelta));
       const newLateCount = type === 'late' ? targetPlayer.lateCount + 1 : targetPlayer.lateCount;
@@ -1662,6 +2715,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         id: `sanction-${Date.now()}`,
         userId: targetUserId,
         sessionId,
+        groupId: session?.groupId,
         sessionTitle: session?.title || 'Sesión de Juego',
         date: session?.date || new Date().toISOString().split('T')[0],
         type,
@@ -1695,8 +2749,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       // Discord notification
-      const discordLog = buildSanctionIssuedLog(sanctionRecord, targetPlayer, newKarma, newTitle);
-      dispatchDiscordPipeline(discordLog);
+      const discordLog = buildSanctionIssuedLog(
+        sanctionRecord,
+        targetPlayer,
+        newKarma,
+        newTitle,
+        targetGroup
+      );
+      dispatchDiscordPipeline(discordLog, session?.groupId);
 
       // Push notification with gavel thud sound
       triggerNotificationPipeline(
@@ -1705,7 +2765,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: reason,
           tag: `sanction_${targetUserId}`,
           sessionId,
-          targetUserIds: players.map((p) => p.id),
+          targetUserIds: targetGroup ? targetGroup.memberIds : players.map((p) => p.id),
         },
         'sanction'
       );
@@ -1713,6 +2773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [
       players,
       sessions,
+      groups,
       syncChannel,
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
@@ -1785,8 +2846,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
       const minutesLate = Math.max(5, nowMins - strictDeadline);
 
-      const discordLog = buildLatePingLog(session, targetPlayer, currentUser, minutesLate);
-      await dispatchDiscordPipeline(discordLog);
+      const targetGroup = groups.find((g) => g.id === session.groupId);
+      const discordLog = buildLatePingLog(
+        session,
+        targetPlayer,
+        currentUser,
+        minutesLate,
+        targetGroup
+      );
+      await dispatchDiscordPipeline(discordLog, session.groupId);
 
       await triggerNotificationPipeline(
         {
@@ -1802,6 +2870,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [
       sessions,
       players,
+      groups,
       currentUser,
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
@@ -1818,8 +2887,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }) => {
       if (!params.content.trim()) return;
 
+      const linkedSession = params.linkedSessionId
+        ? sessions.find((s) => s.id === params.linkedSessionId)
+        : undefined;
+      const chatGroupId = linkedSession?.groupId || resolvedActiveGroupId || undefined;
+      const chatGroup = chatGroupId ? groups.find((g) => g.id === chatGroupId) : undefined;
+
       const newMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
+        groupId: chatGroupId,
         userId: currentUserId,
         content: params.content.trim(),
         mentions: params.content.includes('@todos') || params.content.includes('@everyone')
@@ -1844,19 +2920,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Forward to Discord if requested or configured
       if (newMessage.forwardedToDiscord) {
-        const session = sessions.find((s) => s.id === params.linkedSessionId);
-        const log = buildChatBroadcastLog(newMessage, currentUser, session);
-        dispatchDiscordPipeline(log);
+        const log = buildChatBroadcastLog(newMessage, currentUser, linkedSession, chatGroup);
+        dispatchDiscordPipeline(log, chatGroupId);
       }
 
-      // Local push alert for other users
+      // Local push alert scoped to chat group members
+      const scopedTargetIds = (
+        chatGroup ? players.filter((p) => chatGroup.memberIds.includes(p.id)) : players
+      )
+        .filter((p) => p.id !== currentUserId)
+        .map((p) => p.id);
+
       triggerNotificationPipeline(
         {
           title: `💬 ${currentUser.displayName} en Chat`,
           body: params.content,
           tag: `chat_${newMessage.id}`,
           sessionId: params.linkedSessionId,
-          targetUserIds: players.filter((p) => p.id !== currentUserId).map((p) => p.id),
+          targetUserIds: scopedTargetIds,
         },
         'message'
       );
@@ -1866,6 +2947,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser,
       discordConfig.events.chat_broadcast,
       sessions,
+      groups,
+      resolvedActiveGroupId,
       players,
       syncChannel,
       dispatchDiscordPipeline,
@@ -2043,6 +3126,914 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, [currentUserId, triggerNotificationPipeline]);
 
+  // 7.1 Steam Library Import & 32D Taste Profile Engine
+  const importSteamProfile = useCallback(
+    async (
+      steamUrlOrId: string,
+      customApiKey?: string,
+      userId?: string
+    ): Promise<{ ok: boolean; message: string; profile?: PlayerSteamProfile }> => {
+      const targetUserId = userId || currentUserId;
+      const effectiveApiKey = customApiKey || discordConfig.steamApiKey;
+
+      const res = await fetchSteamProfileLibrary(steamUrlOrId, effectiveApiKey, {
+        igdbClientId: discordConfig.igdbClientId,
+        igdbClientSecret: discordConfig.igdbClientSecret,
+      });
+
+      if (customApiKey && customApiKey !== discordConfig.steamApiKey) {
+        updateDiscordConfig({ steamApiKey: customApiKey });
+      }
+
+      if (!res.ok || !res.profile) {
+        return res;
+      }
+
+      const fetchedProfile = res.profile;
+      const existingTargetPlayer = players.find((p) => p.id === targetUserId);
+      const existingOwned = existingTargetPlayer?.steamProfile?.ownedGames || [];
+      const existingMap = new Map<number, (typeof existingOwned)[0]>();
+      for (const og of existingOwned) {
+        existingMap.set(og.appId, og);
+      }
+
+      const baseOwnedGames = fetchedProfile.ownedGames
+        .filter((g) => !isNonGameSteamApp(g))
+        .map((g) => {
+          const prev = existingMap.get(g.appId);
+          if (!prev) return g;
+          return {
+            ...g,
+            userRating: prev.userRating ?? g.userRating,
+            playsOverride: prev.playsOverride,
+            burnedOut: prev.burnedOut ?? g.burnedOut,
+            selectedForCatalog: prev.selectedForCatalog ?? g.selectedForCatalog,
+            manualHoursOverride: prev.manualHoursOverride,
+            manualRecentHoursOverride: prev.manualRecentHoursOverride,
+            tagVotes: g.tagVotes ?? prev.tagVotes,
+          };
+        });
+
+      const top10SteamAppIds = new Set<number>(
+        [...baseOwnedGames]
+          .filter((sg) => {
+            const effectiveHours = sg.manualHoursOverride ?? sg.playtimeHours ?? 0;
+            const effectiveRecent = sg.manualRecentHoursOverride ?? sg.playtimeRecentHours ?? 0;
+            return !sg.burnedOut && (effectiveHours >= 2 || effectiveRecent > 0);
+          })
+          .sort((a, b) => {
+            const ha = a.manualHoursOverride ?? a.playtimeHours ?? 0;
+            const hb = b.manualHoursOverride ?? b.playtimeHours ?? 0;
+            if (hb !== ha) return hb - ha;
+            const ra = a.manualRecentHoursOverride ?? a.playtimeRecentHours ?? 0;
+            const rb = b.manualRecentHoursOverride ?? b.playtimeRecentHours ?? 0;
+            return rb - ra;
+          })
+          .slice(0, MAX_AUTO_SELECTED_STEAM_GAMES)
+          .map((sg) => sg.appId)
+      );
+
+      const mergedOwnedGames = baseOwnedGames.map((sg) => ({
+        ...sg,
+        playsOverride:
+          sg.playsOverride !== undefined
+            ? sg.playsOverride
+            : top10SteamAppIds.has(sg.appId),
+      }));
+
+      const cleanTotalHours =
+        Math.round(mergedOwnedGames.reduce((acc, g) => acc + (g.playtimeHours || 0), 0) * 10) / 10;
+      const cleanConsiderableCount = mergedOwnedGames.filter((g, idx) =>
+        isConsiderableSteamGame(g, idx)
+      ).length;
+
+      const mergedSteamProfile: PlayerSteamProfile = {
+        ...fetchedProfile,
+        totalHours: cleanTotalHours,
+        considerableGamesCount: cleanConsiderableCount,
+        ownedGames: mergedOwnedGames,
+      };
+
+      // Auto-mark matching Club Catalog games ONLY for the top 10 qualifying Steam games
+      const autoCatalogPrefs: UserGamePreference[] = [];
+      mergedOwnedGames.forEach((sg) => {
+        if (!top10SteamAppIds.has(sg.appId)) return;
+        const catalogMatch = games.find(
+          (cg) =>
+            cg.tags.includes(`steam:${sg.appId}`) ||
+            normalizeGameName(cg.name) === normalizeGameName(sg.name)
+        );
+        if (catalogMatch) {
+          const steamHours = sg.manualHoursOverride ?? sg.playtimeHours;
+          const steamRecent = sg.manualRecentHoursOverride ?? sg.playtimeRecentHours;
+          autoCatalogPrefs.push({
+            userId: targetUserId,
+            gameId: catalogMatch.id,
+            plays: !sg.burnedOut,
+            rating: sg.userRating ?? sg.suggestedRating ?? 3,
+            ...(steamHours && steamHours > 0 ? { hoursPlayed: steamHours } : {}),
+            ...(steamRecent && steamRecent > 0 ? { recentHoursPlayed: steamRecent } : {}),
+          });
+        }
+      });
+
+      let updatedPrefsForTaste = preferences;
+      if (autoCatalogPrefs.length > 0) {
+        const nextPrefs = [...preferences];
+        for (const np of autoCatalogPrefs) {
+          const existingIdx = nextPrefs.findIndex(
+            (p) => p.userId === np.userId && p.gameId === np.gameId
+          );
+          if (existingIdx >= 0) {
+            const resolvedH = np.hoursPlayed ?? nextPrefs[existingIdx].hoursPlayed;
+            const resolvedR =
+              np.recentHoursPlayed ?? nextPrefs[existingIdx].recentHoursPlayed;
+            nextPrefs[existingIdx] = {
+              ...nextPrefs[existingIdx],
+              plays: np.plays,
+              rating: nextPrefs[existingIdx].rating || np.rating,
+              ...(resolvedH !== undefined ? { hoursPlayed: resolvedH } : {}),
+              ...(resolvedR !== undefined ? { recentHoursPlayed: resolvedR } : {}),
+            };
+          } else {
+            nextPrefs.push(np);
+          }
+          dbUpsertPreference(nextPrefs[existingIdx >= 0 ? existingIdx : nextPrefs.length - 1]).catch(console.warn);
+        }
+        updatedPrefsForTaste = nextPrefs;
+        setPreferences(nextPrefs);
+        syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: nextPrefs });
+      }
+
+      let targetUpdated: PlayerProfile | undefined;
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== targetUserId) return p;
+
+          const intermediatePlayer: PlayerProfile = {
+            ...p,
+            steamProfile: mergedSteamProfile,
+          };
+
+          const updatedTaste = recomputeTasteProfileForPlayer(
+            intermediatePlayer,
+            updatedPrefsForTaste,
+            games
+          );
+
+          targetUpdated = {
+            ...intermediatePlayer,
+            tasteProfile: updatedTaste,
+          };
+
+          return targetUpdated;
+        });
+
+        if (targetUpdated) {
+          dbUpsertProfile(targetUpdated).catch(console.warn);
+          syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        }
+
+        return nextPlayers;
+      });
+
+      return {
+        ok: true,
+        message: res.message,
+        profile: targetUpdated?.steamProfile || mergedSteamProfile,
+      };
+    },
+    [
+      currentUserId,
+      discordConfig.steamApiKey,
+      discordConfig.igdbClientId,
+      discordConfig.igdbClientSecret,
+      updateDiscordConfig,
+      players,
+      preferences,
+      games,
+      syncChannel,
+    ]
+  );
+
+  const updateSteamGameFeedback = useCallback(
+    (
+      appId: number,
+      patch: {
+        userRating?: GameRating;
+        burnedOut?: boolean;
+        selectedForCatalog?: boolean;
+        manualHoursOverride?: number;
+        manualRecentHoursOverride?: number;
+      },
+      userId?: string
+    ) => {
+      const targetUserId = userId || currentUserId;
+      let targetUpdated: PlayerProfile | undefined;
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== targetUserId || !p.steamProfile) return p;
+
+          const nextOwnedGames = p.steamProfile.ownedGames.map((g) => {
+            if (g.appId !== appId) return g;
+            return {
+              ...g,
+              ...(patch.userRating !== undefined ? { userRating: patch.userRating } : {}),
+              ...(patch.burnedOut !== undefined ? { burnedOut: patch.burnedOut } : {}),
+              ...(patch.selectedForCatalog !== undefined
+                ? { selectedForCatalog: patch.selectedForCatalog }
+                : {}),
+              ...(patch.manualHoursOverride !== undefined
+                ? { manualHoursOverride: patch.manualHoursOverride }
+                : {}),
+              ...(patch.manualRecentHoursOverride !== undefined
+                ? { manualRecentHoursOverride: patch.manualRecentHoursOverride }
+                : {}),
+            };
+          });
+
+          const intermediatePlayer: PlayerProfile = {
+            ...p,
+            steamProfile: {
+              ...p.steamProfile,
+              ownedGames: nextOwnedGames,
+            },
+          };
+
+          const updatedTaste = recomputeTasteProfileForPlayer(
+            intermediatePlayer,
+            preferences,
+            games
+          );
+
+          targetUpdated = {
+            ...intermediatePlayer,
+            tasteProfile: updatedTaste,
+          };
+
+          return targetUpdated;
+        });
+
+        if (targetUpdated) {
+          dbUpsertProfile(targetUpdated).catch(console.warn);
+          syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        }
+
+        return nextPlayers;
+      });
+
+      // Also sync rating if a matching game exists in games + preferences
+      if (patch.userRating !== undefined) {
+        const matchingGame = games.find(
+          (g) =>
+            g.tags.some((t) => t === `steam:${appId}` || t === `${appId}`) ||
+            targetUpdated?.steamProfile?.ownedGames.find((og) => og.appId === appId)?.name.toLowerCase() === g.name.toLowerCase()
+        );
+
+        if (matchingGame) {
+          const nextPref: UserGamePreference = {
+            userId: targetUserId,
+            gameId: matchingGame.id,
+            plays: true,
+            rating: patch.userRating,
+          };
+
+          setPreferences((prev) => {
+            const filtered = prev.filter(
+              (p) => !(p.userId === targetUserId && p.gameId === matchingGame.id)
+            );
+            const updated = [...filtered, nextPref];
+            syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: updated });
+            return updated;
+          });
+
+          dbUpsertPreference(nextPref).catch(console.warn);
+        }
+      }
+    },
+    [currentUserId, games, preferences, syncChannel]
+  );
+
+  const updatePlayerTasteProfile = useCallback(
+    (patch: Partial<PlayerTasteProfile>, userId?: string) => {
+      const targetUserId = userId || currentUserId;
+      let targetUpdated: PlayerProfile | undefined;
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== targetUserId) return p;
+
+          const baseTaste: PlayerTasteProfile = p.tasteProfile || {
+            topMultiplayerGames: [],
+            topSingleplayerGames: [],
+            externalGames: [],
+            updatedAt: new Date().toISOString(),
+          };
+
+          const mergedTaste: PlayerTasteProfile = {
+            ...baseTaste,
+            ...patch,
+            updatedAt: new Date().toISOString(),
+          };
+
+          const intermediatePlayer: PlayerProfile = {
+            ...p,
+            tasteProfile: mergedTaste,
+          };
+
+          const recomputedTaste = recomputeTasteProfileForPlayer(
+            intermediatePlayer,
+            preferences,
+            games
+          );
+
+          targetUpdated = {
+            ...intermediatePlayer,
+            tasteProfile: recomputedTaste,
+          };
+
+          return targetUpdated;
+        });
+
+        if (targetUpdated) {
+          dbUpsertProfile(targetUpdated).catch(console.warn);
+          syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        }
+
+        return nextPlayers;
+      });
+    },
+    [currentUserId, preferences, games, syncChannel]
+  );
+
+  const syncSteamGamesToCatalog = useCallback(
+    (appIds: number[], userId?: string) => {
+      const targetUserId = userId || currentUserId;
+      const targetPlayer = players.find((p) => p.id === targetUserId);
+      if (!targetPlayer?.steamProfile) return;
+
+      const appIdSet = new Set(appIds);
+      const steamGamesToSync = targetPlayer.steamProfile.ownedGames.filter((g) =>
+        appIdSet.has(g.appId)
+      );
+
+      if (steamGamesToSync.length === 0) return;
+
+      const newGamesToAdd: Game[] = [];
+      const newPreferencesToAdd: UserGamePreference[] = [];
+
+      setGames((prevGames) => {
+        const updatedGames = [...prevGames];
+
+        for (const sg of steamGamesToSync) {
+          let existing = updatedGames.find(
+            (g) =>
+              g.tags.includes(`steam:${sg.appId}`) ||
+              g.name.trim().toLowerCase() === sg.name.trim().toLowerCase()
+          );
+
+          if (!existing) {
+            const newGame: Game = {
+              id: `game-steam-${sg.appId}`,
+              name: sg.name,
+              description: `Importado de Steam Library. Min: ${sg.minPlayers}, Max: ${sg.maxPlayers}.`,
+              coverUrl: sg.headerImageUrl,
+              minPlayers: sg.minPlayers || 1,
+              maxPlayers: sg.maxPlayers || 4,
+              category: sg.genres[0] || 'Co-op Acción',
+              tags: Array.from(new Set([...sg.tags, ...sg.genres, `steam:${sg.appId}`])),
+              averageDurationMins: 60,
+              addedBy: targetUserId,
+            };
+            updatedGames.push(newGame);
+            newGamesToAdd.push(newGame);
+            existing = newGame;
+          }
+
+          const rating: GameRating = sg.userRating || sg.suggestedRating || 3;
+          const steamHours = sg.manualHoursOverride ?? sg.playtimeHours;
+          const steamRecent = sg.manualRecentHoursOverride ?? sg.playtimeRecentHours;
+          newPreferencesToAdd.push({
+            userId: targetUserId,
+            gameId: existing.id,
+            plays: true,
+            rating,
+            ...(steamHours && steamHours > 0 ? { hoursPlayed: steamHours } : {}),
+            ...(steamRecent && steamRecent > 0 ? { recentHoursPlayed: steamRecent } : {}),
+          });
+        }
+
+        for (const g of newGamesToAdd) {
+          dbInsertGame(g).catch(console.warn);
+        }
+
+        syncChannel?.postMessage({ type: 'SYNC_ALL', payload: { games: updatedGames } });
+        return updatedGames;
+      });
+
+      if (newPreferencesToAdd.length > 0) {
+        setPreferences((prevPrefs) => {
+          const nextPrefs = [...prevPrefs];
+          for (const np of newPreferencesToAdd) {
+            const idx = nextPrefs.findIndex(
+              (p) => p.userId === np.userId && p.gameId === np.gameId
+            );
+            if (idx >= 0) {
+              nextPrefs[idx] = np;
+            } else {
+              nextPrefs.push(np);
+            }
+            dbUpsertPreference(np).catch(console.warn);
+          }
+          syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: nextPrefs });
+          return nextPrefs;
+        });
+      }
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== targetUserId || !p.steamProfile) return p;
+
+          const nextOwned = p.steamProfile.ownedGames.map((og) => {
+            if (appIdSet.has(og.appId)) {
+              return { ...og, selectedForCatalog: true };
+            }
+            return og;
+          });
+
+          const intermediatePlayer: PlayerProfile = {
+            ...p,
+            steamProfile: {
+              ...p.steamProfile,
+              ownedGames: nextOwned,
+            },
+          };
+
+          const updatedTaste = recomputeTasteProfileForPlayer(
+            intermediatePlayer,
+            preferences,
+            games
+          );
+
+          const updatedPlayer = {
+            ...intermediatePlayer,
+            tasteProfile: updatedTaste,
+          };
+
+          dbUpsertProfile(updatedPlayer).catch(console.warn);
+          return updatedPlayer;
+        });
+
+        syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        return nextPlayers;
+      });
+    },
+    [currentUserId, players, preferences, games, syncChannel]
+  );
+
+  const setUnifiedGameFeedback = useCallback(
+    (
+      game: UnifiedSelectorGame,
+      patch: {
+        plays?: boolean;
+        rating?: GameRating;
+        burnedOut?: boolean;
+        platform?: ExternalGamePlatform;
+        hoursPlayed?: number;
+        recentHoursPlayed?: number;
+      },
+      userId?: string
+    ) => {
+      const targetUserId = userId || currentUserId;
+      const normName = normalizeGameName(game.name);
+      const nextRating: GameRating = patch.rating ?? game.effectiveRating ?? 4;
+
+      // 1. Sync matching Club Catalog preference if game exists in catalog
+      const matchingCatalogGame =
+        (game.catalogGameId
+          ? games.find((g) => g.id === game.catalogGameId)
+          : undefined) ||
+        games.find(
+          (g) =>
+            (game.steamAppId !== undefined && g.tags.includes(`steam:${game.steamAppId}`)) ||
+            normalizeGameName(g.name) === normName
+        );
+
+      const existingMatchingPref = matchingCatalogGame
+        ? preferences.find(
+            (p) => p.userId === targetUserId && p.gameId === matchingCatalogGame.id
+          )
+        : undefined;
+      const fallbackGameHours = game.playtimeHours > 0 ? game.playtimeHours : undefined;
+      const fallbackGameRecent =
+        game.playtimeRecentHours > 0 ? game.playtimeRecentHours : undefined;
+      const resolvedHoursPlayed =
+        patch.hoursPlayed ?? existingMatchingPref?.hoursPlayed ?? fallbackGameHours;
+      const resolvedRecentHoursPlayed =
+        patch.recentHoursPlayed ??
+        existingMatchingPref?.recentHoursPlayed ??
+        fallbackGameRecent;
+
+      let nextPrefsSnapshot = preferences;
+      if (matchingCatalogGame) {
+        const resolvedPlays =
+          patch.burnedOut === true
+            ? false
+            : patch.plays !== undefined
+            ? patch.plays
+            : patch.rating !== undefined
+            ? true
+            : existingMatchingPref?.plays ?? true;
+        const resolvedRating = patch.rating ?? existingMatchingPref?.rating ?? nextRating;
+        const resolvedPref: UserGamePreference = {
+          userId: targetUserId,
+          gameId: matchingCatalogGame.id,
+          plays: resolvedPlays,
+          rating: resolvedRating,
+          ...(resolvedHoursPlayed !== undefined ? { hoursPlayed: resolvedHoursPlayed } : {}),
+          ...(resolvedRecentHoursPlayed !== undefined
+            ? { recentHoursPlayed: resolvedRecentHoursPlayed }
+            : {}),
+        };
+        const filtered = preferences.filter(
+          (p) => !(p.userId === targetUserId && p.gameId === matchingCatalogGame.id)
+        );
+        nextPrefsSnapshot = [...filtered, resolvedPref];
+        setPreferences(nextPrefsSnapshot);
+        syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: nextPrefsSnapshot });
+        dbUpsertPreference({
+          userId: targetUserId,
+          gameId: matchingCatalogGame.id,
+          plays: resolvedPlays,
+          rating: resolvedRating,
+        }).catch(console.warn);
+      }
+
+      // 2. Persist onto Steam profile (if owned on Steam) OR externalGames list (uniformly)
+      let targetUpdated: PlayerProfile | undefined;
+
+      setPlayers((prevPlayers) => {
+        const nextPlayers = prevPlayers.map((p) => {
+          if (p.id !== targetUserId) return p;
+
+          let nextSteamProfile = p.steamProfile;
+          const baseTaste: PlayerTasteProfile = p.tasteProfile || {
+            topMultiplayerGames: [],
+            topSingleplayerGames: [],
+            externalGames: [],
+            updatedAt: new Date().toISOString(),
+          };
+          let nextExternalGames = [...(baseTaste.externalGames || [])];
+
+          if (game.ownedOnSteam && game.steamAppId && p.steamProfile) {
+            nextSteamProfile = {
+              ...p.steamProfile,
+              ownedGames: p.steamProfile.ownedGames.map((og) => {
+                if (og.appId !== game.steamAppId) return og;
+                const clearRatingOnUnmark =
+                  patch.plays === false && patch.rating === undefined;
+                const nextPlaysOverride =
+                  patch.burnedOut === true
+                    ? false
+                    : patch.plays !== undefined
+                    ? patch.plays
+                    : patch.rating !== undefined ||
+                      patch.hoursPlayed !== undefined ||
+                      patch.recentHoursPlayed !== undefined
+                    ? true
+                    : og.playsOverride;
+                return {
+                  ...og,
+                  userRating: clearRatingOnUnmark
+                    ? undefined
+                    : patch.rating !== undefined
+                    ? patch.rating
+                    : patch.plays === true && og.userRating === undefined
+                    ? nextRating
+                    : og.userRating,
+                  ...(nextPlaysOverride !== undefined
+                    ? { playsOverride: nextPlaysOverride }
+                    : {}),
+                  burnedOut:
+                    patch.burnedOut !== undefined
+                      ? patch.burnedOut
+                      : og.burnedOut,
+                  ...(patch.hoursPlayed !== undefined
+                    ? { manualHoursOverride: patch.hoursPlayed }
+                    : {}),
+                  ...(patch.recentHoursPlayed !== undefined
+                    ? { manualRecentHoursOverride: patch.recentHoursPlayed }
+                    : {}),
+                };
+              }),
+            };
+          } else {
+            const existingExtIndex = nextExternalGames.findIndex(
+              (ext) =>
+                (game.externalGameId && ext.gameId === game.externalGameId) ||
+                normalizeGameName(ext.name) === normName
+            );
+
+            if (
+              patch.plays === false &&
+              patch.rating === undefined &&
+              patch.burnedOut === undefined &&
+              patch.hoursPlayed === undefined &&
+              patch.recentHoursPlayed === undefined
+            ) {
+              if (existingExtIndex >= 0) {
+                nextExternalGames.splice(existingExtIndex, 1);
+              }
+            } else {
+              const resolvedPlatform: ExternalGamePlatform =
+                patch.platform ||
+                (existingExtIndex >= 0
+                  ? nextExternalGames[existingExtIndex].platform
+                  : (['Steam (Otra cuenta / Verde)', 'Riot Games', 'Epic Games', 'Battle.net', 'EA App', 'Xbox Game Pass', 'Otro Launcher'].includes(
+                      game.platform
+                    )
+                      ? (game.platform as ExternalGamePlatform)
+                      : 'Otro Launcher'));
+
+              const prevExt = existingExtIndex >= 0 ? nextExternalGames[existingExtIndex] : undefined;
+              const updatedExternalEntry: ExternalRatedGame = {
+                gameId:
+                  prevExt?.gameId ||
+                  game.externalGameId ||
+                  (game.igdbId
+                    ? `igdb-${game.igdbId}`
+                    : game.steamAppId
+                    ? `steam-ext-${game.steamAppId}`
+                    : `ext-${normName}`),
+                steamAppId: game.steamAppId,
+                igdbId: game.igdbId,
+                name: game.name,
+                platform: resolvedPlatform,
+                coverUrl: game.coverUrl,
+                category: game.category,
+                tags: game.tags,
+                ...(game.tagVotes || prevExt?.tagVotes
+                  ? { tagVotes: game.tagVotes ?? prevExt?.tagVotes }
+                  : {}),
+                minPlayers: game.minPlayers,
+                maxPlayers: game.maxPlayers,
+                isMultiplayer: game.isMultiplayer,
+                rating: patch.rating ?? prevExt?.rating ?? nextRating,
+                ...(patch.hoursPlayed !== undefined || prevExt?.hoursPlayedEstimate !== undefined
+                  ? {
+                      hoursPlayedEstimate:
+                        patch.hoursPlayed !== undefined
+                          ? patch.hoursPlayed
+                          : prevExt?.hoursPlayedEstimate,
+                    }
+                  : {}),
+                ...(patch.recentHoursPlayed !== undefined ||
+                prevExt?.recentHoursPlayed !== undefined
+                  ? {
+                      recentHoursPlayed:
+                        patch.recentHoursPlayed ?? prevExt?.recentHoursPlayed,
+                    }
+                  : {}),
+                burnedOut:
+                  patch.burnedOut !== undefined
+                    ? patch.burnedOut
+                    : prevExt?.burnedOut ?? false,
+                source:
+                  game.source === 'igdb_discovery' || game.igdbId
+                    ? 'igdb'
+                    : game.steamAppId
+                    ? 'steam'
+                    : 'curated',
+              };
+
+              if (existingExtIndex >= 0) {
+                nextExternalGames[existingExtIndex] = updatedExternalEntry;
+              } else {
+                nextExternalGames = [updatedExternalEntry, ...nextExternalGames];
+              }
+            }
+          }
+
+          // Mirror hours into catalogGameHours & any matching Podium Top 3 slots
+          const prevCatalogHours = baseTaste.catalogGameHours || {};
+          const nextCatalogHours =
+            matchingCatalogGame &&
+            (resolvedHoursPlayed !== undefined || resolvedRecentHoursPlayed !== undefined)
+              ? {
+                  ...prevCatalogHours,
+                  [matchingCatalogGame.id]: {
+                    hoursPlayed:
+                      resolvedHoursPlayed ??
+                      prevCatalogHours[matchingCatalogGame.id]?.hoursPlayed ??
+                      0,
+                    ...(resolvedRecentHoursPlayed !== undefined ||
+                    prevCatalogHours[matchingCatalogGame.id]?.recentHoursPlayed !== undefined
+                      ? {
+                          recentHoursPlayed:
+                            resolvedRecentHoursPlayed ??
+                            prevCatalogHours[matchingCatalogGame.id]?.recentHoursPlayed ??
+                            0,
+                        }
+                      : {}),
+                  },
+                }
+              : prevCatalogHours;
+
+          const syncPodiumHours = (entries: typeof baseTaste.topMultiplayerGames) =>
+            patch.hoursPlayed !== undefined || patch.recentHoursPlayed !== undefined
+              ? entries.map((pe) => {
+                  const matchesPodium =
+                    (game.steamAppId !== undefined && pe.steamAppId === game.steamAppId) ||
+                    normalizeGameName(pe.name) === normName;
+                  if (!matchesPodium) return pe;
+                  return {
+                    ...pe,
+                    ...(patch.hoursPlayed !== undefined
+                      ? { hoursPlayed: patch.hoursPlayed }
+                      : {}),
+                    ...(patch.recentHoursPlayed !== undefined
+                      ? { recentHoursPlayed: patch.recentHoursPlayed }
+                      : {}),
+                  };
+                })
+              : entries;
+
+          const intermediatePlayer: PlayerProfile = {
+            ...p,
+            steamProfile: nextSteamProfile,
+            tasteProfile: {
+              ...baseTaste,
+              topMultiplayerGames: syncPodiumHours(baseTaste.topMultiplayerGames || []),
+              topSingleplayerGames: syncPodiumHours(baseTaste.topSingleplayerGames || []),
+              externalGames: nextExternalGames,
+              catalogGameHours: nextCatalogHours,
+              updatedAt: new Date().toISOString(),
+            },
+          };
+
+          const recomputedTaste = recomputeTasteProfileForPlayer(
+            intermediatePlayer,
+            nextPrefsSnapshot,
+            games
+          );
+
+          targetUpdated = {
+            ...intermediatePlayer,
+            tasteProfile: recomputedTaste,
+          };
+
+          return targetUpdated;
+        });
+
+        if (targetUpdated) {
+          dbUpsertProfile(targetUpdated).catch(console.warn);
+          syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+        }
+
+        return nextPlayers;
+      });
+    },
+    [currentUserId, games, preferences, syncChannel]
+  );
+
+  const syncUnifiedGameToCatalog = useCallback(
+    (game: UnifiedSelectorGame, userId?: string): Game | null => {
+      const targetUserId = userId || currentUserId;
+      const normName = normalizeGameName(game.name);
+
+      let resolvedCatalogGame =
+        (game.catalogGameId
+          ? games.find((g) => g.id === game.catalogGameId)
+          : undefined) ||
+        games.find(
+          (g) =>
+            (game.steamAppId !== undefined && g.tags.includes(`steam:${game.steamAppId}`)) ||
+            normalizeGameName(g.name) === normName
+        ) ||
+        null;
+
+      if (!resolvedCatalogGame) {
+        const tagSet = new Set<string>(game.tags || []);
+        if (game.steamAppId) tagSet.add(`steam:${game.steamAppId}`);
+        if (game.platform && !game.platform.includes('/')) {
+          tagSet.add(game.platform);
+        }
+
+        const newGame: Game = {
+          id: game.steamAppId
+            ? `game-steam-${game.steamAppId}`
+            : game.igdbId
+            ? `game-igdb-${game.igdbId}`
+            : `game-${normName.replace(/[^a-z0-9]/g, '') || Date.now()}-${Date.now()}`,
+          name: game.name,
+          description: `Agregado desde ${game.platform}. Cupo: ${game.minPlayers}-${game.maxPlayers} jug.`,
+          coverUrl:
+            game.coverUrl ||
+            'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=600&q=80',
+          minPlayers: Math.max(1, game.minPlayers || 1),
+          maxPlayers: Math.max(1, game.maxPlayers || 4),
+          category: game.category || 'Co-op Acción',
+          tags: Array.from(tagSet).slice(0, 8),
+          averageDurationMins: 50,
+          addedBy: targetUserId,
+        };
+
+        resolvedCatalogGame = newGame;
+        setGames((prevGames) => {
+          if (prevGames.some((g) => normalizeGameName(g.name) === normName)) {
+            return prevGames;
+          }
+          const updatedGames = [...prevGames, newGame];
+          syncChannel?.postMessage({ type: 'SYNC_ALL', payload: { games: updatedGames } });
+          return updatedGames;
+        });
+        dbInsertGame(newGame).catch(console.warn);
+      }
+
+      if (resolvedCatalogGame) {
+        const nextPref: UserGamePreference = {
+          userId: targetUserId,
+          gameId: resolvedCatalogGame.id,
+          plays: !game.burnedOut,
+          rating: game.effectiveRating || 4,
+          ...(game.playtimeHours > 0 ? { hoursPlayed: game.playtimeHours } : {}),
+          ...(game.playtimeRecentHours > 0 ? { recentHoursPlayed: game.playtimeRecentHours } : {}),
+        };
+
+        setPreferences((prevPrefs) => {
+          const filtered = prevPrefs.filter(
+            (p) => !(p.userId === targetUserId && p.gameId === resolvedCatalogGame!.id)
+          );
+          const updatedPrefs = [...filtered, nextPref];
+          syncChannel?.postMessage({ type: 'SYNC_PREFERENCES', payload: updatedPrefs });
+          return updatedPrefs;
+        });
+        dbUpsertPreference(nextPref).catch(console.warn);
+
+        if (game.playtimeHours > 0 || game.playtimeRecentHours > 0) {
+          const syncedCatalogId = resolvedCatalogGame.id;
+          setPlayers((prevPlayers) => {
+            let targetUpdated: PlayerProfile | undefined;
+            const nextPlayers = prevPlayers.map((p) => {
+              if (p.id !== targetUserId) return p;
+              const baseTaste: PlayerTasteProfile = p.tasteProfile || {
+                topMultiplayerGames: [],
+                topSingleplayerGames: [],
+                externalGames: [],
+                updatedAt: new Date().toISOString(),
+              };
+              const prevCatalogHours = baseTaste.catalogGameHours || {};
+              targetUpdated = {
+                ...p,
+                tasteProfile: {
+                  ...baseTaste,
+                  catalogGameHours: {
+                    ...prevCatalogHours,
+                    [syncedCatalogId]: {
+                      hoursPlayed:
+                        game.playtimeHours > 0
+                          ? game.playtimeHours
+                          : prevCatalogHours[syncedCatalogId]?.hoursPlayed ?? 0,
+                      ...(game.playtimeRecentHours > 0 ||
+                      prevCatalogHours[syncedCatalogId]?.recentHoursPlayed !== undefined
+                        ? {
+                            recentHoursPlayed:
+                              game.playtimeRecentHours > 0
+                                ? game.playtimeRecentHours
+                                : prevCatalogHours[syncedCatalogId]?.recentHoursPlayed ?? 0,
+                          }
+                        : {}),
+                    },
+                  },
+                  updatedAt: new Date().toISOString(),
+                },
+              };
+              return targetUpdated;
+            });
+            if (targetUpdated) {
+              dbUpsertProfile(targetUpdated).catch(console.warn);
+              syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: nextPlayers });
+            }
+            return nextPlayers;
+          });
+        }
+      }
+
+      if (game.ownedOnSteam && game.steamAppId) {
+        updateSteamGameFeedback(
+          game.steamAppId,
+          { selectedForCatalog: true },
+          targetUserId
+        );
+      }
+
+      return resolvedCatalogGame;
+    },
+    [currentUserId, games, syncChannel, updateSteamGameFeedback]
+  );
+
   // 8. Reset Utilities
   const resetDemoData = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -2053,6 +4044,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsAuthenticated(false);
     setShowOnboardingModal(false);
     setShowWeeklyScheduleModal(false);
+    setGroups([]);
+    setActiveGroupIdState(null);
+    setPendingInviteCode(null);
     setGames(INITIAL_GAMES);
     setPreferences([]);
     setSessions([]);
@@ -2067,6 +4061,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       type: 'SYNC_ALL',
       payload: {
         players: [],
+        groups: [],
         sessions: [],
         preferences: [],
         sanctions: [],
@@ -2079,22 +4074,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     playNotificationSound('message');
   }, [syncChannel]);
 
+  // Visibility scoping: only expose players who share at least one group with currentUser (plus currentUser)
+  const visiblePlayers = useMemo(() => {
+    if (!currentUserId) return [];
+    const sharedIds = new Set<string>([currentUserId]);
+    userGroups.forEach((group) => {
+      group.memberIds.forEach((memberId) => sharedIds.add(memberId));
+    });
+    return players.filter((p) => sharedIds.has(p.id));
+  }, [players, userGroups, currentUserId]);
+
+  const visiblePreferences = useMemo(() => {
+    if (!currentUserId) return [];
+    const sharedIds = new Set(visiblePlayers.map((p) => p.id));
+    return preferences.filter((pref) => sharedIds.has(pref.userId));
+  }, [preferences, visiblePlayers, currentUserId]);
+
+  const visibleSessions = useMemo(() => {
+    if (!currentUserId || userGroups.length === 0) return [];
+    const groupIds = new Set(userGroups.map((g) => g.id));
+    return sessions.filter((s) => groupIds.has(s.groupId));
+  }, [sessions, userGroups, currentUserId]);
+
+  const visibleSanctions = useMemo(() => {
+    if (!currentUserId) return [];
+    const sharedIds = new Set(visiblePlayers.map((p) => p.id));
+    const groupIds = new Set(userGroups.map((g) => g.id));
+    return sanctions.filter((san) =>
+      san.groupId ? groupIds.has(san.groupId) : sharedIds.has(san.userId)
+    );
+  }, [sanctions, visiblePlayers, userGroups, currentUserId]);
+
+  const visibleChatMessages = useMemo(() => {
+    if (!currentUserId) return [];
+    const sharedIds = new Set(visiblePlayers.map((p) => p.id));
+    const groupIds = new Set(userGroups.map((g) => g.id));
+    return chatMessages.filter((msg) =>
+      msg.groupId ? groupIds.has(msg.groupId) : sharedIds.has(msg.userId)
+    );
+  }, [chatMessages, visiblePlayers, userGroups, currentUserId]);
+
   const value = useMemo<AppContextValue>(
     () => ({
       currentUser,
-      players,
+      players: visiblePlayers,
       isAuthenticated,
       showOnboardingModal,
       setShowOnboardingModal,
       showWeeklyScheduleModal,
       setShowWeeklyScheduleModal,
-      switchActivePlayer,
-      loginAsProfile,
       createAndLoginProfile,
       logout,
       loginWithDiscord,
+      updateUserProfile,
       completeOnboarding,
       isSupabaseConnected: isSupabaseConfigured(),
+
+      groups,
+      userGroups,
+      activeGroupId: resolvedActiveGroupId,
+      activeGroup,
+      pendingInviteCode,
+      pendingInviteGroup,
+      setActiveGroupId,
+      createGroup,
+      updateGroup,
+      deleteGroup,
+      joinGroupByInviteCode,
+      addMemberToGroup,
+      removeMemberFromGroup,
+      testGroupDiscordWebhook,
+      getGroupInviteLink,
 
       updateWeeklySchedule,
       setDailyOverride,
@@ -2102,11 +4152,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateCategoryPreferences,
 
       games,
-      preferences,
+      preferences: visiblePreferences,
       updateGamePreference,
       addGame,
 
-      sessions,
+      importSteamProfile,
+      updateSteamGameFeedback,
+      updatePlayerTasteProfile,
+      syncSteamGamesToCatalog,
+      setUnifiedGameFeedback,
+      syncUnifiedGameToCatalog,
+
+      sessions: visibleSessions,
       activeSessionId,
       setActiveSessionId,
       createSession,
@@ -2118,13 +4175,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       spinSessionRoulette,
       lockSessionGame,
 
-      sanctions,
+      sanctions: visibleSanctions,
       checkInToSession,
       castAttendanceVote,
       issueDirectSanction,
       pingLatePlayer,
 
-      chatMessages,
+      chatMessages: visibleChatMessages,
       sendChatMessage,
       toggleMessageReaction,
 
@@ -2144,25 +4201,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }),
     [
       currentUser,
-      players,
+      visiblePlayers,
       isAuthenticated,
       showOnboardingModal,
       showWeeklyScheduleModal,
-      switchActivePlayer,
-      loginAsProfile,
       createAndLoginProfile,
       logout,
       loginWithDiscord,
+      updateUserProfile,
       completeOnboarding,
+      groups,
+      userGroups,
+      resolvedActiveGroupId,
+      activeGroup,
+      pendingInviteCode,
+      pendingInviteGroup,
+      setActiveGroupId,
+      createGroup,
+      updateGroup,
+      deleteGroup,
+      joinGroupByInviteCode,
+      addMemberToGroup,
+      removeMemberFromGroup,
+      testGroupDiscordWebhook,
+      getGroupInviteLink,
       updateWeeklySchedule,
       setDailyOverride,
       toggleTodayNotPlaying,
       updateCategoryPreferences,
       games,
-      preferences,
+      visiblePreferences,
       updateGamePreference,
       addGame,
-      sessions,
+      importSteamProfile,
+      updateSteamGameFeedback,
+      updatePlayerTasteProfile,
+      syncSteamGamesToCatalog,
+      setUnifiedGameFeedback,
+      syncUnifiedGameToCatalog,
+      visibleSessions,
       activeSessionId,
       setActiveSessionId,
       createSession,
@@ -2173,12 +4250,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       leaveSession,
       spinSessionRoulette,
       lockSessionGame,
-      sanctions,
+      visibleSanctions,
       checkInToSession,
       castAttendanceVote,
       issueDirectSanction,
       pingLatePlayer,
-      chatMessages,
+      visibleChatMessages,
       sendChatMessage,
       toggleMessageReaction,
       discordConfig,

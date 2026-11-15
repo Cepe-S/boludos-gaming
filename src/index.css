@@ -1,25 +1,263 @@
 @import "tailwindcss";
 
+:root,
+.dark {
+  color-scheme: dark;
+  accent-color: hsl(var(--primary));
+
+  /* Surface Hierarchy (Discord-inspired layering) */
+  --background: 216 18% 5%;          /* #0B0D10 - App Canvas / Deepest layer */
+  --card: 220 21% 9%;                /* #11141A - GitHub-style main cards & panels */
+  --popover: 220 20% 12%;            /* #181C24 - Dropdowns, tooltips, modals, sheets */
+  --secondary: 220 20% 12%;          /* #181C24 - Secondary buttons & elevated inputs */
+  --muted: 220 18% 15%;              /* #1F242E - Subtle hover rows & disabled states */
+
+  /* Borders (GitHub-style 1px crisp dividers) */
+  --border: 222 20% 17%;             /* #232834 - Default 1px border */
+  --input: 222 20% 17%;              /* #232834 - Form input border */
+
+  /* Typography */
+  --foreground: 220 13% 95%;         /* #F2F3F5 - Primary headings & high-emphasis text */
+  --card-foreground: 220 13% 95%;    /* #F2F3F5 */
+  --popover-foreground: 220 13% 95%; /* #F2F3F5 */
+  --secondary-foreground: 220 13% 95%;
+  --muted-foreground: 215 9% 61%;    /* #949BA4 - Descriptions, labels, metadata */
+
+  /* Gamer Accents (Discord Blurple & Status) */
+  --primary: 235 86% 65%;            /* #5865F2 - Primary CTA & active focus */
+  --primary-foreground: 0 0% 100%;   /* #FFFFFF */
+  --accent: 222 20% 16%;             /* #202531 - Subtle interactive hover surface */
+  --accent-foreground: 220 13% 95%;
+  --ring: 235 86% 65%;               /* #5865F2 - Focus ring glow */
+
+  /* Semantic Status */
+  --destructive: 358 68% 54%;        /* #DA373C - Errors & destructive actions */
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 69% 41%;            /* #20B26B - Confirmations, ready, online */
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 50%;             /* #F59E0B - Alerts, late, pending */
+  --warning-foreground: 0 0% 10%;
+  --info: 217 91% 60%;               /* #3B82F6 - Info, neutral highlights */
+  --info-foreground: 0 0% 100%;
+
+  --radius: 0.375rem;                /* 6px - Crisp GitHub-like border radius */
+
+  /* Scrollbar Tokens (>= 3:1 thumb contrast against track) */
+  --scrollbar-thumb: #4b556b;
+  --scrollbar-track: #0b0d10;
+}
+
+[data-theme="emerald-tactical"] {
+  --background: 160 22% 5%;
+  --card: 160 22% 9%;
+  --popover: 160 20% 12%;
+  --secondary: 160 20% 12%;
+  --muted: 160 18% 15%;
+  --border: 160 18% 18%;
+  --input: 160 18% 18%;
+  --primary: 158 76% 44%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 160 20% 16%;
+  --ring: 158 76% 44%;
+  --scrollbar-thumb: #3b594e;
+  --scrollbar-track: #0a100d;
+}
+
+[data-theme="crimson-esports"] {
+  --background: 240 15% 5%;
+  --card: 240 16% 9%;
+  --popover: 240 15% 12%;
+  --secondary: 240 15% 12%;
+  --muted: 240 14% 16%;
+  --border: 240 14% 18%;
+  --input: 240 14% 18%;
+  --primary: 348 83% 56%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 240 15% 16%;
+  --ring: 348 83% 56%;
+  --scrollbar-thumb: #5b434b;
+  --scrollbar-track: #0b0b0f;
+}
+
+[data-theme="amber-arcade"] {
+  --background: 24 18% 6%;
+  --card: 24 18% 10%;
+  --popover: 24 16% 13%;
+  --secondary: 24 16% 13%;
+  --muted: 24 14% 17%;
+  --border: 24 15% 20%;
+  --input: 24 15% 20%;
+  --primary: 32 95% 52%;
+  --primary-foreground: 0 0% 10%;
+  --accent: 24 16% 17%;
+  --ring: 32 95% 52%;
+  --scrollbar-thumb: #665340;
+  --scrollbar-track: #110e0b;
+}
+
+[data-theme="aldosivi"] {
+  --background: 157 79% 6%;          /* #031A11 - Verde Abisal (Base profunda para contraste de capas) */
+  --card: 158 70% 11%;               /* #083021 - Derivado oscuro del Verde Tradicional */
+  --popover: 158 64% 14%;            /* #0D3B2A - Superficie elevada */
+  --secondary: 158 100% 18%;         /* #005C3A - Verde Oscuro (Base tradicional) */
+  --muted: 158 60% 17%;              /* #114632 - Hover sutil y estados neutros */
+  --border: 156 58% 24%;             /* #1A6147 - Bordes con identidad verde */
+  --input: 156 58% 24%;
+  --foreground: 0 0% 100%;           /* #FFFFFF - Blanco (Tipografía y detalles) */
+  --card-foreground: 0 0% 100%;
+  --popover-foreground: 0 0% 100%;
+  --secondary-foreground: 0 0% 100%;
+  --muted-foreground: 152 24% 72%;   /* #A7CBB9 - Metadatos legibles sobre verde */
+  --primary: 145 63% 32%;            /* #1E8449 - Verde Claro (Tonal / Sublimado) */
+  --primary-foreground: 0 0% 100%;   /* #FFFFFF */
+  --accent: 158 75% 21%;             /* #0D5E40 - Hover interactivo */
+  --accent-foreground: 0 0% 100%;
+  --ring: 145 63% 32%;               /* #1E8449 */
+  --destructive: 4 77% 48%;          /* #DA291C - Rojo heráldico */
+  --destructive-foreground: 0 0% 100%;
+  --success: 145 63% 38%;            /* #249D57 - Confirmaciones alineadas al verde tonal */
+  --scrollbar-thumb: #1e8449;
+  --scrollbar-track: #031a11;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+}
+
 @layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
   body {
-    background-color: #090d16;
-    color: #f1f5f9;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
   }
 }
 
-/* Custom Scrollbar for Gaming UI */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.cv-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 360px;
 }
-::-webkit-scrollbar-track {
-  background: #090d16;
+
+.scroller-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
-::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 9999px;
+
+@supports not (scrollbar-color: auto) {
+  html::-webkit-scrollbar,
+  .scroller-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  html::-webkit-scrollbar-track,
+  .scroller-thin::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  html::-webkit-scrollbar-thumb,
+  .scroller-thin::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #4f46e5;
+
+@keyframes stepIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tileSelected {
+  0% {
+    transform: scale(0.97);
+    opacity: 0.85;
+  }
+  60% {
+    transform: scale(1.015);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes dropTargetPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+}
+
+.animate-step-in {
+  animation: stepIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-tile-selected {
+  animation: tileSelected 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-drop-target {
+  animation: dropTargetPulse 240ms ease-out infinite;
+  will-change: transform, opacity;
 }

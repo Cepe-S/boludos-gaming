@@ -77,6 +77,7 @@ const createTestParticipant = (overrides: Partial<SessionParticipant> = {}): Ses
 
 const createTestSession = (overrides: Partial<GamingSession> = {}): GamingSession => ({
   id: 'session-1',
+  groupId: 'group-test',
   title: 'Sesión Nocturna Boludos',
   date: '2026-11-13',
   mode: 'random',
@@ -1274,6 +1275,180 @@ describe('Matchmaking & Karma Engine (matchmakingEngine)', () => {
         expect(effective.confidencePercentage).toBe(0);
         expect(effective.slots).toEqual([]);
       });
+
+      it('returns plays: true with only remaining non-cancelled slot when one slot is cancelled via cancelledSlotIds', () => {
+        const customWeekly = createDefaultWeeklySchedule();
+        customWeekly.fri = {
+          enabled: true,
+          availableFrom: '13:00',
+          availableUntil: '02:00',
+          precisionMinutes: 15,
+          confidencePercentage: 80,
+          slots: [
+            {
+              id: 'slot-siesta',
+              from: '13:00',
+              until: '16:00',
+              confidencePercentage: 70,
+              precisionMinutes: 15,
+            },
+            {
+              id: 'slot-noche',
+              from: '22:00',
+              until: '02:00',
+              confidencePercentage: 85,
+              precisionMinutes: 15,
+            },
+          ],
+        };
+
+        const player = createTestPlayer({
+          id: 'p-partial-cancel',
+          weeklySchedule: customWeekly,
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'playing',
+              cancelledSlotIds: ['slot-siesta'],
+              reason: 'Almuerzo familiar al mediodía',
+              updatedAt: '2026-11-13T10:00:00Z',
+            },
+          },
+        });
+
+        // 2026-11-13 is Friday
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+
+        expect(effective.plays).toBe(true);
+        expect(effective.source).toBe('override');
+        expect(effective.dayKey).toBe('fri');
+        expect(effective.availableFrom).toBe('22:00');
+        expect(effective.availableUntil).toBe('02:00');
+        expect(effective.precisionMinutes).toBe(15);
+        expect(effective.confidencePercentage).toBe(85);
+        expect(effective.slots).toHaveLength(1);
+        expect(effective.slots[0].id).toBe('slot-noche');
+        expect(effective.slots[0].from).toBe('22:00');
+        expect(effective.slots[0].until).toBe('02:00');
+        expect(effective.cancelledSlotIds).toEqual(['slot-siesta']);
+        expect(effective.reason).toBe('Almuerzo familiar al mediodía');
+      });
+
+      it('returns plays: false, confidencePercentage: 0, and slots: [] when all slots of that day are listed in cancelledSlotIds', () => {
+        const customWeekly = createDefaultWeeklySchedule();
+        customWeekly.fri = {
+          enabled: true,
+          availableFrom: '13:00',
+          availableUntil: '02:00',
+          precisionMinutes: 15,
+          confidencePercentage: 80,
+          slots: [
+            {
+              id: 'slot-siesta',
+              from: '13:00',
+              until: '16:00',
+              confidencePercentage: 70,
+              precisionMinutes: 15,
+            },
+            {
+              id: 'slot-noche',
+              from: '22:00',
+              until: '02:00',
+              confidencePercentage: 85,
+              precisionMinutes: 15,
+            },
+          ],
+        };
+
+        const player = createTestPlayer({
+          id: 'p-all-cancel',
+          weeklySchedule: customWeekly,
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'playing',
+              cancelledSlotIds: ['slot-siesta', 'slot-noche'],
+              updatedAt: '2026-11-13T10:00:00Z',
+            },
+          },
+        });
+
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+
+        expect(effective.plays).toBe(false);
+        expect(effective.source).toBe('override');
+        expect(effective.dayKey).toBe('fri');
+        expect(effective.confidencePercentage).toBe(0);
+        expect(effective.slots).toEqual([]);
+        expect(effective.cancelledSlotIds).toEqual(['slot-siesta', 'slot-noche']);
+        expect(effective.reason).toBe('Todas las franjas canceladas');
+      });
+
+      it('filters out cancelled slots when override.slots is explicitly provided with cancelledSlotIds', () => {
+        const player = createTestPlayer({
+          id: 'p-override-cancel',
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'playing',
+              slots: [
+                {
+                  id: 'custom-slot-1',
+                  from: '14:00',
+                  until: '17:00',
+                  confidencePercentage: 60,
+                  precisionMinutes: 15,
+                },
+                {
+                  id: 'custom-slot-2',
+                  from: '21:00',
+                  until: '00:00',
+                  confidencePercentage: 80,
+                  precisionMinutes: 15,
+                },
+              ],
+              cancelledSlotIds: ['custom-slot-1'],
+              reason: 'Solo juego a la noche',
+              updatedAt: '2026-11-13T12:00:00Z',
+            },
+          },
+        });
+
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+
+        expect(effective.plays).toBe(true);
+        expect(effective.source).toBe('override');
+        expect(effective.availableFrom).toBe('21:00');
+        expect(effective.availableUntil).toBe('00:00');
+        expect(effective.confidencePercentage).toBe(80);
+        expect(effective.slots).toHaveLength(1);
+        expect(effective.slots[0].id).toBe('custom-slot-2');
+        expect(effective.cancelledSlotIds).toEqual(['custom-slot-1']);
+      });
+
+      it('preserves cancelledSlotIds when override is not_playing', () => {
+        const player = createTestPlayer({
+          id: 'p-not-playing-cancelled',
+          dailyOverrides: {
+            '2026-11-13': {
+              date: '2026-11-13',
+              status: 'not_playing',
+              cancelledSlotIds: ['slot-fri-1'],
+              reason: 'No puedo jugar nada hoy',
+              updatedAt: '2026-11-13T12:00:00Z',
+            },
+          },
+        });
+
+        const effective = getEffectiveDailySchedule(player, '2026-11-13');
+
+        expect(effective.plays).toBe(false);
+        expect(effective.source).toBe('override');
+        expect(effective.confidencePercentage).toBe(0);
+        expect(effective.slots).toEqual([]);
+        expect(effective.cancelledSlotIds).toEqual(['slot-fri-1']);
+        expect(effective.reason).toBe('No puedo jugar nada hoy');
+      });
     });
 
     describe('reconcileAutoParticipantsForSession', () => {
@@ -1396,6 +1571,39 @@ describe('Matchmaking & Karma Engine (matchmakingEngine)', () => {
         const updatedSession = reconcileAutoParticipantsForSession(session, [player]);
         expect(updatedSession.participants.find((p) => p.userId === 'p-bailing-confirmed')).toBeUndefined();
       });
+
+      it('respects groupMemberIds by excluding non-members from auto-enrollment and pruning removed members', () => {
+        const memberA = createTestPlayer({ id: 'member-a', displayName: 'Member A' });
+        const memberB = createTestPlayer({ id: 'member-b', displayName: 'Member B' });
+        const outsider = createTestPlayer({ id: 'outsider-1', displayName: 'Outsider' });
+        const removedMember = createTestPlayer({ id: 'removed-1', displayName: 'Removed' });
+
+        const session = createTestSession({
+          groupId: 'group-alpha',
+          createdBy: 'member-a',
+          date: '2026-11-13',
+          invitedUserIds: undefined, // All group members invited by default
+          participants: [
+            createTestParticipant({
+              userId: 'removed-1',
+              isAutoEnrolled: true,
+              confirmationStatus: 'probable',
+            }),
+          ],
+        });
+
+        const updatedSession = reconcileAutoParticipantsForSession(
+          session,
+          [memberA, memberB, outsider, removedMember],
+          '2026-11-13T18:00:00.000Z',
+          ['member-a', 'member-b']
+        );
+
+        const participantIds = updatedSession.participants.map((p) => p.userId);
+        expect(participantIds).toEqual(['member-a', 'member-b']);
+        expect(participantIds).not.toContain('outsider-1');
+        expect(participantIds).not.toContain('removed-1');
+      });
     });
 
     describe('getProbableAvailablePlayersForSession', () => {
@@ -1459,6 +1667,42 @@ describe('Matchmaking & Karma Engine (matchmakingEngine)', () => {
         const probItem = probables.find((r) => r.player.id === 'p-prob')!;
         expect(probItem.matchedSlot).toBeDefined();
         expect(probItem.matchedSlot.confidencePercentage).toBeLessThan(100);
+      });
+
+      it('respects groupMemberIds and excludes non-members from probable callout results', () => {
+        const memberConfirmed = createTestPlayer({ id: 'm-conf', displayName: 'Member Confirmed' });
+        const memberProbable = createTestPlayer({ id: 'm-prob', displayName: 'Member Probable' });
+        const outsiderProbable = createTestPlayer({ id: 'outsider-prob', displayName: 'Outsider Probable' });
+
+        const session = createTestSession({
+          groupId: 'group-alpha',
+          createdBy: 'm-conf',
+          date: '2026-11-13',
+          invitedUserIds: undefined,
+          participants: [
+            createTestParticipant({
+              userId: 'm-conf',
+              confirmationStatus: 'confirmed',
+              confidencePercentage: 100,
+            }),
+            createTestParticipant({
+              userId: 'm-prob',
+              confirmationStatus: 'probable',
+              confidencePercentage: 75,
+            }),
+          ],
+        });
+
+        const probables = getProbableAvailablePlayersForSession(
+          session,
+          [memberConfirmed, memberProbable, outsiderProbable],
+          ['m-conf', 'm-prob']
+        );
+
+        const probableIds = probables.map((res) => res.player.id);
+        expect(probableIds).toEqual(['m-prob']);
+        expect(probableIds).not.toContain('outsider-prob');
+        expect(probableIds).not.toContain('m-conf');
       });
     });
   });
