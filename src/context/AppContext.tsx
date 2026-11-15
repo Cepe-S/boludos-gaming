@@ -454,41 +454,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   // Gaming Groups State
-  const [groups, setGroups] = useState<GamingGroup[]>(() => {
-    const storedGroups = loadFromStorage<GamingGroup[]>(STORAGE_KEYS.GROUPS, []);
-    if (storedGroups.length > 0) {
-      return storedGroups;
-    }
-    const storedPlayers = loadFromStorage<PlayerProfile[]>(STORAGE_KEYS.PLAYERS, []);
-    const storedSessions = loadFromStorage<GamingSession[]>(STORAGE_KEYS.SESSIONS, []);
-    if (storedPlayers.length > 0 || storedSessions.length > 0) {
-      const legacyDiscord = loadFromStorage<DiscordIntegrationConfig>(
-        STORAGE_KEYS.DISCORD_CONFIG,
-        INITIAL_DISCORD_CONFIG
-      );
-      return [
-        {
-          id: 'group-boludos-og',
-          name: 'Boludos Gaming OG',
-          description: 'Grupo principal del club — sesiones, ruleta y Tribunal del Humo.',
-          inviteCode: 'BG-CLUB1',
-          createdBy: storedPlayers[0]?.id || '',
-          memberIds: storedPlayers.map((p) => p.id),
-          adminIds: storedPlayers[0] ? [storedPlayers[0].id] : [],
-          discordConfig: {
-            enabled: legacyDiscord.enabled,
-            webhookUrl: legacyDiscord.webhookUrl,
-            channelName: legacyDiscord.channelName,
-            guildName: legacyDiscord.guildName,
-            mentionRoleId: legacyDiscord.mentionRoleId,
-            useEveryoneMention: legacyDiscord.useEveryoneMention,
-          },
-          createdAt: new Date().toISOString(),
-        },
-      ];
-    }
-    return [];
-  });
+  const [groups, setGroups] = useState<GamingGroup[]>(() =>
+    loadFromStorage<GamingGroup[]>(STORAGE_KEYS.GROUPS, [])
+  );
 
   const [activeGroupIdState, setActiveGroupIdState] = useState<string | null>(() =>
     loadFromStorage<string | null>(STORAGE_KEYS.ACTIVE_GROUP_ID, null)
@@ -1921,19 +1889,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let autoCreatedGroup: GamingGroup | undefined;
 
       if (!targetGroup) {
-        const defaultMembers = players.some((p) => p.id === currentUserId)
-          ? players.map((p) => p.id)
-          : [currentUserId];
         autoCreatedGroup = {
           id: targetGroupId,
-          name: targetGroupId === 'group-boludos-og' ? 'Los Boludos OG' : 'Nuevo Grupo',
+          name: 'Mi Grupo',
           description: 'Grupo privado para coordinar sesiones, horarios y alertas de Discord.',
-          inviteCode:
-            targetGroupId === 'group-boludos-og'
-              ? 'BG-CLUB1'
-              : generateUniqueInviteCode(groups),
+          inviteCode: generateUniqueInviteCode(groups),
           createdBy: currentUserId,
-          memberIds: defaultMembers,
+          memberIds: [currentUserId],
           adminIds: [currentUserId],
           discordConfig: {
             enabled: discordConfig.enabled,
