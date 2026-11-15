@@ -9,6 +9,7 @@ import {
   UserGamePreference,
 } from '@/types/domain';
 import { getPlayerArchetypeBadge } from '@/lib/playerCategorizationEngine';
+import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -202,7 +203,13 @@ export const ParticipantsTribunalBentoCard: React.FC<ParticipantsTribunalBentoCa
                             </span>
                             {archetype.hasData && (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-secondary/55 border border-border text-[9px] text-muted-foreground">
-                                <span>{archetype.emoji}</span>
+                                <PvjArchetypeIcon
+                                  hasData={archetype.hasData}
+                                  type={archetype.type}
+                                  primaryDimension={archetype.primaryDimension}
+                                  secondaryDimension={archetype.secondaryDimension}
+                                  iconClassName="w-2.5 h-2.5 shrink-0"
+                                />
                                 <span className="truncate max-w-[115px]">{archetype.name}</span>
                               </span>
                             )}

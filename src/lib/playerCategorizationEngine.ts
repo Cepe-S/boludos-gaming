@@ -1812,6 +1812,8 @@ export interface PlayerArchetypeBadgeInfo {
   name: string;
   emoji: string;
   type: PvjClassificationType;
+  primaryDimension: PvjDimensionKey;
+  secondaryDimension: PvjDimensionKey | null;
   primaryLabel: string;
   secondaryLabel?: string;
   confidencePct: number;
@@ -1837,8 +1839,10 @@ export function getPlayerArchetypeBadge(
     name: hasData ? pvj.classification.archetype_name : 'Sin Categorizar',
     emoji: hasData ? pvj.classification.archetype_emoji || '🎮' : '🧩',
     type: pvj.classification.type,
-    primaryLabel: primaryMeta ? `${primaryMeta.emoji} ${primaryMeta.label}` : '',
-    secondaryLabel: secondaryMeta ? `${secondaryMeta.emoji} ${secondaryMeta.label}` : undefined,
+    primaryDimension: pvj.classification.primary_dimension,
+    secondaryDimension: pvj.classification.secondary_dimension,
+    primaryLabel: primaryMeta ? primaryMeta.label : '',
+    secondaryLabel: secondaryMeta ? secondaryMeta.label : undefined,
     confidencePct: Math.round(pvj.classification.confidence_score * 100),
   };
 }

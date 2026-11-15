@@ -36,11 +36,15 @@ function getMeshColors(themeId: ThemePaletteId): [string, string, string, string
 }
 
 function destroyParticlesInstances() {
-  if (typeof window === 'undefined' || !Array.isArray(window.pJSDom)) return;
-  while (window.pJSDom.length > 0) {
-    const instance = window.pJSDom.pop();
-    instance?.pJS?.fn?.vendors?.destroypJS?.();
+  if (typeof window === 'undefined') return;
+  if (Array.isArray(window.pJSDom)) {
+    while (window.pJSDom.length > 0) {
+      const instance = window.pJSDom.pop();
+      instance?.pJS?.fn?.vendors?.destroypJS?.();
+    }
   }
+  // particles.js v2.0.0 sets `pJSDom = null` inside destroypJS(), which throws on `pJSDom.push(...)` on remount.
+  window.pJSDom = [];
 }
 
 interface ObjectConstructorWithDeepExtend extends ObjectConstructor {
@@ -90,7 +94,8 @@ function mountParticles(themeId: ThemePaletteId) {
 
   const palette = getPaletteForTheme(themeId);
   const accentColor = palette.swatch;
-  const lightColor = palette.colors[4] ?? '#F2F3F5';
+  const lightColor =
+    palette.id === 'aldosivi' ? '#FFFFFF' : (palette.colors[4] ?? '#F2F3F5');
 
   window.particlesJS('particles-js', {
     particles: {
@@ -213,10 +218,12 @@ export const MeshBackground: React.FC = () => {
       className="fixed inset-0 -z-10 pointer-events-none bg-background overflow-hidden"
       aria-hidden="true"
     >
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full block opacity-55"
-      />
+      <div className="w-full h-full opacity-55">
+        <canvas
+          ref={canvasRef}
+          className="w-full h-full block"
+        />
+      </div>
       <div
         id="particles-js"
         className="absolute inset-0 w-full h-full"

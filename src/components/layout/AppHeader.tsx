@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { getEffectiveScheduleForDate } from '@/lib/matchmakingEngine';
 import { AppTab } from '@/components/layout/AppSidebar';
+import { BrandWordmark } from '@/components/layout/BrandWordmark';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -100,9 +101,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 h-14 border-b border-border/70 bg-background/55 backdrop-blur-md px-4 flex items-center justify-between gap-3">
-      {/* Left: Mobile Sidebar Toggle + Contextual Breadcrumb */}
-      <div className="flex items-center gap-2.5 min-w-0">
+    <header className="sticky top-0 z-30 w-full h-14 border-b border-border/70 bg-background/75 backdrop-blur-md px-4 lg:pl-0 flex items-center justify-between gap-3">
+      {/* Left: Brand Mark + Mobile Sidebar Toggle + Contextual Breadcrumb */}
+      <div className="flex items-center gap-2.5 lg:gap-0 min-w-0">
         <Button
           type="button"
           variant="secondary"
@@ -115,7 +116,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <Menu className="w-5 h-5" strokeWidth={1.75} />
         </Button>
 
-        <div className="flex items-center gap-2 min-w-0 text-xs">
+        <div className="hidden lg:flex lg:w-60 lg:h-7 lg:px-4 items-center border-r border-border/70 shrink-0">
+          <BrandWordmark />
+        </div>
+
+        <div className="flex items-center gap-2 min-w-0 text-xs lg:pl-4">
           <span className="hidden sm:inline-flex items-center gap-1.5 text-muted-foreground truncate max-w-[160px]">
             <Users className="w-4 h-4 text-primary shrink-0" strokeWidth={1.75} />
             <span className="truncate font-medium">

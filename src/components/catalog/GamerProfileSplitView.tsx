@@ -15,6 +15,7 @@ import {
 } from '@/types/domain';
 import { TASTE_DIMENSION_MAP } from '@/lib/tasteProfileEngine';
 import { PvjArchetypeDashboard } from '@/components/PvjArchetypeDashboard';
+import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
 import { GameCompactTile } from './GameCompactTile';
 import { StickyTopPodiumBar } from './StickyTopPodiumBar';
 import {
@@ -641,12 +642,21 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
               <span className="text-xs font-bold text-foreground block truncate">
                 {currentUser.displayName}
               </span>
-              <span className="text-[10px] text-muted-foreground block truncate">
-                {pvjProfile.valid_games_analyzed > 0
-                  ? `${pvjProfile.classification.archetype_emoji || ''} ${
-                      pvjProfile.classification.archetype_name
-                    }`
-                  : 'Perfil en configuración'}
+              <span className="text-[10px] text-muted-foreground flex items-center gap-1 min-w-0">
+                {pvjProfile.valid_games_analyzed > 0 ? (
+                  <>
+                    <PvjArchetypeIcon
+                      hasData
+                      type={pvjProfile.classification.type}
+                      primaryDimension={pvjProfile.classification.primary_dimension}
+                      secondaryDimension={pvjProfile.classification.secondary_dimension}
+                      iconClassName="w-3 h-3 shrink-0"
+                    />
+                    <span className="truncate">{pvjProfile.classification.archetype_name}</span>
+                  </>
+                ) : (
+                  <span className="truncate">Perfil en configuración</span>
+                )}
               </span>
             </div>
           </div>

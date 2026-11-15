@@ -412,61 +412,48 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
 
                         {/* Inline user control */}
                         <TableCell className="text-right">
-                          <div className="flex flex-col items-end gap-1">
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                size="xs"
-                                variant={myPlays ? 'emerald' : 'outline'}
-                                onClick={() => onTogglePlay(game.id, myPlays, myRating)}
-                              >
-                                {myPlays && <Check className="w-3 h-3" strokeWidth={2} />}
-                                <span>{myPlays ? 'Lo juego' : 'No lo juego'}</span>
-                              </Button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              size="xs"
+                              variant={myPlays ? 'emerald' : 'outline'}
+                              onClick={() => onTogglePlay(game.id, myPlays, myRating)}
+                            >
+                              {myPlays && <Check className="w-3 h-3" strokeWidth={2} />}
+                              <span>{myPlays ? 'Lo juego' : 'No lo juego'}</span>
+                            </Button>
 
-                              <div
-                                className="flex items-center"
-                                onMouseLeave={() => setHoveredStar(null)}
-                              >
-                                {([1, 2, 3, 4, 5] as GameRating[]).map((star) => {
-                                  const active = myPlays && displayRating >= star;
-                                  return (
-                                    <button
-                                      key={star}
-                                      type="button"
-                                      onMouseEnter={() =>
-                                        setHoveredStar({ gameId: game.id, star })
-                                      }
-                                      onClick={() => onSetRating(game.id, star)}
-                                      title={RATING_INFO[star].label}
-                                      aria-label={RATING_INFO[star].label}
-                                      className={cn(
-                                        'p-0.5 rounded transition-colors cursor-pointer',
-                                        active
-                                          ? 'text-warning'
-                                          : 'text-muted-foreground/35 hover:text-warning'
-                                      )}
-                                    >
-                                      <Star
-                                        className="w-4 h-4"
-                                        fill={active ? 'currentColor' : 'none'}
-                                        strokeWidth={1.75}
-                                      />
-                                    </button>
-                                  );
-                                })}
-                              </div>
+                            <div
+                              className="flex items-center"
+                              onMouseLeave={() => setHoveredStar(null)}
+                            >
+                              {([1, 2, 3, 4, 5] as GameRating[]).map((star) => {
+                                const active = myPlays && displayRating >= star;
+                                return (
+                                  <button
+                                    key={star}
+                                    type="button"
+                                    onMouseEnter={() =>
+                                      setHoveredStar({ gameId: game.id, star })
+                                    }
+                                    onClick={() => onSetRating(game.id, star)}
+                                    title={RATING_INFO[star].label}
+                                    aria-label={RATING_INFO[star].label}
+                                    className={cn(
+                                      'p-0.5 rounded transition-colors cursor-pointer',
+                                      active
+                                        ? 'text-warning'
+                                        : 'text-muted-foreground/35 hover:text-warning'
+                                    )}
+                                  >
+                                    <Star
+                                      className="w-4 h-4"
+                                      fill={active ? 'currentColor' : 'none'}
+                                      strokeWidth={1.75}
+                                    />
+                                  </button>
+                                );
+                              })}
                             </div>
-
-                            {myPlays && (
-                              <span
-                                className={cn(
-                                  'text-[10px] px-1.5 py-0 rounded border',
-                                  RATING_INFO[myRating].colorClass
-                                )}
-                              >
-                                {RATING_INFO[myRating].label}
-                              </span>
-                            )}
                           </div>
                         </TableCell>
                       </TableRow>

@@ -2,21 +2,18 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Award,
-  BookOpen,
-  Brain,
   ChevronDown,
   ChevronUp,
   Flame,
-  Gem,
   Grid,
-  Handshake,
-  type LucideIcon,
-  Palette,
   Puzzle,
   Sparkles,
-  Swords,
   Target,
 } from 'lucide-react';
+import {
+  PVJ_DIMENSION_ICONS,
+  PvjDimensionIcon,
+} from '@/components/PvjDimensionIcon';
 import {
   PlayerProfile,
   PvjDimensionKey,
@@ -46,31 +43,6 @@ export interface PvjArchetypeDashboardProps {
   pvjProfile: PvjPlayerCategorizationResult;
   onJumpToPendingHours?: () => void;
 }
-
-const PVJ_DIMENSION_ICONS: Record<PvjDimensionKey, LucideIcon> = {
-  D1_agonia: Swords,
-  D2_ingenio: Brain,
-  D3_expresion: Palette,
-  D4_narrativa: BookOpen,
-  D5_acumulacion: Gem,
-  D6_sinergia: Handshake,
-};
-
-const PvjDimensionIcon: React.FC<{
-  dimension: PvjDimensionKey;
-  color?: string;
-  className?: string;
-}> = ({ dimension, color, className = 'w-3.5 h-3.5 shrink-0' }) => {
-  const Icon = PVJ_DIMENSION_ICONS[dimension];
-  return (
-    <Icon
-      className={className}
-      strokeWidth={1.85}
-      style={color ? { color } : undefined}
-      aria-hidden="true"
-    />
-  );
-};
 
 const CLASSIFICATION_BADGE_MAP: Record<
   PvjPlayerCategorizationResult['classification']['type'],

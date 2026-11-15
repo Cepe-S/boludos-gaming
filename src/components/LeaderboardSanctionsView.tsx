@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useApp } from '@/context/AppContext';
 import { getPlayerArchetypeBadge } from '@/lib/playerCategorizationEngine';
+import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -471,8 +472,15 @@ export const LeaderboardSanctionsView: React.FC = () => {
                             <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                               <span>{player.activeTitle}</span>
                               {arch.hasData && (
-                                <span className="px-1.5 py-0 rounded bg-secondary/55 border border-border text-[9px]">
-                                  {arch.emoji} {arch.name}
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-secondary/55 border border-border text-[9px]">
+                                  <PvjArchetypeIcon
+                                    hasData={arch.hasData}
+                                    type={arch.type}
+                                    primaryDimension={arch.primaryDimension}
+                                    secondaryDimension={arch.secondaryDimension}
+                                    iconClassName="w-2.5 h-2.5 shrink-0"
+                                  />
+                                  <span>{arch.name}</span>
                                 </span>
                               )}
                             </div>

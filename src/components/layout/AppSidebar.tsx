@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { getPlayerArchetypeBadge } from '@/lib/playerCategorizationEngine';
+import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
+import { BrandWordmark } from '@/components/layout/BrandWordmark';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -16,7 +18,6 @@ import {
   Calendar,
   Check,
   ChevronDown,
-  Flame,
   Gamepad2,
   LogOut,
   Plus,
@@ -33,6 +34,7 @@ export interface AppSidebarContentProps {
   setActiveTab: (tab: AppTab) => void;
   onOpenDiscordModal: () => void;
   onItemNavigate?: () => void;
+  hideBrandHeader?: boolean;
 }
 
 function getGroupInitials(name: string): string {
@@ -56,6 +58,7 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
   setActiveTab,
   onOpenDiscordModal,
   onItemNavigate,
+  hideBrandHeader = false,
 }) => {
   const {
     currentUser,
@@ -143,27 +146,18 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
   return (
     <div className="flex flex-col h-full bg-card/50 text-card-foreground select-none">
       {/* Brand Header */}
-      <div className="h-14 px-3.5 border-b border-border flex items-center justify-between gap-2 shrink-0">
-        <button
-          type="button"
-          onClick={() => navigate('sessions')}
-          className="flex items-center gap-2.5 text-left group cursor-pointer focus:outline-none"
-        >
-          <div className="relative flex items-center justify-center w-8 h-8 rounded-md bg-primary/15 border border-primary/40 text-primary shrink-0">
-            <Flame className="w-4 h-4 text-primary group-hover:text-warning transition-colors" strokeWidth={2} />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-success ring-2 ring-card" />
-          </div>
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-xs font-black tracking-wider text-foreground">
-              BOLUDOS
-            </span>
-            <span className="text-xs font-semibold text-primary">GAMING</span>
-            <span className="text-[9px] font-bold uppercase px-1 py-0.2 rounded bg-secondary/55 border border-border text-muted-foreground">
-              ARG
-            </span>
-          </div>
-        </button>
-      </div>
+      {!hideBrandHeader && (
+        <div className="h-14 px-4 border-b border-border flex items-center shrink-0">
+          <button
+            type="button"
+            onClick={() => navigate('sessions')}
+            className="w-full flex items-center text-left cursor-pointer focus:outline-none"
+            aria-label="Ir a Sesiones"
+          >
+            <BrandWordmark />
+          </button>
+        </div>
+      )}
 
       {/* Active Server / Group Selector */}
       <div className="p-3 border-b border-border shrink-0">
@@ -354,10 +348,21 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
                       {currentUser.karmaScore}%
                     </Badge>
                   </div>
-                  <span className="text-[10px] text-muted-foreground block truncate">
-                    {currentArchetype.hasData
-                      ? `${currentArchetype.emoji} ${currentArchetype.name}`
-                      : currentUser.activeTitle}
+                  <span className="text-[10px] text-muted-foreground flex items-center gap-1 min-w-0">
+                    {currentArchetype.hasData ? (
+                      <>
+                        <PvjArchetypeIcon
+                          hasData={currentArchetype.hasData}
+                          type={currentArchetype.type}
+                          primaryDimension={currentArchetype.primaryDimension}
+                          secondaryDimension={currentArchetype.secondaryDimension}
+                          iconClassName="w-3 h-3 shrink-0"
+                        />
+                        <span className="truncate">{currentArchetype.name}</span>
+                      </>
+                    ) : (
+                      <span className="truncate">{currentUser.activeTitle}</span>
+                    )}
                   </span>
                 </div>
               </div>

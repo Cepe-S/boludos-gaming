@@ -37,15 +37,15 @@ export function App() {
   return (
     <TooltipProvider delayDuration={200}>
       <MeshBackground />
-      <div className="relative min-h-screen text-foreground flex">
-        {/* Desktop Persistent Sidebar */}
-        <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-screen border-r border-border/70 bg-card/55 backdrop-blur-md z-20">
-          <AppSidebarContent
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
-          />
-        </aside>
+      <div className="relative min-h-screen text-foreground flex flex-col">
+        {/* Global Full-Width GitHub-Style Top Header */}
+        <AppHeader
+          activeTab={activeTab}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+          onOpenChat={() => setIsChatOpen(true)}
+          onOpenNotifications={() => setIsNotificationsOpen(true)}
+          onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
+        />
 
         {/* Mobile Drawer Sidebar */}
         <Sheet open={isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
@@ -60,17 +60,20 @@ export function App() {
           </SheetContent>
         </Sheet>
 
-        {/* Main Workspace Column */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <AppHeader
-            activeTab={activeTab}
-            onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
-            onOpenChat={() => setIsChatOpen(true)}
-            onOpenNotifications={() => setIsNotificationsOpen(true)}
-            onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
-          />
+        {/* Below Header: Persistent Left Sidebar + Main Workspace */}
+        <div className="flex-1 flex min-w-0">
+          {/* Desktop Persistent Sidebar */}
+          <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:shrink-0 lg:sticky lg:top-14 lg:h-[calc(100vh-3.5rem)] border-r border-border/70 bg-card/55 backdrop-blur-md z-20">
+            <AppSidebarContent
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
+              hideBrandHeader
+            />
+          </aside>
 
-          <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-5">
+          {/* Main Workspace Column */}
+          <main className="flex-1 min-w-0 w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-5">
             {activeTab === 'sessions' && (
               <SessionsView onNavigateToGroups={() => setActiveTab('groups')} />
             )}
