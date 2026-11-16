@@ -25,7 +25,10 @@ import { fetchExternalDiscoveryGames } from '@/lib/steamService';
 import { GroupOnboardingEmptyState } from '@/components/sessions/GroupOnboardingEmptyState';
 import { ScheduleOverlapBentoCard } from '@/components/sessions/ScheduleOverlapBentoCard';
 import { PersonalCheckInBentoCard } from '@/components/sessions/PersonalCheckInBentoCard';
+import { InstantSessionRsvpCard } from '@/components/sessions/InstantSessionRsvpCard';
+import { InstantSessionModal } from '@/components/sessions/InstantSessionModal';
 import { RouletteSynchronyBentoCard } from '@/components/sessions/RouletteSynchronyBentoCard';
+import { SelectedSessionGameCard } from '@/components/sessions/SelectedSessionGameCard';
 import { ParticipantsTribunalBentoCard } from '@/components/sessions/ParticipantsTribunalBentoCard';
 import { SessionCreateModal } from '@/components/sessions/SessionCreateModal';
 import { SessionManageInvitesModal } from '@/components/sessions/SessionManageInvitesModal';
@@ -33,19 +36,17 @@ import { SessionCalloutModal } from '@/components/sessions/SessionCalloutModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
   Calendar,
-  CalendarClock,
   CalendarPlus,
   CheckCircle2,
   Dices,
-  FolderKanban,
-  Moon,
-  Settings,
-  Sun,
-  Users,
+  Gamepad2,
+  Trash2,
   X,
+  Zap,
 } from 'lucide-react';
 
 export interface SessionsViewProps {
@@ -74,6 +75,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     activeSessionId,
     setActiveSessionId,
     createSession,
+    createInstantSession,
+    deleteSession,
+    respondToInstantSession,
+    addGameToGroup,
     joinOrUpdateSessionSchedule,
     confirmSessionAttendance,
     sendSessionCallout,
@@ -86,15 +91,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     preferences,
     players,
     currentUser,
-    checkInToSession,
     castAttendanceVote,
     pingLatePlayer,
-    toggleTodayNotPlaying,
-    setShowWeeklyScheduleModal,
     discordConfig,
     userGroups,
     activeGroup,
-    setActiveGroupId,
     createGroup,
     joinGroupByInviteCode,
   } = useApp();
@@ -118,6 +119,12 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     const memberSet = new Set(activeGroup.memberIds);
     return players.filter((p) => memberSet.has(p.id));
   }, [activeGroup, players]);
+
+  const groupGames = useMemo(() => {
+    if (!activeGroup) return [];
+    const groupGameSet = new Set(activeGroup.gameIds);
+    return games.filter((g) => groupGameSet.has(g.id));
+  }, [activeGroup, games]);
 
   // Personal Check-in & schedule editor local state synced to activeSession participant
   const currentParticipant = useMemo(() => {
@@ -151,10 +158,30 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
 
   // Modals & action UI states
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showInstantModal, setShowInstantModal] = useState(false);
   const [showManageInvitesModal, setShowManageInvitesModal] = useState(false);
   const [showCalloutModal, setShowCalloutModal] = useState(false);
   const [pingingUserId, setPingingUserId] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
+  const [sessionSubTab, setSessionSubTab] = useState<'session' | 'games'>('session');
+
+  const canDeleteActiveSession = useMemo(() => {
+    if (!activeSession) return false;
+    return (
+      activeSession.createdBy === currentUser.id ||
+      activeGroup?.createdBy === currentUser.id ||
+      Boolean(activeGroup?.adminIds.includes(currentUser.id))
+    );
+  }, [activeSession, activeGroup, currentUser.id]);
+
+  const activeInstantSession = useMemo(
+    () =>
+      groupSessions.find(
+        (s) => s.sessionKind === 'instant' && s.status !== 'finished'
+      ),
+    [groupSessions]
+  );
 
   // Roulette animation state
   const [isSpinningRoulette, setIsSpinningRoulette] = useState(false);
@@ -167,6 +194,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     setRouletteWinnerBanner(null);
     setSlotReelGameName(null);
     setIsSpinningRoulette(false);
+    setConfirmDeleteSession(false);
   }, [activeSession?.id]);
 
   useEffect(() => {
@@ -212,13 +240,13 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   const synchronyResults = useMemo(() => {
     if (!activeSession) return [];
     return calculateGameSynchrony(
-      games,
+      groupGames,
       preferences,
       activeSession.participants,
       players,
       activeSession.allowSplitLobbies
     );
-  }, [activeSession, games, preferences, players]);
+  }, [activeSession, groupGames, preferences, players]);
 
   const perfectGames = useMemo(
     () => synchronyResults.filter((r) => r.status === 'perfect_fit'),
@@ -250,20 +278,29 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
 
     return generateGroupGameRecommendations({
       targetPlayers,
-      catalogGames: games,
+      catalogGames: groupGames,
       preferences,
       externalDiscoveryGames:
         liveDiscoveryGames.length > 0 ? liveDiscoveryGames : GLOBAL_GAMES_KNOWLEDGE_BASE,
       maxResultsPerCategory: 6,
     });
-  }, [activeSession, players, groupMembers, games, preferences, liveDiscoveryGames]);
+  }, [activeSession, players, groupMembers, groupGames, preferences, liveDiscoveryGames]);
 
   const activeGame = useMemo(() => {
     if (!activeSession) return null;
-    const id = activeSession.selectedGameId || activeSession.rouletteWinnerGameId;
+    const id =
+      rouletteWinnerBanner?.id ||
+      activeSession.rouletteWinnerGameId ||
+      activeSession.selectedGameId ||
+      activeSession.selectedGameIds?.[0];
     if (!id) return null;
     return games.find((g) => g.id === id) ?? null;
-  }, [activeSession, games]);
+  }, [activeSession, games, rouletteWinnerBanner]);
+
+  const activeGameSync = useMemo(() => {
+    if (!activeGame) return undefined;
+    return synchronyResults.find((r) => r.game.id === activeGame.id);
+  }, [activeGame, synchronyResults]);
 
   const confirmedParticipantsCount = useMemo(() => {
     if (!activeSession) return 0;
@@ -276,10 +313,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   }, [activeSession]);
 
   const todayStr = getTodayDateString();
-  const effectiveToday = useMemo(
-    () => getEffectiveDailySchedule(currentUser, todayStr),
-    [currentUser, todayStr]
-  );
 
   const showTempBanner = (msg: string) => {
     setFeedbackBanner(msg);
@@ -310,9 +343,20 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   };
 
   // Roulette Spin Handler with slot reel visual & confetti
-  const handleSpinRoulette = () => {
+  const handleSpinRoulette = (onlyLocked = false) => {
     if (!activeSession || isSpinningRoulette) return;
-    const pool = [...perfectGames, ...splitGames];
+    const lockedIds =
+      activeSession.selectedGameIds && activeSession.selectedGameIds.length > 0
+        ? activeSession.selectedGameIds
+        : activeSession.selectedGameId
+          ? [activeSession.selectedGameId]
+          : [];
+
+    const allCandidates = [...perfectGames, ...splitGames, ...incompatibleGames];
+    const pool =
+      onlyLocked && lockedIds.length > 0
+        ? allCandidates.filter((item) => lockedIds.includes(item.game.id))
+        : [...perfectGames, ...splitGames];
     if (pool.length === 0) return;
 
     setIsSpinningRoulette(true);
@@ -330,7 +374,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
         window.clearInterval(spinIntervalRef.current);
         spinIntervalRef.current = null;
       }
-      const winner = spinSessionRoulette(activeSession.id);
+      const winner = spinSessionRoulette(activeSession.id, { onlyLocked });
       setIsSpinningRoulette(false);
       setSlotReelGameName(null);
       if (winner) {
@@ -382,102 +426,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   }
 
   return (
-    <div className="space-y-4">
-      {/* Group Strip + Today Auto-Enrollment Quick Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 rounded-md bg-card/50 border border-border">
-        <div className="flex items-center gap-2 flex-wrap">
-          <FolderKanban
-            className="w-3.5 h-3.5 text-primary shrink-0 mr-0.5"
-            strokeWidth={1.75}
-            aria-label="Grupo"
-          />
-
-          {userGroups.map((g) => {
-            const isActive = activeGroup?.id === g.id;
-            return (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => setActiveGroupId(g.id)}
-                className={cn(
-                  'px-2.5 py-1.5 rounded-md border text-xs font-medium inline-flex items-center gap-2 transition-colors cursor-pointer',
-                  isActive
-                    ? 'bg-primary/15 border-primary text-foreground'
-                    : 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:bg-secondary'
-                )}
-              >
-                <span className="truncate max-w-[140px]">{g.name}</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary/55 border border-border text-muted-foreground">
-                  {g.memberIds.length}
-                </span>
-              </button>
-            );
-          })}
-
-          {onNavigateToGroups && (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="w-6 px-0"
-              onClick={onNavigateToGroups}
-              title="Gestionar grupos y webhooks"
-              aria-label="Gestionar grupos y webhooks"
-            >
-              <Settings className="w-3.5 h-3.5" strokeWidth={1.75} />
-            </Button>
-          )}
-        </div>
-
-        {/* Today Auto-Enrollment Status */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div
-            className={cn(
-              'px-2.5 py-1 rounded-md border text-[11px] inline-flex items-center gap-1.5',
-              effectiveToday.plays
-                ? 'bg-success/10 border-success/35 text-success'
-                : 'bg-destructive/10 border-destructive/35 text-destructive'
-            )}
-          >
-            {effectiveToday.plays ? (
-              <>
-                <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
-                <span>
-                  Hoy {effectiveToday.availableFrom}–{effectiveToday.availableUntil} ·{' '}
-                  {effectiveToday.confidencePercentage}%
-                </span>
-              </>
-            ) : (
-              <>
-                <Moon className="w-3.5 h-3.5" strokeWidth={1.75} />
-                <span>Hoy no juego</span>
-              </>
-            )}
-          </div>
-
-          <Button
-            size="xs"
-            variant={effectiveToday.plays ? 'outline' : 'destructive'}
-            onClick={() => toggleTodayNotPlaying('Cambio rápido desde Sesiones')}
-            title={effectiveToday.plays ? 'Marcar Hoy No Juego' : 'Volver a Jugar Hoy'}
-          >
-            {effectiveToday.plays ? 'No juego' : 'Juego hoy'}
-          </Button>
-
-          <Button
-            size="xs"
-            variant="secondary"
-            onClick={() => setShowWeeklyScheduleModal(true)}
-            title="Configurar horario semanal"
-          >
-            <CalendarClock className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>Horario</span>
-          </Button>
-        </div>
-      </div>
-
-      {/* Session Selector Bar + New Session CTA */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+    <div className="space-y-3">
+      {/* Compact Session Selector Bar + New Session CTA */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
           {groupSessions.map((sess) => {
             const isSelected = activeSession?.id === sess.id;
             const confCount = sess.participants.filter((p) => isParticipantConfirmed(p)).length;
@@ -487,47 +439,113 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                 type="button"
                 onClick={() => setActiveSessionId(sess.id)}
                 className={cn(
-                  'px-3 py-2 rounded-md border text-left shrink-0 transition-colors cursor-pointer min-w-[190px]',
+                  'px-2.5 py-1 rounded-md border text-left shrink-0 transition-colors cursor-pointer min-w-[140px] max-w-[195px]',
                   isSelected
-                    ? 'bg-secondary/55 border-primary text-foreground'
+                    ? 'bg-secondary/60 border-primary text-foreground'
                     : 'bg-card/50 border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60'
                 )}
               >
-                <div className="flex items-center justify-between gap-2 mb-0.5">
-                  <span className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
-                    <Calendar className="w-3 h-3" strokeWidth={1.75} />
-                    {sess.date}
-                  </span>
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-[11px] font-semibold truncate">{sess.title}</span>
                   <Badge
-                    variant={sess.mode === 'random' ? 'default' : 'secondary'}
-                    className="text-[9px] px-1.5 py-0"
+                    variant={sess.sessionKind === 'instant' ? 'warning' : sess.mode === 'random' ? 'default' : 'secondary'}
+                    className="text-[9px] px-1 py-0 shrink-0"
                   >
-                    {sess.mode === 'random' ? 'Ruleta' : 'Fijo'}
+                    {sess.sessionKind === 'instant'
+                      ? '⚡'
+                      : sess.mode === 'random'
+                        ? 'Ruleta'
+                        : 'Fijo'}
                   </Badge>
                 </div>
-                <div className="text-xs font-semibold truncate">{sess.title}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2">
-                  <span>{sess.participants.length} anotados</span>
-                  <span className="text-success font-medium">{confCount} conf.</span>
+                <div className="text-[10px] font-mono text-muted-foreground flex items-center justify-between gap-2 mt-0.5">
+                  <span>{sess.date}</span>
+                  <span className="text-success font-medium">
+                    {confCount}/{sess.participants.length}
+                  </span>
                 </div>
               </button>
             );
           })}
         </div>
 
-        <Button
-          size="sm"
-          className="shrink-0"
-          onClick={() => setShowCreateModal(true)}
-        >
-          <CalendarPlus className="w-4 h-4" strokeWidth={1.75} />
-          <span>Nueva Sesión</span>
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          {activeSession && canDeleteActiveSession && (
+            confirmDeleteSession ? (
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    deleteSession(activeSession.id);
+                    setConfirmDeleteSession(false);
+                    showTempBanner('Sesión eliminada.');
+                  }}
+                  title="Confirmar eliminación"
+                >
+                  <Trash2 className="w-4 h-4" strokeWidth={1.75} />
+                  <span>Confirmar</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setConfirmDeleteSession(false)}
+                  title="Cancelar"
+                  aria-label="Cancelar"
+                >
+                  <X className="w-4 h-4" strokeWidth={1.75} />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-9 px-0 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                onClick={() => setConfirmDeleteSession(true)}
+                title="Eliminar sesión"
+                aria-label="Eliminar sesión"
+              >
+                <Trash2 className="w-4 h-4" strokeWidth={1.75} />
+              </Button>
+            )
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={Boolean(activeInstantSession)}
+            onClick={() => {
+              if (activeInstantSession) {
+                setActiveSessionId(activeInstantSession.id);
+                return;
+              }
+              setShowInstantModal(true);
+            }}
+            title={
+              activeInstantSession
+                ? 'Ya hay una convocatoria instantánea en curso'
+                : 'Convocar jugadores ahora'
+            }
+          >
+            <Zap className="w-4 h-4 text-warning" strokeWidth={1.75} />
+            <span>Convocar ahora</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <CalendarPlus className="w-4 h-4" strokeWidth={1.75} />
+            <span>Nueva Sesión</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Toast Feedback Banner */}
+      {/* Floating Toast Feedback Banner (zero layout shift) */}
       {feedbackBanner && (
-        <div className="px-3.5 py-2.5 rounded-md bg-success/10 border border-success/40 text-success text-xs flex items-center justify-between gap-2">
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-50 max-w-md px-3.5 py-2.5 rounded-md bg-card/95 backdrop-blur-md border border-success/40 shadow-lg text-success text-xs flex items-center justify-between gap-2.5"
+        >
           <span className="inline-flex items-center gap-2 font-medium">
             <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
             {feedbackBanner}
@@ -537,7 +555,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
             onClick={() => setFeedbackBanner(null)}
             title="Cerrar"
             aria-label="Cerrar"
-            className="opacity-75 hover:opacity-100 cursor-pointer p-0.5 rounded"
+            className="opacity-75 hover:opacity-100 cursor-pointer p-0.5 rounded shrink-0"
           >
             <X className="w-3.5 h-3.5" strokeWidth={1.75} />
           </button>
@@ -554,163 +572,245 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
             <h3 className="text-sm font-bold text-foreground">
               Sin sesiones en {activeGroup?.name ?? 'este grupo'}
             </h3>
-            <Button size="sm" onClick={() => setShowCreateModal(true)}>
-              <CalendarPlus className="w-4 h-4" strokeWidth={1.75} />
-              <span>Crear sesión</span>
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setShowInstantModal(true)}
+              >
+                <Zap className="w-4 h-4 text-warning" strokeWidth={1.75} />
+                <span>Convocar ahora</span>
+              </Button>
+              <Button size="sm" onClick={() => setShowCreateModal(true)}>
+                <CalendarPlus className="w-4 h-4" strokeWidth={1.75} />
+                <span>Programar sesión</span>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (
         <>
-          {/* Compact Session Summary Hero */}
-          <div className="p-4 rounded-md bg-card/50 border border-border flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="space-y-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="font-mono text-[10px]">
-                  <Calendar className="w-3 h-3" strokeWidth={1.75} />
-                  <span>{activeSession.date}</span>
-                </Badge>
-                <Badge
-                  variant={
-                    activeSession.status === 'open'
-                      ? 'success'
-                      : activeSession.status === 'in_progress'
-                        ? 'default'
-                        : 'secondary'
-                  }
-                  className="text-[10px]"
-                >
-                  {activeSession.status === 'open'
-                    ? 'Abierta'
-                    : activeSession.status === 'in_progress'
-                      ? 'En curso'
-                      : 'Finalizada'}
-                </Badge>
-                {activeGame && (
-                  <Badge variant="purple" className="text-[10px]">
-                    {activeGame.name}
-                  </Badge>
-                )}
+          {/* Session Sub-Tabs: Sesión | Juegos */}
+          <Tabs
+            value={sessionSubTab}
+            onValueChange={(v) => setSessionSubTab(v as 'session' | 'games')}
+            className="w-full space-y-3"
+          >
+            <TabsList className="w-full sm:w-auto">
+              <TabsTrigger value="session" className="gap-1.5 text-xs">
+                <Calendar className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>Sesión</span>
+              </TabsTrigger>
+              <TabsTrigger value="games" className="gap-1.5 text-xs">
+                <Gamepad2 className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                <span>Juegos</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="session" className="mt-0">
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+                <div className="xl:col-span-7 flex flex-col gap-4 min-w-0">
+                  <ScheduleOverlapBentoCard
+                    activeSession={activeSession}
+                    scheduleOverlap={scheduleOverlap}
+                    isParticipantConfirmed={isParticipantConfirmed}
+                  />
+
+                  <RouletteSynchronyBentoCard
+                    sectionMode="locked"
+                    activeSession={activeSession}
+                    activeGame={activeGame}
+                    participantsCount={activeSession.participants.length}
+                    perfectGames={perfectGames}
+                    splitGames={splitGames}
+                    incompatibleGames={incompatibleGames}
+                    sessionRecommendations={sessionRecommendations}
+                    isSpinningRoulette={isSpinningRoulette}
+                    slotReelGameName={slotReelGameName}
+                    rouletteWinnerBanner={rouletteWinnerBanner}
+                    onSpinRoulette={() => handleSpinRoulette(true)}
+                    onOpenGamesTab={() => setSessionSubTab('games')}
+                    onLockGame={(gameId) => {
+                      const existingIds =
+                        activeSession.selectedGameIds ??
+                        (activeSession.selectedGameId ? [activeSession.selectedGameId] : []);
+                      const wasLocked = existingIds.includes(gameId);
+                      lockSessionGame(activeSession.id, gameId);
+                      const locked = games.find((g) => g.id === gameId);
+                      if (locked) {
+                        showTempBanner(
+                          wasLocked
+                            ? `Juego quitado: ${locked.name}`
+                            : `🔒 Juego fijado: ${locked.name}`
+                        );
+                      }
+                    }}
+                    onSelectRecommendation={(rec) => {
+                      const game = ensureCatalogGameFromRec(rec);
+                      if (game) {
+                        if (activeGroup) {
+                          addGameToGroup(activeGroup.id, game.id);
+                        }
+                        lockSessionGame(activeSession.id, game.id);
+                        showTempBanner(`✨ Juego importado/fijado: ${game.name}`);
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className="xl:col-span-5 flex flex-col gap-4 min-w-0">
+                  {activeGame && (
+                    <SelectedSessionGameCard
+                      game={activeGame}
+                      syncResult={activeGameSync}
+                      isRouletteWinner={
+                        Boolean(rouletteWinnerBanner?.id === activeGame.id) ||
+                        activeSession.rouletteWinnerGameId === activeGame.id
+                      }
+                    />
+                  )}
+
+                  {activeSession.sessionKind === 'instant' ? (
+                    <InstantSessionRsvpCard
+                      activeSession={activeSession}
+                      currentUser={currentUser}
+                      groupMembers={groupMembers}
+                      onRespond={(resp) => {
+                        respondToInstantSession(activeSession.id, resp);
+                        showTempBanner(
+                          resp.status === 'going'
+                            ? '⚡ ¡Anotado! Tu llegada se actualizó en el gráfico.'
+                            : 'Avisaste que esta vez no podés.'
+                        );
+                      }}
+                    />
+                  ) : (
+                    <PersonalCheckInBentoCard
+                      currentUser={currentUser}
+                      currentParticipant={currentParticipant}
+                      isConfirmed={isParticipantConfirmed(currentParticipant)}
+                      joinFromTime={joinFromTime}
+                      setJoinFromTime={setJoinFromTime}
+                      joinUntilTime={joinUntilTime}
+                      setJoinUntilTime={setJoinUntilTime}
+                      joinPrecision={joinPrecision}
+                      setJoinPrecision={setJoinPrecision}
+                      joinNote={joinNote}
+                      setJoinNote={setJoinNote}
+                      calculatedStrictDeadline={calculatedStrictDeadline}
+                      onJoinOrUpdate={() => {
+                        joinOrUpdateSessionSchedule(activeSession.id, {
+                          availableFrom: joinFromTime,
+                          availableUntil: joinUntilTime,
+                          precisionMinutes: joinPrecision,
+                          note: joinNote || undefined,
+                          confirmAttendance: true,
+                        });
+                        showTempBanner('✅ Horario guardado y asistencia confirmada (100%) en Discord.');
+                      }}
+                      onLeaveSession={() => {
+                        leaveSession(activeSession.id);
+                        showTempBanner('Saliste de la sesión.');
+                      }}
+                      onConfirmAttendance={() => {
+                        confirmSessionAttendance(activeSession.id);
+                        showTempBanner('✅ Confirmaste asistencia al 100%.');
+                      }}
+                    />
+                  )}
+
+                  <ParticipantsTribunalBentoCard
+                    activeSession={activeSession}
+                    currentUser={currentUser}
+                    players={players}
+                    games={groupGames}
+                    preferences={preferences}
+                    scheduleOverlap={scheduleOverlap}
+                    confirmedParticipantsCount={confirmedParticipantsCount}
+                    probableParticipantsCount={probableParticipants.length}
+                    isParticipantConfirmed={isParticipantConfirmed}
+                    pingingUserId={pingingUserId}
+                    onConfirmAttendance={(userId) => confirmSessionAttendance(activeSession.id, userId)}
+                    onPingLate={handlePingLate}
+                    onCastVote={handleCastVote}
+                    onOpenManageInvites={() => setShowManageInvitesModal(true)}
+                    onOpenCalloutModal={() => setShowCalloutModal(true)}
+                  />
+                </div>
               </div>
-              <h2 className="text-lg sm:text-xl font-bold tracking-tight text-foreground truncate">
-                {activeSession.title}
-              </h2>
-            </div>
+            </TabsContent>
 
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <Badge variant="secondary" className="py-1 px-2.5 font-mono">
-                <Users className="w-3.5 h-3.5 mr-1 text-primary" strokeWidth={1.75} />
-                {confirmedParticipantsCount}/{activeSession.participants.length} conf.
-              </Badge>
-            </div>
-          </div>
-
-          {/* BENTO GRID ROW 1: Schedule Overlap Timeline + Personal Check-in */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ScheduleOverlapBentoCard
-              activeSession={activeSession}
-              scheduleOverlap={scheduleOverlap}
-              isParticipantConfirmed={isParticipantConfirmed}
-            />
-
-            <PersonalCheckInBentoCard
-              currentUser={currentUser}
-              currentParticipant={currentParticipant}
-              isConfirmed={isParticipantConfirmed(currentParticipant)}
-              joinFromTime={joinFromTime}
-              setJoinFromTime={setJoinFromTime}
-              joinUntilTime={joinUntilTime}
-              setJoinUntilTime={setJoinUntilTime}
-              joinPrecision={joinPrecision}
-              setJoinPrecision={setJoinPrecision}
-              joinNote={joinNote}
-              setJoinNote={setJoinNote}
-              calculatedStrictDeadline={calculatedStrictDeadline}
-              onJoinOrUpdate={() => {
-                joinOrUpdateSessionSchedule(activeSession.id, {
-                  availableFrom: joinFromTime,
-                  availableUntil: joinUntilTime,
-                  precisionMinutes: joinPrecision,
-                  note: joinNote || undefined,
-                  confirmAttendance: true,
-                });
-                showTempBanner('✅ Horario guardado y asistencia confirmada (100%) en Discord.');
-              }}
-              onLeaveSession={() => {
-                leaveSession(activeSession.id);
-                showTempBanner('Saliste de la sesión.');
-              }}
-              onConfirmAttendance={() => {
-                confirmSessionAttendance(activeSession.id);
-                showTempBanner('✅ Confirmaste asistencia al 100%.');
-              }}
-              onCheckIn={() => {
-                checkInToSession(activeSession.id);
-                showTempBanner('✅ Check-in registrado en el Tribunal del Humo.');
-              }}
-            />
-          </div>
-
-          {/* BENTO GRID ROW 2: Weighted Roulette & Synchrony + Participants & Tribunal */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-            <RouletteSynchronyBentoCard
-              activeSession={activeSession}
-              activeGame={activeGame}
-              participantsCount={activeSession.participants.length}
-              perfectGames={perfectGames}
-              splitGames={splitGames}
-              incompatibleGames={incompatibleGames}
-              sessionRecommendations={sessionRecommendations}
-              isSpinningRoulette={isSpinningRoulette}
-              slotReelGameName={slotReelGameName}
-              rouletteWinnerBanner={rouletteWinnerBanner}
-              onSpinRoulette={handleSpinRoulette}
-              onLockGame={(gameId) => {
-                lockSessionGame(activeSession.id, gameId);
-                const locked = games.find((g) => g.id === gameId);
-                if (locked) {
-                  showTempBanner(`🔒 Juego fijado: ${locked.name}`);
-                }
-              }}
-              onSelectRecommendation={(rec) => {
-                const game = ensureCatalogGameFromRec(rec);
-                if (game) {
-                  lockSessionGame(activeSession.id, game.id);
-                  showTempBanner(`✨ Juego importado/fijado para la sesión: ${game.name}`);
-                }
-              }}
-            />
-
-            <ParticipantsTribunalBentoCard
-              activeSession={activeSession}
-              currentUser={currentUser}
-              players={players}
-              games={games}
-              preferences={preferences}
-              scheduleOverlap={scheduleOverlap}
-              confirmedParticipantsCount={confirmedParticipantsCount}
-              probableParticipantsCount={probableParticipants.length}
-              isParticipantConfirmed={isParticipantConfirmed}
-              pingingUserId={pingingUserId}
-              onConfirmAttendance={(userId) => confirmSessionAttendance(activeSession.id, userId)}
-              onCheckIn={(userId) => checkInToSession(activeSession.id, undefined, userId)}
-              onPingLate={handlePingLate}
-              onCastVote={handleCastVote}
-              onOpenManageInvites={() => setShowManageInvitesModal(true)}
-              onOpenCalloutModal={() => setShowCalloutModal(true)}
-            />
-          </div>
+            <TabsContent value="games" className="mt-0">
+              <RouletteSynchronyBentoCard
+                sectionMode="games"
+                activeSession={activeSession}
+                activeGame={activeGame}
+                participantsCount={activeSession.participants.length}
+                perfectGames={perfectGames}
+                splitGames={splitGames}
+                incompatibleGames={incompatibleGames}
+                sessionRecommendations={sessionRecommendations}
+                isSpinningRoulette={isSpinningRoulette}
+                slotReelGameName={slotReelGameName}
+                rouletteWinnerBanner={rouletteWinnerBanner}
+                onSpinRoulette={() => handleSpinRoulette(false)}
+                onLockGame={(gameId) => {
+                  const existingIds =
+                    activeSession.selectedGameIds ??
+                    (activeSession.selectedGameId ? [activeSession.selectedGameId] : []);
+                  const wasLocked = existingIds.includes(gameId);
+                  lockSessionGame(activeSession.id, gameId);
+                  const locked = games.find((g) => g.id === gameId);
+                  if (locked) {
+                    showTempBanner(
+                      wasLocked
+                        ? `Juego quitado: ${locked.name}`
+                        : `🔒 Juego fijado: ${locked.name}`
+                    );
+                  }
+                }}
+                onSelectRecommendation={(rec) => {
+                  const game = ensureCatalogGameFromRec(rec);
+                  if (game) {
+                    if (activeGroup) {
+                      addGameToGroup(activeGroup.id, game.id);
+                    }
+                    lockSessionGame(activeSession.id, game.id);
+                    showTempBanner(`✨ Juego importado/fijado para la sesión: ${game.name}`);
+                  }
+                }}
+              />
+            </TabsContent>
+          </Tabs>
         </>
       )}
 
       {/* Session Modals */}
+      <InstantSessionModal
+        open={showInstantModal}
+        onOpenChange={setShowInstantModal}
+        groupName={activeGroup?.name}
+        onSubmit={({ startsInMinutes, title }) => {
+          createInstantSession({
+            groupId: activeGroup?.id,
+            startsInMinutes,
+            title,
+          });
+          showTempBanner(
+            startsInMinutes > 0
+              ? `⚡ Convocatoria programada para dentro de ${startsInMinutes}m.`
+              : '⚡ Convocatoria instantánea enviada a todo el grupo.'
+          );
+        }}
+      />
+
       <SessionCreateModal
         open={showCreateModal}
         onOpenChange={setShowCreateModal}
         activeGroup={activeGroup}
         groupMembers={groupMembers}
         currentUser={currentUser}
-        games={games}
+        games={groupGames}
         preferences={preferences}
         discordConfig={discordConfig}
         defaultDate={todayStr}

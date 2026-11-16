@@ -40,8 +40,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { Check, Filter, Plus, RotateCcw, Search, Star, ThumbsDown, Users } from 'lucide-react';
+import { Check, Filter, Info, Plus, RotateCcw, Search, Star } from 'lucide-react';
 
 const addClubGameSchema = z.object({
   name: z.string().trim().min(2, 'Ingresá el nombre del juego.'),
@@ -282,13 +283,13 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-[820px]">
+              <Table className="min-w-[720px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[270px]">Juego</TableHead>
-                    <TableHead className="w-[155px]">Sincronía</TableHead>
-                    <TableHead>Grupo</TableHead>
-                    <TableHead className="text-right w-[235px]">Mi Voto</TableHead>
+                    <TableHead className="h-8 px-2.5 text-[11px] w-[250px]">Juego</TableHead>
+                    <TableHead className="h-8 px-2.5 text-[11px] w-[140px]">Sincronía</TableHead>
+                    <TableHead className="h-8 px-2.5 text-[11px]">Grupo</TableHead>
+                    <TableHead className="h-8 px-2.5 text-[11px] text-right w-[210px]">Mi Voto</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -302,116 +303,175 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
                     const displayRating =
                       hoveredStar?.gameId === game.id ? hoveredStar.star : myRating;
                     const likelihood = unifiedLikelihoodMap.get(game.id);
+                    const playingPlayers = playerRatings.filter((pr) => pr.plays);
 
                     return (
                       <TableRow key={game.id}>
-                        {/* Game info */}
-                        <TableCell>
-                          <div className="flex items-center gap-3">
+                        {/* Compact Game info + Hover Info Button */}
+                        <TableCell className="py-1.5 px-2.5">
+                          <div className="flex items-center gap-2 min-w-0">
                             <img
                               src={getSafeCoverUrl(game.coverUrl)}
                               alt={game.name}
                               onError={handleImageFallback}
-                              className="w-10 h-11 object-cover rounded border border-border shrink-0"
+                              className="w-7 h-7 object-cover rounded border border-border shrink-0"
                             />
-                            <div className="min-w-0 space-y-0.5">
-                              <span className="text-xs sm:text-sm font-semibold text-foreground block truncate max-w-[195px]">
-                                {game.name}
-                              </span>
-                              <div className="flex flex-wrap items-center gap-1">
-                                <Badge variant="outline" className="text-[9px] px-1.5 py-0">
-                                  {game.category}
-                                </Badge>
-                                <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5">
-                                  <Users className="w-3 h-3" strokeWidth={1.75} />
-                                  {game.minPlayers}–{game.maxPlayers}
-                                </span>
-                                {likelihood && likelihood.affinity >= 70 && (
-                                  <Badge variant="purple" className="text-[9px] px-1 py-0">
-                                    {likelihood.affinity}% afín
+                            <span className="text-xs font-semibold text-foreground truncate max-w-[175px]">
+                              {game.name}
+                            </span>
+
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label={`Detalles de ${game.name}`}
+                                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 cursor-pointer"
+                                >
+                                  <Info className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="right" className="max-w-[260px] p-2.5 space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-foreground text-xs">{game.name}</span>
+                                  <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                                    {game.category}
                                   </Badge>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                                  <span>{game.minPlayers}–{game.maxPlayers} jug.</span>
+                                  <span>· ~{game.averageDurationMins}m</span>
+                                  {likelihood && likelihood.affinity >= 50 && (
+                                    <span className="text-primary font-semibold">
+                                      {likelihood.affinity}% afín
+                                    </span>
+                                  )}
+                                </div>
+                                {game.description && (
+                                  <p className="text-[11px] text-muted-foreground leading-snug">
+                                    {game.description}
+                                  </p>
                                 )}
+                                {game.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 pt-0.5">
+                                    {game.tags.slice(0, 4).map((tag) => (
+                                      <span
+                                        key={tag}
+                                        className="text-[9px] px-1.5 py-0 rounded bg-secondary text-secondary-foreground"
+                                      >
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </TableCell>
+
+                        {/* Compact Synchrony */}
+                        <TableCell className="py-1.5 px-2.5">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center gap-2 cursor-default">
+                                <span
+                                  className={cn(
+                                    'text-xs font-bold font-mono w-9 shrink-0',
+                                    synchronyScore >= 75
+                                      ? 'text-success'
+                                      : synchronyScore >= 55
+                                        ? 'text-primary'
+                                        : 'text-warning'
+                                  )}
+                                >
+                                  {synchronyScore}%
+                                </span>
+                                <div className="h-1.5 flex-1 min-w-[36px] rounded-full bg-secondary overflow-hidden">
+                                  <div
+                                    className={cn(
+                                      'h-full rounded-full',
+                                      synchronyScore >= 75
+                                        ? 'bg-success'
+                                        : synchronyScore >= 55
+                                          ? 'bg-primary'
+                                          : 'bg-warning'
+                                    )}
+                                    style={{ width: `${Math.min(100, synchronyScore)}%` }}
+                                  />
+                                </div>
+                                <span className="text-[11px] text-warning font-medium inline-flex items-center gap-0.5 shrink-0">
+                                  <Star className="w-3 h-3 fill-warning text-warning" strokeWidth={1.75} />
+                                  {averageRating.toFixed(1)}
+                                </span>
                               </div>
-                            </div>
-                          </div>
-                        </TableCell>
-
-                        {/* Synchrony */}
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between text-xs">
-                              <span
-                                className={cn(
-                                  'font-bold font-mono',
-                                  synchronyScore >= 75
-                                    ? 'text-success'
-                                    : synchronyScore >= 55
-                                      ? 'text-primary'
-                                      : 'text-warning'
-                                )}
-                              >
-                                {synchronyScore}%
-                              </span>
-                              <span className="text-[11px] text-warning font-medium inline-flex items-center gap-0.5">
-                                <Star className="w-3 h-3 fill-warning text-warning" strokeWidth={1.75} />
-                                {averageRating.toFixed(1)}
-                              </span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full rounded-full',
-                                  synchronyScore >= 75
-                                    ? 'bg-success'
-                                    : synchronyScore >= 55
-                                      ? 'bg-primary'
-                                      : 'bg-warning'
-                                )}
-                                style={{ width: `${Math.min(100, synchronyScore)}%` }}
-                              />
-                            </div>
-                            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                              <span>
-                                {playsCount}/{totalPlayers} juegan
-                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-[11px] space-y-0.5">
+                              <div>{playsCount}/{totalPlayers} juegan · ★ {averageRating.toFixed(1)}</div>
                               {dislikeCount > 0 && (
-                                <span className="text-destructive inline-flex items-center gap-0.5">
-                                  <ThumbsDown className="w-2.5 h-2.5" strokeWidth={1.75} />
-                                  {dislikeCount}
-                                </span>
+                                <div className="text-destructive">{dislikeCount} no le gusta</div>
                               )}
-                            </div>
-                          </div>
+                            </TooltipContent>
+                          </Tooltip>
                         </TableCell>
 
-                        {/* Group player breakdown */}
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1 max-w-[320px]">
-                            {playerRatings.map((pr) => (
-                              <span
-                                key={pr.player.id}
-                                className={cn(
-                                  'inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px]',
-                                  !pr.plays
-                                    ? 'bg-background/45 border-border text-muted-foreground/50'
-                                    : pr.rating >= 4
-                                      ? 'bg-success/10 border-success/35 text-success'
-                                      : pr.rating === 1
-                                        ? 'bg-destructive/10 border-destructive/35 text-destructive'
-                                        : 'bg-secondary/55 border-border text-foreground'
-                                )}
-                              >
-                                <span className="truncate max-w-[65px]">{pr.player.displayName}</span>
-                                <span className="font-mono font-semibold">
-                                  {pr.plays ? `${pr.rating}★` : '—'}
-                                </span>
-                              </span>
-                            ))}
-                          </div>
+                        {/* Group player avatars only (ring color = affinity/rating) */}
+                        <TableCell className="py-1.5 px-2.5">
+                          {playingPlayers.length === 0 ? (
+                            <span className="text-[11px] text-muted-foreground/40">—</span>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {playingPlayers.map((pr) => {
+                                const ringClass =
+                                  pr.rating >= 4
+                                    ? 'ring-2 ring-success'
+                                    : pr.rating === 3
+                                      ? 'ring-2 ring-primary'
+                                      : pr.rating === 2
+                                        ? 'ring-2 ring-warning'
+                                        : 'ring-2 ring-destructive';
+
+                                return (
+                                  <Tooltip key={pr.player.id}>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        type="button"
+                                        aria-label={`${pr.player.displayName}: ${pr.rating}★`}
+                                        className="rounded-full focus:outline-none cursor-default shrink-0"
+                                      >
+                                        <img
+                                          src={pr.player.avatarUrl}
+                                          alt={pr.player.displayName}
+                                          className={cn(
+                                            'w-6 h-6 rounded-full object-cover border border-background',
+                                            ringClass
+                                          )}
+                                        />
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="text-[11px] space-y-0.5">
+                                      <div className="font-semibold text-foreground">
+                                        {pr.player.displayName}
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-mono font-semibold text-warning">
+                                          {pr.rating}★
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                          · {RATING_INFO[pr.rating].label}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground">
+                                        {pr.player.activeTitle} · Karma {pr.player.karmaScore}
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                );
+                              })}
+                            </div>
+                          )}
                         </TableCell>
 
                         {/* Inline user control */}
-                        <TableCell className="text-right">
+                        <TableCell className="py-1.5 px-2.5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
                               size="xs"
@@ -446,7 +506,7 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
                                     )}
                                   >
                                     <Star
-                                      className="w-4 h-4"
+                                      className="w-3.5 h-3.5"
                                       fill={active ? 'currentColor' : 'none'}
                                       strokeWidth={1.75}
                                     />

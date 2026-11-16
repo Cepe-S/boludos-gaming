@@ -533,6 +533,7 @@ export const INITIAL_GROUPS: GamingGroup[] = [
       'user-gonza',
     ],
     adminIds: ['user-santi', 'user-tincho'],
+    gameIds: [],
     discordConfig: {
       enabled: true,
       webhookUrl: '',

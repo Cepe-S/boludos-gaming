@@ -47,7 +47,6 @@ export interface ParticipantsTribunalBentoCardProps {
   isParticipantConfirmed: (participant?: SessionParticipant | null) => boolean;
   pingingUserId: string | null;
   onConfirmAttendance: (userId?: string) => void;
-  onCheckIn: (userId?: string) => void;
   onPingLate: (userId: string) => void;
   onCastVote: (targetUserId: string, vote: AttendanceVote['vote']) => void;
   onOpenManageInvites: () => void;
@@ -66,7 +65,6 @@ export const ParticipantsTribunalBentoCard: React.FC<ParticipantsTribunalBentoCa
   isParticipantConfirmed,
   pingingUserId,
   onConfirmAttendance,
-  onCheckIn,
   onPingLate,
   onCastVote,
   onOpenManageInvites,
@@ -281,18 +279,6 @@ export const ParticipantsTribunalBentoCard: React.FC<ParticipantsTribunalBentoCa
                                 aria-label="Confirmar al 100%"
                               >
                                 <UserCheck className="w-3.5 h-3.5" strokeWidth={1.75} />
-                              </Button>
-                            )}
-
-                            {part.attendanceStatus === 'pending' && isMe && (
-                              <Button
-                                size="xs"
-                                variant="default"
-                                onClick={() => onCheckIn(part.userId)}
-                                title="Hacer Check-in ahora"
-                              >
-                                <Check className="w-3 h-3" strokeWidth={2} />
-                                <span>Check-in</span>
                               </Button>
                             )}
 

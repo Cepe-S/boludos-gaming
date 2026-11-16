@@ -22,6 +22,7 @@ import {
   GamingGroup,
   GamingSession,
   GroupDiscordConfig,
+  InstantSessionRsvp,
   PlayerProfile,
   PlayerSteamProfile,
   PlayerTasteProfile,
@@ -83,12 +84,14 @@ import {
   dbCreateSession,
   dbDeleteGroup,
   dbDeleteParticipant,
+  dbDeleteSession,
   dbInsertChatMessage,
   dbInsertGame,
   dbInsertSanction,
   dbUpdateChatReactions,
   dbUpdateDiscordConfig,
   dbUpdateSessionGame,
+  dbUpdateSessionInstantRsvps,
   dbUpdateSessionInvitesAndCallouts,
   dbUpsertAttendanceVote,
   dbUpsertGroup,
@@ -559,7 +562,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data.games.length > 0) setGames(data.games);
       setPreferences(data.preferences);
       setGroups(data.groups);
-      setSessions(data.sessions);
+      setSessions((prev) => {
+        const prevMap = new Map(prev.map((s) => [s.id, s]));
+        return data.sessions.map((remote) => {
+          if (remote.selectedGameIds && remote.selectedGameIds.length > 0) {
+            return remote;
+          }
+          const local = prevMap.get(remote.id);
+          if (local?.selectedGameIds && local.selectedGameIds.length > 0) {
+            return {
+              ...remote,
+              selectedGameIds: local.selectedGameIds,
+              selectedGameId: local.selectedGameIds[0],
+            };
+          }
+          return remote;
+        });
+      });
       setActiveSessionIdState((prev) =>
         data.sessions.some((s) => s.id === prev) ? prev : (data.sessions[0]?.id || '')
       );
@@ -967,7 +986,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setSessions((prevSessions) => {
         const updatedSessions = prevSessions.map((sess) => {
-          if (sess.groupId !== group.id || sess.status === 'finished') return sess;
+          if (sess.groupId !== group.id || sess.status === 'finished' || sess.sessionKind === 'instant') {
+            return sess;
+          }
           const reconciled = reconcileAutoParticipantsForSession(
             sess,
             groupPlayers,
@@ -996,7 +1017,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     (updatedPlayers: PlayerProfile[], filterDate?: string) => {
       setSessions((prevSessions) => {
         const updatedSessions = prevSessions.map((sess) => {
-          if (sess.status === 'finished') return sess;
+          if (sess.status === 'finished' || sess.sessionKind === 'instant') return sess;
           if (filterDate && sess.date !== filterDate) return sess;
 
           const sessGroup = groups.find((g) => g.id === sess.groupId);
@@ -1064,6 +1085,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createdBy: creatorId,
         memberIds,
         adminIds,
+        gameIds: [],
         discordConfig: {
           enabled: params.discordConfig?.enabled ?? true,
           webhookUrl: params.discordConfig?.webhookUrl?.trim() || '',
@@ -1232,6 +1254,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       reconcileGroupOpenSessions(updatedGroup, players);
     },
     [groups, players, syncChannel, reconcileGroupOpenSessions]
+  );
+
+  const addGameToGroup = useCallback(
+    (groupId: string, gameId: string) => {
+      const targetGroup = groups.find((g) => g.id === groupId);
+      if (!targetGroup) return;
+      if (targetGroup.gameIds.includes(gameId)) return;
+
+      const updatedGroup: GamingGroup = {
+        ...targetGroup,
+        gameIds: [...targetGroup.gameIds, gameId],
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+      dbUpsertGroup(updatedGroup).catch(console.warn);
+    },
+    [groups, syncChannel]
+  );
+
+  const removeGameFromGroup = useCallback(
+    (groupId: string, gameId: string) => {
+      const targetGroup = groups.find((g) => g.id === groupId);
+      if (!targetGroup || !targetGroup.gameIds.includes(gameId)) return;
+
+      const updatedGroup: GamingGroup = {
+        ...targetGroup,
+        gameIds: targetGroup.gameIds.filter((id) => id !== gameId),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
+      setGroups(nextGroups);
+      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+      dbUpsertGroup(updatedGroup).catch(console.warn);
+    },
+    [groups, syncChannel]
   );
 
   const testGroupDiscordWebhook = useCallback(
@@ -1864,6 +1925,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [currentUser, currentUserId, games, players, preferences, syncChannel, triggerNotificationPipeline]
   );
 
+  const addAndLinkGameToGroup = useCallback(
+    (groupId: string, gameData: Omit<Game, 'id' | 'addedBy'>): Game => {
+      const normalizedTarget = normalizeGameName(gameData.name);
+      const existing = games.find((g) => normalizeGameName(g.name) === normalizedTarget);
+      const resolved = existing ?? addGame(gameData);
+      addGameToGroup(groupId, resolved.id);
+      return resolved;
+    },
+    [games, addGame, addGameToGroup]
+  );
+
   // 3. Sessions & Matchmaking
   const setActiveSessionId = useCallback((sessionId: string) => {
     setActiveSessionIdState(sessionId);
@@ -1897,6 +1969,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           createdBy: currentUserId,
           memberIds: [currentUserId],
           adminIds: [currentUserId],
+          gameIds: [],
           discordConfig: {
             enabled: discordConfig.enabled,
             webhookUrl: discordConfig.webhookUrl,
@@ -1918,7 +1991,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveGroupIdState(targetGroupId);
       }
 
-      const groupMemberIds = Array.from(new Set([...targetGroup.memberIds, currentUserId]));
+      const resolvedTargetGroup = targetGroup!;
+      const groupMemberIds = Array.from(new Set([...resolvedTargetGroup.memberIds, currentUserId]));
       const groupPlayers = players.filter((p) => groupMemberIds.includes(p.id));
 
       const invitedUserIds =
@@ -1998,16 +2072,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveSessionIdState(newSession.id);
 
       // Discord Rich Embed & Webhook
-      const mentionRole = targetGroup.discordConfig.useEveryoneMention
+      const mentionRole = resolvedTargetGroup.discordConfig.useEveryoneMention
         ? '@everyone'
-        : targetGroup.discordConfig.mentionRoleId || discordConfig.mentionRoleId || '@everyone';
-      const discordLog = buildSessionCreatedLog(newSession, currentUser, mentionRole, targetGroup);
+        : resolvedTargetGroup.discordConfig.mentionRoleId || discordConfig.mentionRoleId || '@everyone';
+      const discordLog = buildSessionCreatedLog(newSession, currentUser, mentionRole, resolvedTargetGroup);
       dispatchDiscordPipeline(discordLog, targetGroupId);
 
       // Push Notification scoped to group members
       triggerNotificationPipeline(
         {
-          title: `🎮 Nueva Sesión en ${targetGroup.name}`,
+          title: `🎮 Nueva Sesión en ${resolvedTargetGroup.name}`,
           body: `${currentUser.displayName} convocó a "${params.title}" para las ${params.availableFrom} (±${params.precisionMinutes}m). Hay ${autoParticipants.length} jugadores convocados.`,
           tag: `session_${newSession.id}`,
           sessionId: newSession.id,
@@ -2030,6 +2104,199 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatchDiscordPipeline,
       triggerNotificationPipeline,
     ]
+  );
+
+  const createInstantSession = useCallback(
+    (params: { groupId?: string; title?: string; startsInMinutes?: number }): GamingSession => {
+      const targetGroupId =
+        params.groupId || resolvedActiveGroupId || userGroups[0]?.id || 'group-instant';
+
+      const existingInstant = sessions.find(
+        (s) =>
+          s.groupId === targetGroupId &&
+          s.sessionKind === 'instant' &&
+          s.status !== 'finished'
+      );
+      if (existingInstant) {
+        setActiveSessionIdState(existingInstant.id);
+        return existingInstant;
+      }
+
+      const targetGroup = groups.find((g) => g.id === targetGroupId);
+      const now = new Date();
+      const delayMins = Math.min(60, Math.max(0, Math.round(params.startsInMinutes ?? 0)));
+      const startAt = new Date(now.getTime() + delayMins * 60_000);
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      const todayStr = `${startAt.getFullYear()}-${pad2(startAt.getMonth() + 1)}-${pad2(startAt.getDate())}`;
+      const timeLabel = `${pad2(startAt.getHours())}:${pad2(startAt.getMinutes())}`;
+      const resolvedTitle =
+        params.title?.trim() ||
+        (delayMins > 0
+          ? `⚡ Convocatoria en ${delayMins}m (${timeLabel})`
+          : `⚡ Convocatoria Instantánea (${timeLabel})`);
+
+      const newSession: GamingSession = {
+        id: `session-instant-${Date.now()}`,
+        groupId: targetGroupId,
+        title: resolvedTitle,
+        date: todayStr,
+        sessionKind: 'instant',
+        instantRsvps: [],
+        mode: 'random',
+        status: 'open',
+        createdBy: currentUserId,
+        createdAt: now.toISOString(),
+        allowSplitLobbies: false,
+        participants: [],
+        attendanceVotes: [],
+        callouts: [],
+      };
+
+      setSessions((prev) => {
+        const next = [newSession, ...prev];
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: next });
+        return next;
+      });
+      setActiveSessionIdState(newSession.id);
+      dbCreateSession(newSession).catch(console.warn);
+
+      if (targetGroup) {
+        const mentionRole = targetGroup.discordConfig.useEveryoneMention
+          ? '@everyone'
+          : targetGroup.discordConfig.mentionRoleId || discordConfig.mentionRoleId || '@everyone';
+        const discordLog = buildSessionCreatedLog(newSession, currentUser, mentionRole, targetGroup);
+        dispatchDiscordPipeline(discordLog, targetGroupId);
+
+        triggerNotificationPipeline(
+          {
+            title:
+              delayMins > 0
+                ? `⚡ ¡Convocatoria en ${delayMins}m (${timeLabel}) en ${targetGroup.name}!`
+                : `⚡ ¡Convocatoria Ahora en ${targetGroup.name}!`,
+            body: `${currentUser.displayName} convocó a jugar ${delayMins > 0 ? `a las ${timeLabel}` : 'ahora'}. Entrá para avisar si estás y en cuánto tiempo llegás.`,
+            tag: `instant_${newSession.id}`,
+            sessionId: newSession.id,
+            targetUserIds: targetGroup.memberIds,
+          },
+          'ping'
+        );
+      }
+
+      return newSession;
+    },
+    [
+      resolvedActiveGroupId,
+      userGroups,
+      sessions,
+      groups,
+      currentUserId,
+      currentUser,
+      discordConfig,
+      syncChannel,
+      dispatchDiscordPipeline,
+      triggerNotificationPipeline,
+    ]
+  );
+
+  const respondToInstantSession = useCallback(
+    (
+      sessionId: string,
+      params: {
+        status: 'going' | 'declined';
+        etaMinutes?: number;
+        durationMinutes?: number;
+        userId?: string;
+      }
+    ) => {
+      const targetUserId = params.userId || currentUserId;
+      if (!targetUserId) return;
+
+      const now = new Date();
+      const nowMins = now.getHours() * 60 + now.getMinutes();
+      const eta = Math.max(0, Math.round(params.etaMinutes ?? 0));
+      const fromMins = nowMins + eta;
+      const dur = params.durationMinutes && params.durationMinutes > 0
+        ? Math.round(params.durationMinutes)
+        : 180; // default 3h window on timeline when duration is omitted
+      const untilMins = fromMins + dur;
+
+      const availableFrom = formatMinutesToTime(fromMins);
+      const availableUntil = formatMinutesToTime(untilMins);
+      const etaLabel = eta === 0 ? 'Ya estoy' : `En ${eta}m`;
+      const durLabel =
+        params.durationMinutes && params.durationMinutes > 0
+          ? `${Math.round((params.durationMinutes / 60) * 10) / 10}h`
+          : 'Sin límite';
+
+      const newRsvp: InstantSessionRsvp = {
+        userId: targetUserId,
+        status: params.status,
+        etaMinutes: params.status === 'going' ? eta : undefined,
+        durationMinutes: params.status === 'going' ? params.durationMinutes : undefined,
+        respondedAt: now.toISOString(),
+      };
+
+      let updatedRsvpsSnapshot: InstantSessionRsvp[] = [];
+      let updatedParticipantSnapshot: SessionParticipant | null = null;
+
+      setSessions((prev) => {
+        const updated = prev.map((sess) => {
+          if (sess.id !== sessionId) return sess;
+
+          const existingRsvps = sess.instantRsvps || [];
+          const nextRsvps = [
+            ...existingRsvps.filter((r) => r.userId !== targetUserId),
+            newRsvp,
+          ];
+          updatedRsvpsSnapshot = nextRsvps;
+
+          if (params.status === 'declined') {
+            return {
+              ...sess,
+              instantRsvps: nextRsvps,
+              participants: sess.participants.filter((p) => p.userId !== targetUserId),
+            };
+          }
+
+          const existingPart = sess.participants.find((p) => p.userId === targetUserId);
+          const participantData: SessionParticipant = {
+            userId: targetUserId,
+            joinedAt: existingPart?.joinedAt || now.toISOString(),
+            availableFrom,
+            availableUntil,
+            precisionMinutes: 5,
+            attendanceStatus: existingPart?.attendanceStatus || 'pending',
+            checkedInAt: existingPart?.checkedInAt,
+            note: `${etaLabel} · ${durLabel}`,
+            isAutoEnrolled: false,
+            confirmationStatus: 'confirmed',
+            confidencePercentage: 100,
+          };
+          updatedParticipantSnapshot = participantData;
+
+          const nextParticipants = existingPart
+            ? sess.participants.map((p) => (p.userId === targetUserId ? participantData : p))
+            : [...sess.participants, participantData];
+
+          return {
+            ...sess,
+            instantRsvps: nextRsvps,
+            participants: nextParticipants,
+          };
+        });
+
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
+        return updated;
+      });
+
+      dbUpdateSessionInstantRsvps(sessionId, updatedRsvpsSnapshot).catch(console.warn);
+      if (params.status === 'declined') {
+        dbDeleteParticipant(sessionId, targetUserId).catch(console.warn);
+      } else if (updatedParticipantSnapshot) {
+        dbUpsertParticipant(sessionId, updatedParticipantSnapshot).catch(console.warn);
+      }
+    },
+    [currentUserId, syncChannel]
   );
 
   const joinOrUpdateSessionSchedule = useCallback(
@@ -2418,8 +2685,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [currentUserId, syncChannel]
   );
 
+  const deleteSession = useCallback(
+    (sessionId: string) => {
+      const targetSession = sessions.find((s) => s.id === sessionId);
+      if (!targetSession) return;
+
+      const targetGroup = groups.find((g) => g.id === targetSession.groupId);
+      const isAllowed =
+        targetSession.createdBy === currentUserId ||
+        targetGroup?.createdBy === currentUserId ||
+        Boolean(targetGroup?.adminIds.includes(currentUserId));
+
+      if (!isAllowed) return;
+
+      setSessions((prev) => {
+        const updated = prev.filter((s) => s.id !== sessionId);
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
+        return updated;
+      });
+
+      setActiveSessionIdState((prevActive) =>
+        prevActive === sessionId ? '' : prevActive
+      );
+
+      dbDeleteSession(sessionId).catch(console.warn);
+    },
+    [sessions, groups, currentUserId, syncChannel]
+  );
+
   const spinSessionRoulette = useCallback(
-    (sessionId: string): Game | null => {
+    (sessionId: string, options?: { onlyLocked?: boolean }): Game | null => {
       const session = sessions.find((s) => s.id === sessionId);
       if (!session) return null;
 
@@ -2427,16 +2722,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const groupPlayers = targetGroup
         ? players.filter((p) => targetGroup.memberIds.includes(p.id))
         : players;
+      const groupGames = targetGroup
+        ? games.filter((g) => targetGroup.gameIds.includes(g.id))
+        : games;
 
       const synchronyResults = calculateGameSynchrony(
-        games,
+        groupGames,
         preferences,
         session.participants,
         groupPlayers,
         session.allowSplitLobbies
       );
 
-      const winningGame = spinWeightedRoulette(synchronyResults);
+      const lockedIds =
+        session.selectedGameIds && session.selectedGameIds.length > 0
+          ? session.selectedGameIds
+          : session.selectedGameId
+            ? [session.selectedGameId]
+            : [];
+
+      let winningGame: Game | null = null;
+      if (options?.onlyLocked && lockedIds.length > 0) {
+        const lockedSyncResults = synchronyResults.filter((r) =>
+          lockedIds.includes(r.game.id)
+        );
+        winningGame = spinWeightedRoulette(lockedSyncResults);
+        if (!winningGame) {
+          const lockedPool = lockedIds
+            .map((id) => games.find((g) => g.id === id))
+            .filter((g): g is Game => Boolean(g));
+          if (lockedPool.length > 0) {
+            winningGame = lockedPool[Math.floor(Math.random() * lockedPool.length)];
+          }
+        }
+      } else {
+        winningGame = spinWeightedRoulette(synchronyResults);
+      }
+
       if (!winningGame) return null;
 
       const winningResult = synchronyResults.find((r) => r.game.id === winningGame.id);
@@ -2448,13 +2770,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return {
             ...s,
             rouletteWinnerGameId: winningGame.id,
-            selectedGameId: winningGame.id,
           };
         });
         syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
         return updated;
       });
-      dbUpdateSessionGame(sessionId, winningGame.id, true).catch(console.warn);
+      dbUpdateSessionGame(
+        sessionId,
+        lockedIds[0] ?? null,
+        true,
+        lockedIds,
+        winningGame.id
+      ).catch(console.warn);
 
       // Discord Rich Embed & Webhook
       const discordLog = buildRouletteWinnerLog(
@@ -2496,17 +2823,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const lockSessionGame = useCallback(
     (sessionId: string, gameId: string) => {
+      const currentSession = sessions.find((s) => s.id === sessionId);
+      const currentIds =
+        currentSession?.selectedGameIds ??
+        (currentSession?.selectedGameId ? [currentSession.selectedGameId] : []);
+      const isAlreadyLocked = currentIds.includes(gameId);
+      const nextIds = isAlreadyLocked
+        ? currentIds.filter((id) => id !== gameId)
+        : [...currentIds, gameId];
+      const nextPrimaryId = nextIds[0] ?? null;
+
       setSessions((prev) => {
         const updated = prev.map((s) => {
           if (s.id !== sessionId) return s;
-          return { ...s, selectedGameId: gameId };
+          const prevIds = s.selectedGameIds ?? (s.selectedGameId ? [s.selectedGameId] : []);
+          const exists = prevIds.includes(gameId);
+          const updatedIds = exists
+            ? prevIds.filter((id) => id !== gameId)
+            : [...prevIds, gameId];
+          return {
+            ...s,
+            selectedGameIds: updatedIds,
+            selectedGameId: updatedIds[0],
+          };
         });
         syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
         return updated;
       });
-      dbUpdateSessionGame(sessionId, gameId, false).catch(console.warn);
+      dbUpdateSessionGame(sessionId, nextPrimaryId, false, nextIds).catch(console.warn);
     },
-    [syncChannel]
+    [sessions, syncChannel]
   );
 
   // 4. Attendance, Check-in & Tribunal del Humo
@@ -4105,6 +4451,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       joinGroupByInviteCode,
       addMemberToGroup,
       removeMemberFromGroup,
+      addGameToGroup,
+      removeGameFromGroup,
+      addAndLinkGameToGroup,
       testGroupDiscordWebhook,
       getGroupInviteLink,
 
@@ -4129,6 +4478,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activeSessionId,
       setActiveSessionId,
       createSession,
+      createInstantSession,
+      deleteSession,
+      respondToInstantSession,
       joinOrUpdateSessionSchedule,
       confirmSessionAttendance,
       sendSessionCallout,
@@ -4185,6 +4537,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       joinGroupByInviteCode,
       addMemberToGroup,
       removeMemberFromGroup,
+      addGameToGroup,
+      removeGameFromGroup,
+      addAndLinkGameToGroup,
       testGroupDiscordWebhook,
       getGroupInviteLink,
       updateWeeklySchedule,
@@ -4205,6 +4560,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activeSessionId,
       setActiveSessionId,
       createSession,
+      createInstantSession,
+      deleteSession,
+      respondToInstantSession,
       joinOrUpdateSessionSchedule,
       confirmSessionAttendance,
       sendSessionCallout,

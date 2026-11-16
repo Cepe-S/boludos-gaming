@@ -131,6 +131,9 @@ export interface AppContextValue {
   ) => { ok: boolean; group?: GamingGroup; error?: string };
   addMemberToGroup: (groupId: string, userId: string) => void;
   removeMemberFromGroup: (groupId: string, userId: string) => void;
+  addGameToGroup: (groupId: string, gameId: string) => void;
+  removeGameFromGroup: (groupId: string, gameId: string) => void;
+  addAndLinkGameToGroup: (groupId: string, game: Omit<Game, 'id' | 'addedBy'>) => Game;
   testGroupDiscordWebhook: (groupId: string) => Promise<{ ok: boolean; error?: string }>;
   getGroupInviteLink: (inviteCode: string) => string;
 
@@ -150,6 +153,21 @@ export interface AppContextValue {
     invitedUserIds?: string[];
     groupId?: string;
   }) => GamingSession;
+  createInstantSession: (params: {
+    groupId?: string;
+    title?: string;
+    startsInMinutes?: number;
+  }) => GamingSession;
+  deleteSession: (sessionId: string) => void;
+  respondToInstantSession: (
+    sessionId: string,
+    params: {
+      status: 'going' | 'declined';
+      etaMinutes?: number;
+      durationMinutes?: number;
+      userId?: string;
+    }
+  ) => void;
   joinOrUpdateSessionSchedule: (
     sessionId: string,
     params: {
@@ -168,7 +186,7 @@ export interface AppContextValue {
   ) => Promise<{ notifiedUsers: PlayerProfile[] }>;
   updateSessionInvites: (sessionId: string, invitedUserIds?: string[]) => void;
   leaveSession: (sessionId: string, userId?: string) => void;
-  spinSessionRoulette: (sessionId: string) => Game | null;
+  spinSessionRoulette: (sessionId: string, options?: { onlyLocked?: boolean }) => Game | null;
   lockSessionGame: (sessionId: string, gameId: string) => void;
 
   // Attendance, Check-in & Tribunal del Humo Sanctions

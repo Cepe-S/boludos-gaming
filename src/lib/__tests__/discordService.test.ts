@@ -77,6 +77,7 @@ const mockGroup: GamingGroup = {
   createdBy: 'user-santi',
   memberIds: ['user-santi', 'user-nacho', 'user-gonza'],
   adminIds: ['user-santi'],
+  gameIds: [],
   discordConfig: {
     enabled: true,
     webhookUrl: 'https://discord.com/api/webhooks/999/test_token',

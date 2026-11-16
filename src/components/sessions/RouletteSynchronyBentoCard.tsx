@@ -7,6 +7,11 @@ import {
 } from '@/types/domain';
 import { GroupRecommendationsResult } from '@/lib/tasteProfileEngine';
 import { GroupRecommendationCard } from './GroupRecommendationCard';
+import {
+  SessionGameTile,
+  SessionPlayerAvatarRow,
+  buildPlayerAvatarsFromBreakdown,
+} from './SessionGameTile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -21,19 +26,71 @@ import {
   Compass,
   Dices,
   Flame,
+  Gamepad2,
   Lock,
   PartyPopper,
   RotateCw,
-  ShieldAlert,
   Sparkles,
-  Split,
-  Star,
-  ThumbsDown,
   Trophy,
   Users,
+  X,
 } from 'lucide-react';
 
+function buildSynchronyInfoContent(item: GameSynchronyResult): React.ReactNode {
+  const statusLabel =
+    item.status === 'missing_owners'
+      ? `Faltan dueños (${item.playersWhoPlayCount}/${item.totalParticipants})`
+      : item.status === 'needs_more_players'
+        ? `Requiere mín. ${item.game.minPlayers} jugadores`
+        : item.status === 'split_required'
+          ? `Máx. ${item.game.maxPlayers} por lobby (Sub-lobbies)`
+          : null;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-foreground">{item.game.name}</span>
+        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+          {item.game.category}
+        </Badge>
+      </div>
+      <div className="text-[10px] text-muted-foreground space-y-0.5">
+        <div>
+          👥 {item.game.minPlayers}–{item.game.maxPlayers} jug. · ~{item.game.averageDurationMins}m · ★{' '}
+          {item.averageRating.toFixed(1)}
+        </div>
+        <div>
+          {item.playersWhoPlayCount}/{item.totalParticipants} juegan · Peso{' '}
+          {item.rouletteWeight.toLocaleString()}
+          {item.dislikeCount > 0 ? ` · ${item.dislikeCount} veto(s)` : ''}
+        </div>
+      </div>
+      {statusLabel && (
+        <div className="text-[10px] font-medium text-warning">{statusLabel}</div>
+      )}
+      {item.game.description && (
+        <p className="text-[11px] text-muted-foreground leading-snug">
+          {item.game.description}
+        </p>
+      )}
+      {item.suggestedSubLobbies && item.suggestedSubLobbies.length > 0 && (
+        <div className="space-y-1 pt-1 border-t border-border/60">
+          {item.suggestedSubLobbies.map((lobby) => (
+            <div key={lobby.lobbyName} className="text-[10px]">
+              <span className="font-semibold text-foreground">{lobby.lobbyName}: </span>
+              <span className="text-muted-foreground">
+                {lobby.players.map((pl) => pl.displayName).join(', ')}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export interface RouletteSynchronyBentoCardProps {
+  sectionMode?: 'locked' | 'games';
   activeSession: GamingSession;
   activeGame: Game | null;
   participantsCount: number;
@@ -47,6 +104,7 @@ export interface RouletteSynchronyBentoCardProps {
   onSpinRoulette: () => void;
   onLockGame: (gameId: string) => void;
   onSelectRecommendation: (rec: GroupGameRecommendation) => void;
+  onOpenGamesTab?: () => void;
 }
 
 const DEFAULT_COVER =
@@ -65,6 +123,7 @@ function getSynchronyBarClass(score: number): string {
 }
 
 export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProps> = ({
+  sectionMode = 'games',
   activeSession,
   activeGame,
   participantsCount,
@@ -78,23 +137,236 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
   onSpinRoulette,
   onLockGame,
   onSelectRecommendation,
+  onOpenGamesTab,
 }) => {
-  const activeGameId = activeSession.selectedGameId || activeSession.rouletteWinnerGameId;
-  const activeSync =
-    perfectGames.find((g) => g.game.id === activeGameId) ||
-    splitGames.find((g) => g.game.id === activeGameId) ||
-    incompatibleGames.find((g) => g.game.id === activeGameId);
+  const lockedGameIds =
+    activeSession.selectedGameIds && activeSession.selectedGameIds.length > 0
+      ? activeSession.selectedGameIds
+      : activeSession.selectedGameId
+        ? [activeSession.selectedGameId]
+        : activeSession.rouletteWinnerGameId
+          ? [activeSession.rouletteWinnerGameId]
+          : [];
+
+  const allSyncItems = [...perfectGames, ...splitGames, ...incompatibleGames];
+  const activeGameId = lockedGameIds[0];
+  const activeSync = allSyncItems.find((g) => g.game.id === activeGameId);
 
   const canSpin = participantsCount > 0 && perfectGames.length + splitGames.length > 0;
+  const gridColsClass =
+    sectionMode === 'games'
+      ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5'
+      : 'grid grid-cols-2 sm:grid-cols-3 gap-2';
+
+  const recommendationsContent =
+    sessionRecommendations.all.length === 0 ? (
+      <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">
+        Sin recomendaciones disponibles.
+      </div>
+    ) : (
+      <div className="space-y-4">
+        {sessionRecommendations.readyToPlay.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-success flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />
+                En Catálogo ({sessionRecommendations.readyToPlay.length})
+              </span>
+            </div>
+            <div className={gridColsClass}>
+              {sessionRecommendations.readyToPlay.map((rec) => {
+                const isLocked =
+                  !!rec.catalogGameId && lockedGameIds.includes(rec.catalogGameId);
+                return (
+                  <GroupRecommendationCard
+                    key={rec.id}
+                    recommendation={rec}
+                    compact
+                    isSelectedOrLocked={isLocked}
+                    selectedBadgeLabel="Fijado"
+                    actionLabel={isLocked ? 'Fijado' : 'Fijar'}
+                    actionIcon={
+                      isLocked ? (
+                        <Check className="w-3 h-3" strokeWidth={2} />
+                      ) : (
+                        <Lock className="w-3 h-3" strokeWidth={1.75} />
+                      )
+                    }
+                    actionVariant={isLocked ? 'emerald' : 'secondary'}
+                    onAction={onSelectRecommendation}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {sessionRecommendations.discovery.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-border">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
+              <Compass className="w-3.5 h-3.5" strokeWidth={1.75} />
+              Descubrimiento ({sessionRecommendations.discovery.length})
+            </span>
+            <div className={gridColsClass}>
+              {sessionRecommendations.discovery.map((rec) => (
+                <GroupRecommendationCard
+                  key={rec.id}
+                  recommendation={rec}
+                  compact
+                  actionLabel="Importar"
+                  actionIcon={<Sparkles className="w-3 h-3" strokeWidth={1.75} />}
+                  actionVariant="default"
+                  onAction={onSelectRecommendation}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+
+  if (sectionMode === 'locked') {
+    const lockedSyncItems = lockedGameIds
+      .map((id) => allSyncItems.find((item) => item.game.id === id))
+      .filter((item): item is GameSynchronyResult => Boolean(item));
+
+    return (
+      <Card className="cv-section flex flex-col">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-md bg-success/15 border border-success/40 flex items-center justify-center text-success shrink-0">
+              <Lock className="w-4 h-4" strokeWidth={1.75} />
+            </div>
+            <CardTitle className="truncate">Juegos Fijados</CardTitle>
+            {lockedGameIds.length > 0 && (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                {lockedGameIds.length}
+              </Badge>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenGamesTab && (
+              <Button size="xs" variant="outline" onClick={onOpenGamesTab}>
+                <Gamepad2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>Todos los juegos</span>
+              </Button>
+            )}
+            <Button
+              size="xs"
+              onClick={onSpinRoulette}
+              disabled={isSpinningRoulette || lockedSyncItems.length === 0}
+              title={
+                lockedSyncItems.length === 0
+                  ? 'Fijá al menos un juego para girar la ruleta'
+                  : 'Sortear entre los juegos fijados'
+              }
+            >
+              <Dices className="w-3.5 h-3.5" strokeWidth={1.75} />
+              <span>{isSpinningRoulette ? 'Girando...' : 'Ruleta'}</span>
+            </Button>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          {isSpinningRoulette && (
+            <div className="rounded-md border border-primary/70 bg-primary/10 px-3 py-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-primary truncate">
+                {slotReelGameName || 'Sorteando...'}
+              </span>
+              <Badge variant="default" className="text-[10px]">
+                Girando
+              </Badge>
+            </div>
+          )}
+
+          {!isSpinningRoulette &&
+            (rouletteWinnerBanner || activeSession.rouletteWinnerGameId) &&
+            (() => {
+              const winnerGame =
+                rouletteWinnerBanner ||
+                allSyncItems.find((g) => g.game.id === activeSession.rouletteWinnerGameId)?.game;
+              if (!winnerGame) return null;
+              return (
+                <div className="rounded-md border border-success/50 bg-success/15 px-3 py-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <PartyPopper className="w-4 h-4 text-success shrink-0" strokeWidth={1.75} />
+                    <span className="text-xs font-semibold text-foreground truncate">
+                      Salió: <span className="text-success">{winnerGame.name}</span>
+                    </span>
+                  </div>
+                  <Badge variant="success" className="text-[10px] shrink-0">
+                    Ganador
+                  </Badge>
+                </div>
+              );
+            })()}
+
+          {lockedSyncItems.length === 0 ? (
+            <div className="p-5 text-center rounded-md border border-dashed border-border bg-background/45 space-y-2.5">
+              <p className="text-xs text-muted-foreground">Sin juegos fijados todavía.</p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {perfectGames[0] && (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => onLockGame(perfectGames[0].game.id)}
+                  >
+                    <Trophy className="w-3.5 h-3.5 text-warning" strokeWidth={1.75} />
+                    <span>Fijar {perfectGames[0].game.name}</span>
+                  </Button>
+                )}
+                {onOpenGamesTab && (
+                  <Button size="xs" variant="outline" onClick={onOpenGamesTab}>
+                    <Gamepad2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    <span>Ver juegos</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {lockedSyncItems.map((item) => {
+                const isWinner =
+                  rouletteWinnerBanner?.id === item.game.id ||
+                  activeSession.rouletteWinnerGameId === item.game.id;
+                return (
+                  <SessionGameTile
+                    key={item.game.id}
+                    name={item.game.name}
+                    coverUrl={item.game.coverUrl}
+                    score={item.synchronyScore}
+                    isSelected
+                    statusPill={isWinner ? 'Ruleta' : undefined}
+                    infoContent={buildSynchronyInfoContent(item)}
+                    playerAvatars={buildPlayerAvatarsFromBreakdown(item)}
+                    actionLabel="Quitar"
+                    actionIcon={<X className="w-3 h-3" strokeWidth={2} />}
+                    actionVariant="outline"
+                    onAction={() => onLockGame(item.game.id)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <Card className="xl:col-span-7 cv-section flex flex-col">
+    <Card className="cv-section flex flex-col">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary shrink-0">
-            <Dices className="w-4 h-4" strokeWidth={1.75} />
+            <Gamepad2 className="w-4 h-4" strokeWidth={1.75} />
           </div>
-          <CardTitle>Ruleta &amp; Sincronía</CardTitle>
+          <CardTitle>Juegos</CardTitle>
+          {lockedGameIds.length > 0 && (
+            <Badge variant="success" className="font-mono text-[10px]">
+              {lockedGameIds.length} fijado{lockedGameIds.length === 1 ? '' : 's'}
+            </Badge>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -210,19 +482,28 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                 </div>
               </div>
 
-              {activeSync?.suggestedSubLobbies && activeSync.suggestedSubLobbies.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 sm:justify-end">
-                  {activeSync.suggestedSubLobbies.map((lobby) => (
-                    <Badge
-                      key={lobby.lobbyName}
-                      variant={lobby.isWaitlist ? 'warning' : 'secondary'}
-                      className="text-[10px]"
-                    >
-                      {lobby.lobbyName}: {lobby.players.map((p) => p.displayName).join(', ')}
-                    </Badge>
-                  ))}
-                </div>
-              )}
+              <div className="flex flex-col items-start sm:items-end gap-1.5 shrink-0">
+                {activeSync && (
+                  <SessionPlayerAvatarRow
+                    size="md"
+                    avatars={buildPlayerAvatarsFromBreakdown(activeSync)}
+                    className="sm:justify-end"
+                  />
+                )}
+                {activeSync?.suggestedSubLobbies && activeSync.suggestedSubLobbies.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                    {activeSync.suggestedSubLobbies.map((lobby) => (
+                      <Badge
+                        key={lobby.lobbyName}
+                        variant={lobby.isWaitlist ? 'warning' : 'secondary'}
+                        className="text-[10px]"
+                      >
+                        {lobby.lobbyName}: {lobby.players.map((p) => p.displayName).join(', ')}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
@@ -241,20 +522,16 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
           )}
         </div>
 
-        {/* Synchrony / Sub-Lobbies / AI / Incompatibles Tabs */}
+        {/* Sincronía / Recomendaciones / Otros Tabs (Sub-Lobbies removed) */}
         <Tabs defaultValue="perfect" className="w-full flex-1 flex flex-col">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
+          <TabsList className="grid w-full grid-cols-3 h-auto">
             <TabsTrigger value="perfect" className="gap-1.5 text-xs py-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-success" strokeWidth={1.75} />
               <span>Sincronía ({perfectGames.length})</span>
             </TabsTrigger>
-            <TabsTrigger value="split" className="gap-1.5 text-xs py-1.5">
-              <Split className="w-3.5 h-3.5 text-warning" strokeWidth={1.75} />
-              <span>Sub-Lobbies ({splitGames.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="ai" className="gap-1.5 text-xs py-1.5">
+            <TabsTrigger value="recommendations" className="gap-1.5 text-xs py-1.5">
               <Brain className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-              <span>IA ({sessionRecommendations.all.length})</span>
+              <span>Recomendaciones ({sessionRecommendations.all.length})</span>
             </TabsTrigger>
             <TabsTrigger value="incompatible" className="gap-1.5 text-xs py-1.5">
               <Ban className="w-3.5 h-3.5 text-destructive" strokeWidth={1.75} />
@@ -263,7 +540,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
           </TabsList>
 
           {/* TAB 1: PERFECT MATCH GAMES */}
-          <TabsContent value="perfect" className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+          <TabsContent value="perfect" className="max-h-[540px] overflow-y-auto pr-1">
             {participantsCount === 0 ? (
               <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">
                 Sin participantes.
@@ -273,320 +550,80 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                 Sin juegos compatibles para {participantsCount} jugadores.
               </div>
             ) : (
-              perfectGames.map((item, idx) => {
-                const isSelected = activeGameId === item.game.id;
-                return (
-                  <div
-                    key={item.game.id}
-                    className={cn(
-                      'p-3 rounded-md border transition-colors space-y-2',
-                      isSelected
-                        ? 'bg-success/15 border-success/45'
-                        : 'bg-background/45 border-border hover:border-primary/40'
-                    )}
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-xs font-mono font-bold text-muted-foreground w-5 shrink-0">
-                          #{idx + 1}
-                        </span>
-                        <img
-                          src={item.game.coverUrl || DEFAULT_COVER}
-                          alt={item.game.name}
-                          onError={(e) => {
-                            const img = e.currentTarget;
-                            if (img.src !== DEFAULT_COVER) img.src = DEFAULT_COVER;
-                          }}
-                          className="w-10 h-11 object-cover rounded border border-border shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-xs sm:text-sm font-semibold text-foreground truncate">
-                              {item.game.name}
-                            </span>
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                              {item.game.minPlayers}–{item.game.maxPlayers}p
-                            </Badge>
-                            {item.dislikeCount > 0 && (
-                              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                                <ThumbsDown className="w-2.5 h-2.5" strokeWidth={1.75} />
-                                {item.dislikeCount} veto(s)
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 text-[11px] text-muted-foreground mt-0.5">
-                            <span className="inline-flex items-center gap-1 text-warning font-medium">
-                              <Star className="w-3 h-3 fill-warning text-warning" strokeWidth={1.75} />
-                              {item.averageRating.toFixed(1)}
-                            </span>
-                            <span>
-                              {item.playersWhoPlayCount}/{item.totalParticipants} jug.
-                            </span>
-                            <span className="font-mono text-[10px]">
-                              Peso: {item.rouletteWeight.toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
-                        <div className="text-right">
-                          <span
-                            className={cn(
-                              'text-sm font-bold font-mono block leading-none',
-                              getSynchronyColorClass(item.synchronyScore)
-                            )}
-                          >
-                            {item.synchronyScore}%
-                          </span>
-                          <div className="w-16 h-1.5 rounded-full bg-secondary overflow-hidden mt-1">
-                            <div
-                              className={cn('h-full rounded-full', getSynchronyBarClass(item.synchronyScore))}
-                              style={{ width: `${Math.min(100, item.synchronyScore)}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <Button
-                          size="xs"
-                          variant={isSelected ? 'emerald' : 'secondary'}
-                          onClick={() => onLockGame(item.game.id)}
-                        >
-                          {isSelected ? (
-                            <>
-                              <Check className="w-3 h-3" strokeWidth={2} />
-                              <span>Fijado</span>
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="w-3 h-3" strokeWidth={1.75} />
-                              <span>Fijar</span>
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Player breakdown pills */}
-                    <div className="flex flex-wrap gap-1 pt-1 border-t border-border/60">
-                      {item.playerBreakdowns.map((pb) => (
-                        <span
-                          key={pb.userId}
-                          className={cn(
-                            'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border',
-                            !pb.plays
-                              ? 'bg-destructive/10 border-destructive/30 text-destructive'
-                              : pb.rating >= 4
-                                ? 'bg-success/10 border-success/30 text-success'
-                                : pb.rating === 1
-                                  ? 'bg-warning/10 border-warning/30 text-warning'
-                                  : 'bg-secondary/55 border-border text-muted-foreground'
-                          )}
-                        >
-                          <span>{pb.displayName}:</span>
-                          <span className="font-semibold">
-                            {pb.plays ? `${pb.rating}★` : 'No juega'}
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </TabsContent>
-
-          {/* TAB 2: SUB-LOBBIES / SPLIT GAMES */}
-          <TabsContent value="split" className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
-            {splitGames.length === 0 ? (
-              <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">
-                Sin sub-lobbies disponibles.
+              <div className={gridColsClass}>
+                {perfectGames.map((item, idx) => {
+                  const isSelected = lockedGameIds.includes(item.game.id);
+                  return (
+                    <SessionGameTile
+                      key={item.game.id}
+                      name={item.game.name}
+                      coverUrl={item.game.coverUrl}
+                      score={item.synchronyScore}
+                      rank={idx + 1}
+                      isSelected={isSelected}
+                      infoContent={buildSynchronyInfoContent(item)}
+                      playerAvatars={buildPlayerAvatarsFromBreakdown(item)}
+                      actionLabel={isSelected ? 'Fijado' : 'Fijar'}
+                      actionIcon={
+                        isSelected ? (
+                          <Check className="w-3 h-3" strokeWidth={2} />
+                        ) : (
+                          <Lock className="w-3 h-3" strokeWidth={1.75} />
+                        )
+                      }
+                      onAction={() => onLockGame(item.game.id)}
+                    />
+                  );
+                })}
               </div>
-            ) : (
-              splitGames.map((item) => {
-                const isSelected = activeGameId === item.game.id;
-                return (
-                  <div
-                    key={item.game.id}
-                    className={cn(
-                      'p-3 rounded-md border space-y-2',
-                      isSelected
-                        ? 'bg-success/15 border-success/45'
-                        : 'bg-background/45 border-border'
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <img
-                          src={item.game.coverUrl || DEFAULT_COVER}
-                          alt={item.game.name}
-                          onError={(e) => {
-                            const img = e.currentTarget;
-                            if (img.src !== DEFAULT_COVER) img.src = DEFAULT_COVER;
-                          }}
-                          className="w-9 h-10 object-cover rounded border border-border shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs sm:text-sm font-semibold text-foreground truncate">
-                              {item.game.name}
-                            </span>
-                            <Badge variant="warning" className="text-[10px]">
-                              Máx {item.game.maxPlayers}p
-                            </Badge>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground font-mono">
-                            Sincronía {item.synchronyScore}%
-                          </p>
-                        </div>
-                      </div>
-
-                      <Button
-                        size="xs"
-                        variant={isSelected ? 'emerald' : 'secondary'}
-                        onClick={() => onLockGame(item.game.id)}
-                      >
-                        {isSelected ? 'Fijado' : 'Fijar'}
-                      </Button>
-                    </div>
-
-                    {item.suggestedSubLobbies && item.suggestedSubLobbies.length > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1.5 border-t border-border/60">
-                        {item.suggestedSubLobbies.map((lobby) => (
-                          <div
-                            key={lobby.lobbyName}
-                            className="p-2 rounded bg-card/50 border border-border text-[11px]"
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-semibold text-foreground">{lobby.lobbyName}</span>
-                              <Badge
-                                variant={lobby.isWaitlist ? 'warning' : 'success'}
-                                className="text-[10px] px-1.5 py-0"
-                              >
-                                {lobby.players.length} jug.
-                              </Badge>
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {lobby.players.map((pl) => (
-                                <span
-                                  key={pl.id}
-                                  className="px-1.5 py-0.5 rounded bg-secondary/55 border border-border text-[10px] text-muted-foreground"
-                                >
-                                  {pl.displayName} ({pl.karmaScore})
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
             )}
           </TabsContent>
 
-          {/* TAB 3: AI GROUP RECOMMENDATIONS (32D TASTE + STEAM + TOP 3 PODIUM + IGDB) */}
-          <TabsContent value="ai" className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-            {sessionRecommendations.all.length === 0 ? (
-              <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">
-                Sin recomendaciones disponibles.
-              </div>
-            ) : (
-              <>
-                {sessionRecommendations.readyToPlay.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-success flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />
-                        En Catálogo ({sessionRecommendations.readyToPlay.length})
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                      {sessionRecommendations.readyToPlay.map((rec) => {
-                        const isLocked =
-                          !!rec.catalogGameId && rec.catalogGameId === activeGameId;
-                        return (
-                          <GroupRecommendationCard
-                            key={rec.id}
-                            recommendation={rec}
-                            compact
-                            isSelectedOrLocked={isLocked}
-                            selectedBadgeLabel="Fijado"
-                            actionLabel={isLocked ? 'Fijado' : 'Fijar'}
-                            actionIcon={
-                              isLocked ? (
-                                <Check className="w-3.5 h-3.5" strokeWidth={2} />
-                              ) : (
-                                <Lock className="w-3.5 h-3.5" strokeWidth={1.75} />
-                              )
-                            }
-                            actionVariant={isLocked ? 'emerald' : 'secondary'}
-                            onAction={onSelectRecommendation}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {sessionRecommendations.discovery.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-border">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                      <Compass className="w-3.5 h-3.5" strokeWidth={1.75} />
-                      Descubrimiento ({sessionRecommendations.discovery.length})
-                    </span>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                      {sessionRecommendations.discovery.map((rec) => (
-                        <GroupRecommendationCard
-                          key={rec.id}
-                          recommendation={rec}
-                          compact
-                          actionLabel="Importar"
-                          actionIcon={<Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />}
-                          actionVariant="default"
-                          onAction={onSelectRecommendation}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
+          {/* TAB 2: RECOMMENDATIONS */}
+          <TabsContent value="recommendations" className="max-h-[540px] overflow-y-auto pr-1">
+            {recommendationsContent}
           </TabsContent>
 
-          {/* TAB 4: INCOMPATIBLE GAMES */}
-          <TabsContent value="incompatible" className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+          {/* TAB 3: INCOMPATIBLE GAMES */}
+          <TabsContent value="incompatible" className="max-h-[540px] overflow-y-auto pr-1">
             {incompatibleGames.length === 0 ? (
               <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">
                 Todos los juegos son compatibles.
               </div>
             ) : (
-              incompatibleGames.map((item) => (
-                <div
-                  key={item.game.id}
-                  className="p-2.5 rounded-md border border-border bg-background/45 flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <ShieldAlert className="w-4 h-4 text-destructive shrink-0" strokeWidth={1.75} />
-                    <div className="min-w-0">
-                      <span className="text-xs font-semibold text-foreground truncate block">
-                        {item.game.name}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground">
-                        {item.status === 'missing_owners'
-                          ? `Faltan dueños (${item.playersWhoPlayCount}/${item.totalParticipants})`
-                          : item.status === 'needs_more_players'
-                            ? `Mín. ${item.game.minPlayers} jug.`
-                            : `Máx. ${item.game.maxPlayers} jug.`}
-                      </span>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="text-[10px] shrink-0 font-mono">
-                    {item.synchronyScore}%
-                  </Badge>
-                </div>
-              ))
+              <div className={gridColsClass}>
+                {incompatibleGames.map((item) => {
+                  const isSelected = lockedGameIds.includes(item.game.id);
+                  const reasonPill =
+                    item.status === 'missing_owners'
+                      ? `${item.playersWhoPlayCount}/${item.totalParticipants}`
+                      : item.status === 'needs_more_players'
+                        ? `Mín ${item.game.minPlayers}p`
+                        : `Máx ${item.game.maxPlayers}p`;
+                  return (
+                    <SessionGameTile
+                      key={item.game.id}
+                      name={item.game.name}
+                      coverUrl={item.game.coverUrl}
+                      score={item.synchronyScore}
+                      isSelected={isSelected}
+                      muted={!isSelected}
+                      statusPill={reasonPill}
+                      infoContent={buildSynchronyInfoContent(item)}
+                      playerAvatars={buildPlayerAvatarsFromBreakdown(item)}
+                      actionLabel={isSelected ? 'Fijado' : 'Fijar'}
+                      actionIcon={
+                        isSelected ? (
+                          <Check className="w-3 h-3" strokeWidth={2} />
+                        ) : (
+                          <Lock className="w-3 h-3" strokeWidth={1.75} />
+                        )
+                      }
+                      onAction={() => onLockGame(item.game.id)}
+                    />
+                  );
+                })}
+              </div>
             )}
           </TabsContent>
         </Tabs>

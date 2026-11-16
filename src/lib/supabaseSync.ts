@@ -8,6 +8,7 @@ import {
   GameRating,
   GamingGroup,
   GamingSession,
+  InstantSessionRsvp,
   ParticipantConfirmationStatus,
   PlayerProfile,
   PlayerSteamProfile,
@@ -15,6 +16,7 @@ import {
   PrecisionMinutes,
   SanctionRecord,
   SessionCalloutRecord,
+  SessionKind,
   SessionParticipant,
   UserGamePreference,
   WeeklySchedule,
@@ -42,6 +44,7 @@ export function mapGroupRow(row: Record<string, unknown>): GamingGroup {
     createdBy: String(row.created_by || ''),
     memberIds: Array.isArray(row.member_ids) ? row.member_ids.map(String) : [],
     adminIds: Array.isArray(row.admin_ids) ? row.admin_ids.map(String) : [],
+    gameIds: Array.isArray(row.game_ids) ? row.game_ids.map(String) : [],
     discordConfig: {
       enabled: row.discord_enabled !== undefined ? Boolean(row.discord_enabled) : true,
       webhookUrl: String(row.discord_webhook_url || ''),
@@ -255,8 +258,17 @@ export async function fetchAllSupabaseData(): Promise<SupabaseHydratedState | nu
     groupId: String(row.group_id || 'group-boludos-og'),
     title: String(row.title),
     date: String(row.scheduled_date),
+    sessionKind: (row.session_kind === 'instant' ? 'instant' : 'scheduled') as SessionKind,
+    instantRsvps: Array.isArray(row.instant_rsvps)
+      ? (row.instant_rsvps as InstantSessionRsvp[])
+      : [],
     mode: row.mode as GamingSession['mode'],
     selectedGameId: row.selected_game_id ? String(row.selected_game_id) : undefined,
+    selectedGameIds: Array.isArray(row.selected_game_ids)
+      ? row.selected_game_ids.map(String)
+      : row.selected_game_id
+        ? [String(row.selected_game_id)]
+        : undefined,
     rouletteWinnerGameId: row.roulette_winner_game_id
       ? String(row.roulette_winner_game_id)
       : undefined,
@@ -325,6 +337,7 @@ export async function dbUpsertGroup(group: GamingGroup): Promise<void> {
       created_by: group.createdBy || null,
       member_ids: group.memberIds,
       admin_ids: group.adminIds,
+      game_ids: group.gameIds || [],
       discord_webhook_url: group.discordConfig.webhookUrl || '',
       discord_channel_name: group.discordConfig.channelName || 'general-gaming',
       discord_guild_name: group.discordConfig.guildName || '',
@@ -419,6 +432,12 @@ export async function dbCreateSession(session: GamingSession) {
     scheduled_date: session.date,
     mode: session.mode,
     selected_game_id: session.selectedGameId || null,
+    selected_game_ids:
+      session.selectedGameIds && session.selectedGameIds.length > 0
+        ? session.selectedGameIds
+        : session.selectedGameId
+          ? [session.selectedGameId]
+          : null,
     roulette_winner_game_id: session.rouletteWinnerGameId || null,
     status: session.status,
     allow_split_lobbies: session.allowSplitLobbies,
@@ -428,6 +447,8 @@ export async function dbCreateSession(session: GamingSession) {
         ? session.invitedUserIds
         : null,
     callouts: session.callouts || [],
+    session_kind: session.sessionKind || 'scheduled',
+    instant_rsvps: session.instantRsvps || [],
   });
 
   if (error) {
@@ -436,6 +457,14 @@ export async function dbCreateSession(session: GamingSession) {
 
   for (const p of session.participants) {
     await dbUpsertParticipant(session.id, p);
+  }
+}
+
+export async function dbDeleteSession(sessionId: string) {
+  if (!supabase) return;
+  const { error } = await supabase.from('sessions').delete().eq('id', sessionId);
+  if (error) {
+    console.warn('Supabase dbDeleteSession warning:', error);
   }
 }
 
@@ -482,6 +511,17 @@ export async function dbUpdateSessionInvitesAndCallouts(
   }
 }
 
+export async function dbUpdateSessionInstantRsvps(
+  sessionId: string,
+  instantRsvps: InstantSessionRsvp[]
+) {
+  if (!supabase) return;
+  await supabase
+    .from('sessions')
+    .update({ instant_rsvps: instantRsvps })
+    .eq('id', sessionId);
+}
+
 export async function dbDeleteParticipant(sessionId: string, userId: string) {
   if (!supabase) return;
   await supabase
@@ -493,18 +533,33 @@ export async function dbDeleteParticipant(sessionId: string, userId: string) {
 
 export async function dbUpdateSessionGame(
   sessionId: string,
-  selectedGameId: string,
-  isRouletteWinner: boolean
+  selectedGameId: string | null,
+  isRouletteWinner: boolean,
+  selectedGameIds?: string[],
+  rouletteWinnerGameId?: string
 ) {
   if (!supabase) return;
-  await supabase
-    .from('sessions')
-    .update(
-      isRouletteWinner
-        ? { selected_game_id: selectedGameId, roulette_winner_game_id: selectedGameId }
-        : { selected_game_id: selectedGameId }
-    )
-    .eq('id', sessionId);
+  const winnerId = rouletteWinnerGameId ?? selectedGameId;
+  const payload: Record<string, unknown> = isRouletteWinner
+    ? { selected_game_id: selectedGameId, roulette_winner_game_id: winnerId }
+    : { selected_game_id: selectedGameId };
+
+  if (selectedGameIds !== undefined) {
+    payload.selected_game_ids = selectedGameIds.length > 0 ? selectedGameIds : null;
+  }
+
+  const { error } = await supabase.from('sessions').update(payload).eq('id', sessionId);
+  if (error && selectedGameIds !== undefined && error.message?.includes('selected_game_ids')) {
+    // Fallback if remote schema hasn't added selected_game_ids yet
+    await supabase
+      .from('sessions')
+      .update(
+        isRouletteWinner
+          ? { selected_game_id: selectedGameId, roulette_winner_game_id: winnerId }
+          : { selected_game_id: selectedGameId }
+      )
+      .eq('id', sessionId);
+  }
 }
 
 export async function dbInsertSanction(sanction: SanctionRecord) {

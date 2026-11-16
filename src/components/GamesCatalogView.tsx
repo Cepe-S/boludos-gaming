@@ -60,6 +60,7 @@ export function GamesCatalogView({
     addGame,
     currentUser,
     players,
+    activeGroup,
     discordConfig,
     updateCategoryPreferences,
     importSteamProfile,
@@ -534,13 +535,20 @@ export function GamesCatalogView({
   }, [preferences]);
 
   const gamesWithMetrics = useMemo<GameGroupMetrics[]>(() => {
-    return games.map((game) => {
+    const scopedGames = activeGroup
+      ? games.filter((g) => activeGroup.gameIds.includes(g.id))
+      : [];
+    const scopedPlayers = activeGroup
+      ? players.filter((p) => activeGroup.memberIds.includes(p.id))
+      : players;
+
+    return scopedGames.map((game) => {
       let playsCount = 0;
       let ratingSum = 0;
       let dislikeCount = 0;
       let lovedCount = 0;
 
-      const playerRatings = players.map((player) => {
+      const playerRatings = scopedPlayers.map((player) => {
         const pref = prefMap.get(`${player.id}_${game.id}`);
         const plays = pref ? pref.plays : false;
         const rating = (pref ? pref.rating : 3) as GameRating;
@@ -555,7 +563,7 @@ export function GamesCatalogView({
         return { player, plays, rating };
       });
 
-      const totalPlayers = players.length;
+      const totalPlayers = scopedPlayers.length;
       let synchronyScore = 0;
       let averageRating = 1.0;
 
@@ -579,7 +587,7 @@ export function GamesCatalogView({
         playerRatings,
       };
     });
-  }, [games, players, prefMap]);
+  }, [games, players, prefMap, activeGroup]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();

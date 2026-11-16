@@ -229,9 +229,20 @@ export interface GamingGroup {
   createdBy: string;
   memberIds: string[];
   adminIds: string[];
+  gameIds: string[];
   discordConfig: GroupDiscordConfig;
   createdAt: string;
   updatedAt?: string;
+}
+
+export type SessionKind = 'scheduled' | 'instant';
+
+export interface InstantSessionRsvp {
+  userId: string;
+  status: 'going' | 'declined';
+  etaMinutes?: number;
+  durationMinutes?: number;
+  respondedAt: string;
 }
 
 export interface GamingSession {
@@ -239,8 +250,11 @@ export interface GamingSession {
   groupId: string;
   title: string;
   date: string; // YYYY-MM-DD
+  sessionKind?: SessionKind;
+  instantRsvps?: InstantSessionRsvp[];
   mode: SessionMode;
   selectedGameId?: string;
+  selectedGameIds?: string[];
   rouletteWinnerGameId?: string;
   status: SessionStatus;
   createdBy: string;

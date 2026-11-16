@@ -18,8 +18,8 @@ export const ScheduleOverlapBentoCard: React.FC<ScheduleOverlapBentoCardProps> =
   isParticipantConfirmed,
 }) => {
   return (
-    <Card className="cv-section flex flex-col justify-between">
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+    <Card className="xl:col-span-7 cv-section flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary shrink-0">
             <CalendarClock className="w-4 h-4" strokeWidth={1.75} />

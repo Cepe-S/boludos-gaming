@@ -7,12 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import {
-  AlertTriangle,
-  Award,
   Check,
-  CheckCircle2,
   Clock,
-  Ghost,
   LogOut,
   Timer,
 } from 'lucide-react';
@@ -33,7 +29,6 @@ export interface PersonalCheckInBentoCardProps {
   onJoinOrUpdate: () => void;
   onLeaveSession: () => void;
   onConfirmAttendance: () => void;
-  onCheckIn: () => void;
 }
 
 const PRECISION_OPTIONS: Array<{
@@ -64,90 +59,49 @@ export const PersonalCheckInBentoCard: React.FC<PersonalCheckInBentoCardProps> =
   onJoinOrUpdate,
   onLeaveSession,
   onConfirmAttendance,
-  onCheckIn,
 }) => {
-  const checkedIn =
-    currentParticipant?.attendanceStatus === 'on_time' ||
-    currentParticipant?.attendanceStatus === 'late';
-
   return (
-    <Card className="flex flex-col justify-between">
-      <CardHeader className="flex flex-row items-center justify-between gap-2">
+    <Card className="xl:col-span-5 flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-md bg-success/15 border border-success/40 flex items-center justify-center text-success shrink-0">
             <Timer className="w-4 h-4" strokeWidth={1.75} />
           </div>
-          <CardTitle className="truncate">Check-in &amp; Horario</CardTitle>
+          <CardTitle className="truncate">Mi Horario</CardTitle>
         </div>
 
         {currentParticipant && (
           <Badge variant={isConfirmed ? 'success' : 'warning'}>
-            {isConfirmed ? 'Confirmado' : 'Probable'}
+            {isConfirmed ? 'Confirmado' : `Prob. ${currentParticipant.confidencePercentage ?? 75}%`}
           </Badge>
         )}
       </CardHeader>
 
-      <CardContent className="space-y-3.5">
-        {/* Check-in Box First for Immediate Access */}
-        {checkedIn && currentParticipant ? (
-          <div className="p-3 rounded-md bg-success/15 border border-success/40 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-md bg-success/20 text-success flex items-center justify-center shrink-0">
-              <Check className="w-4 h-4" strokeWidth={2} />
-            </div>
-            <div className="min-w-0 text-xs">
-              <p className="font-semibold text-success">
-                Check-in {currentParticipant.checkedInAt}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {currentParticipant.attendanceStatus === 'on_time'
-                  ? 'En hora (+5 Karma)'
-                  : 'Tarde (-10 Karma)'}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="p-3 rounded-md bg-background/45 border border-border space-y-2.5">
-            {currentParticipant && !isConfirmed && (
-              <div className="flex items-center justify-between gap-2 pb-2 border-b border-border">
-                <span className="text-[11px] text-warning font-medium">
-                  Auto ({currentParticipant.confidencePercentage ?? 75}%)
-                </span>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="emerald"
-                  onClick={onConfirmAttendance}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-                  <span>Confirmar</span>
-                </Button>
-              </div>
-            )}
+      <CardContent className="space-y-2.5">
+        {/* Compact Schedule Limit & Confirm Bar */}
+        <div className="px-2.5 py-2 rounded-md bg-background/45 border border-border flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="w-3.5 h-3.5 text-success shrink-0" strokeWidth={1.75} />
+            <span>Límite</span>
+            <strong className="font-mono text-foreground">{calculatedStrictDeadline}</strong>
+          </span>
 
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-success" strokeWidth={1.75} />
-                <span>Límite:</span>
-              </span>
-              <strong className="font-mono text-foreground">{calculatedStrictDeadline}</strong>
-            </div>
-
+          {currentParticipant && !isConfirmed && (
             <Button
               type="button"
+              size="xs"
               variant="emerald"
-              className="w-full"
-              disabled={!currentParticipant}
-              onClick={onCheckIn}
-              title={!currentParticipant ? 'Anotate primero para hacer check-in' : 'Registrar check-in'}
+              onClick={onConfirmAttendance}
+              title="Confirmar asistencia al 100%"
             >
-              <CheckCircle2 className="w-4 h-4" strokeWidth={1.75} />
-              <span>Check-in</span>
+              <Check className="w-3.5 h-3.5" strokeWidth={1.75} />
+              <span>Confirmar horario</span>
             </Button>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Arrival / Departure */}
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <Label htmlFor="join-from-time" className="text-[11px] text-muted-foreground">
               Llegada
@@ -157,7 +111,7 @@ export const PersonalCheckInBentoCard: React.FC<PersonalCheckInBentoCardProps> =
               type="time"
               value={joinFromTime}
               onChange={(e) => setJoinFromTime(e.target.value)}
-              className="font-mono"
+              className="font-mono h-8 text-xs"
             />
           </div>
 
@@ -170,13 +124,13 @@ export const PersonalCheckInBentoCard: React.FC<PersonalCheckInBentoCardProps> =
               type="time"
               value={joinUntilTime}
               onChange={(e) => setJoinUntilTime(e.target.value)}
-              className="font-mono"
+              className="font-mono h-8 text-xs"
             />
           </div>
         </div>
 
         {/* Precision Margin Segmented Selector */}
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground">Tolerancia</Label>
           <div className="grid grid-cols-4 gap-1.5">
             {PRECISION_OPTIONS.map((opt) => {
@@ -185,38 +139,35 @@ export const PersonalCheckInBentoCard: React.FC<PersonalCheckInBentoCardProps> =
                 <button
                   key={opt.val}
                   type="button"
-                  title={opt.sub}
+                  title={`${opt.icon} ${opt.sub} (${opt.label})`}
                   onClick={() => setJoinPrecision(opt.val)}
                   className={cn(
-                    'py-1.5 px-1 rounded-md border text-center transition-colors cursor-pointer flex flex-col items-center',
+                    'py-1.5 px-1.5 rounded-md border text-center transition-colors cursor-pointer flex items-center justify-center gap-1',
                     selected
                       ? 'bg-primary/15 border-primary text-foreground'
                       : 'bg-background/45 border-border text-muted-foreground hover:bg-accent hover:text-foreground'
                   )}
                 >
-                  <span className="text-xs leading-none mb-0.5">{opt.icon}</span>
                   <span className="text-[11px] font-bold font-mono">{opt.label}</span>
-                  <span className="text-[9px] opacity-80">{opt.sub}</span>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* Optional Note */}
-        <Input
-          id="join-note"
-          type="text"
-          placeholder="Nota opcional..."
-          aria-label="Nota opcional"
-          value={joinNote}
-          onChange={(e) => setJoinNote(e.target.value)}
-        />
-
-        {/* Join / Update / Leave */}
-        <div className="flex items-center gap-2">
-          <Button type="button" onClick={onJoinOrUpdate} className="flex-1">
-            <Check className="w-4 h-4" strokeWidth={1.75} />
+        {/* Optional Note + Join / Update / Leave */}
+        <div className="flex items-center gap-2 pt-0.5">
+          <Input
+            id="join-note"
+            type="text"
+            placeholder="Nota opcional..."
+            aria-label="Nota opcional"
+            value={joinNote}
+            onChange={(e) => setJoinNote(e.target.value)}
+            className="h-8 text-xs flex-1 min-w-0"
+          />
+          <Button type="button" size="sm" onClick={onJoinOrUpdate} className="shrink-0">
+            <Check className="w-3.5 h-3.5" strokeWidth={1.75} />
             <span>{currentParticipant ? 'Actualizar' : 'Anotarme'}</span>
           </Button>
           {currentParticipant && (
@@ -227,27 +178,11 @@ export const PersonalCheckInBentoCard: React.FC<PersonalCheckInBentoCardProps> =
               onClick={onLeaveSession}
               title="Salir de la sesión"
               aria-label="Salir de la sesión"
-              className="text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10 shrink-0"
+              className="h-8 w-8 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10 shrink-0"
             >
-              <LogOut className="w-4 h-4" strokeWidth={1.75} />
+              <LogOut className="w-3.5 h-3.5" strokeWidth={1.75} />
             </Button>
           )}
-        </div>
-
-        {/* Karma Rules Strip */}
-        <div className="pt-2 border-t border-border text-[10px] text-muted-foreground flex items-center justify-between">
-          <span className="flex items-center gap-1">
-            <Award className="w-3 h-3 text-success" strokeWidth={1.75} />
-            +5 Puntual
-          </span>
-          <span className="flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3 text-warning" strokeWidth={1.75} />
-            -10 Tarde
-          </span>
-          <span className="flex items-center gap-1">
-            <Ghost className="w-3 h-3 text-destructive" strokeWidth={1.75} />
-            -25 Humo
-          </span>
         </div>
       </CardContent>
     </Card>

@@ -3,14 +3,27 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useApp } from '@/context/AppContext';
+import { InstantSessionModal } from '@/components/sessions/InstantSessionModal';
 import {
   DiscordNotificationLog,
+  GAME_CATEGORIES,
   Game,
+  GameRating,
   GamingGroup,
   GamingSession,
   GroupDiscordConfig,
   PlayerProfile,
 } from '@/types/domain';
+import {
+  GLOBAL_GAMES_KNOWLEDGE_BASE,
+  KnowledgeGameEntry,
+  normalizeGameName,
+} from '@/lib/tasteProfileEngine';
+import {
+  SearchedSteamGame,
+  fetchExternalDiscoveryGames,
+  searchSteamStoreGames,
+} from '@/lib/steamService';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +33,7 @@ import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -44,11 +58,14 @@ import { cn } from '@/lib/utils';
 import {
   AlertTriangle,
   ArrowRight,
+  BookPlus,
   Calendar,
   Check,
+  Clock,
   Copy,
   Crown,
   FolderKanban,
+  Gamepad2,
   Hash,
   Link as LinkIcon,
   LogOut,
@@ -59,18 +76,20 @@ import {
   Shield,
   ShieldAlert,
   ShieldOff,
+  Star,
   Trash2,
   UserMinus,
   UserPlus,
   Users,
   Webhook,
+  Zap,
 } from 'lucide-react';
 
 export interface GroupsViewProps {
   onNavigateToSessions?: () => void;
 }
 
-type DetailSubTab = 'members' | 'discord' | 'sessions' | 'settings';
+type DetailSubTab = 'members' | 'games' | 'discord' | 'sessions' | 'settings';
 
 interface ColorPreset {
   id: string;
@@ -238,6 +257,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     players,
     sessions,
     games,
+    preferences,
+    updateGamePreference,
+    updateSteamGameFeedback,
     userGroups,
     activeGroup,
     setActiveGroupId,
@@ -247,8 +269,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     joinGroupByInviteCode,
     addMemberToGroup,
     removeMemberFromGroup,
+    addGameToGroup,
+    removeGameFromGroup,
+    addAndLinkGameToGroup,
+    createInstantSession,
+    deleteSession,
     testGroupDiscordWebhook,
     getGroupInviteLink,
+    discordConfig,
     discordLogs,
     setActiveSessionId,
   } = useApp();
@@ -286,6 +314,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [detailTab, setDetailTab] = useState<DetailSubTab>('members');
   const [copiedState, setCopiedState] = useState<'code' | 'link' | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDeleteGroupSessionId, setConfirmDeleteGroupSessionId] = useState<string | null>(null);
   const [identitySaved, setIdentitySaved] = useState(false);
 
   // Member management
@@ -294,6 +323,32 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+
+  // Group games & Add-to-library modal state
+  const [groupGameSearch, setGroupGameSearch] = useState('');
+  const [groupDiscoveryGames, setGroupDiscoveryGames] = useState<KnowledgeGameEntry[]>([]);
+  const [groupLiveSearchResults, setGroupLiveSearchResults] = useState<SearchedSteamGame[]>([]);
+  const [isSearchingGroupGames, setIsSearchingGroupGames] = useState(false);
+  const [groupGamePickerLimit, setGroupGamePickerLimit] = useState(30);
+  const [showCustomGameForm, setShowCustomGameForm] = useState(false);
+  const [showInstantModal, setShowInstantModal] = useState(false);
+  const [customGameName, setCustomGameName] = useState('');
+  const [customGameCategory, setCustomGameCategory] = useState<string>(
+    GAME_CATEGORIES[0].id
+  );
+  const [customGameMinPlayers, setCustomGameMinPlayers] = useState(1);
+  const [customGameMaxPlayers, setCustomGameMaxPlayers] = useState(5);
+
+  const [libraryModalGame, setLibraryModalGame] = useState<Game | null>(null);
+  const [libraryRating, setLibraryRating] = useState<GameRating>(4);
+  const [libraryHours, setLibraryHours] = useState<string>('0');
+  const [libraryRecentHours, setLibraryRecentHours] = useState<string>('0');
+  const [librarySteamAppId, setLibrarySteamAppId] = useState<number | null>(
+    null
+  );
+  const [librarySteamDetectedHours, setLibrarySteamDetectedHours] = useState<
+    number | null
+  >(null);
 
   // Discord Webhook form
   const [discordForm, setDiscordForm] = useState<GroupDiscordConfig>({
@@ -403,6 +458,413 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         return b.createdAt.localeCompare(a.createdAt);
       });
   }, [activeGroup, sessions]);
+
+  const groupGames = useMemo<Game[]>(() => {
+    if (!activeGroup) return [];
+    const allowed = new Set(activeGroup.gameIds);
+    return games.filter((g) => allowed.has(g.id));
+  }, [activeGroup, games]);
+
+  // Fetch discovery games when on Games subtab
+  useEffect(() => {
+    if (detailTab !== 'games') return;
+    let cancelled = false;
+    fetchExternalDiscoveryGames({
+      igdbClientId: discordConfig.igdbClientId,
+      igdbClientSecret: discordConfig.igdbClientSecret,
+    })
+      .then((items) => {
+        if (!cancelled) setGroupDiscoveryGames(items);
+      })
+      .catch(() => {
+        if (!cancelled) setGroupDiscoveryGames([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailTab, discordConfig.igdbClientId, discordConfig.igdbClientSecret]);
+
+  // Live IGDB / Steam Store search when typing >= 2 chars
+  useEffect(() => {
+    const q = groupGameSearch.trim();
+    setGroupGamePickerLimit(30);
+    if (detailTab !== 'games' || q.length < 2) {
+      setGroupLiveSearchResults([]);
+      setIsSearchingGroupGames(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingGroupGames(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const items = await searchSteamStoreGames(q, {
+          igdbClientId: discordConfig.igdbClientId,
+          igdbClientSecret: discordConfig.igdbClientSecret,
+        });
+        if (!cancelled) setGroupLiveSearchResults(items);
+      } catch {
+        if (!cancelled) setGroupLiveSearchResults([]);
+      } finally {
+        if (!cancelled) setIsSearchingGroupGames(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [detailTab, groupGameSearch, discordConfig.igdbClientId, discordConfig.igdbClientSecret]);
+
+  interface GroupGameMemberAffinity {
+    player: PlayerProfile;
+    rating?: GameRating;
+    hoursPlayed?: number;
+    recentHoursPlayed?: number;
+    burnedOut?: boolean;
+    sourceLabel: string;
+  }
+
+  interface GroupGameCandidate {
+    key: string;
+    catalogGameId?: string;
+    name: string;
+    category: string;
+    coverUrl: string;
+    minPlayers: number;
+    maxPlayers: number;
+    tags: string[];
+    averageDurationMins: number;
+    memberAffinities: GroupGameMemberAffinity[];
+    avgRating: number;
+    totalHours: number;
+  }
+
+  const groupGameCandidates = useMemo<GroupGameCandidate[]>(() => {
+    if (!activeGroup) return [];
+
+    const linkedIds = new Set(activeGroup.gameIds);
+    const linkedNames = new Set(groupGames.map((g) => normalizeGameName(g.name)));
+    const memberById = new Map(currentMembers.map((m) => [m.id, m]));
+    const map = new Map<
+      string,
+      Omit<GroupGameCandidate, 'memberAffinities' | 'avgRating' | 'totalHours'> & {
+        affinityByUser: Map<string, GroupGameMemberAffinity>;
+      }
+    >();
+
+    const ensureCandidate = (
+      name: string,
+      patch: Partial<Omit<GroupGameCandidate, 'key' | 'name' | 'memberAffinities' | 'avgRating' | 'totalHours'>>
+    ) => {
+      const key = normalizeGameName(name);
+      if (!key || linkedNames.has(key)) return null;
+      const existing = map.get(key);
+      if (existing) {
+        if (!existing.catalogGameId && patch.catalogGameId) {
+          existing.catalogGameId = patch.catalogGameId;
+        }
+        if (!existing.coverUrl && patch.coverUrl) {
+          existing.coverUrl = patch.coverUrl;
+        }
+        if (existing.tags.length === 0 && patch.tags && patch.tags.length > 0) {
+          existing.tags = patch.tags;
+        }
+        return existing;
+      }
+      const created = {
+        key,
+        catalogGameId: patch.catalogGameId,
+        name: name.trim(),
+        category: patch.category || 'Co-op Acción',
+        coverUrl: patch.coverUrl || '',
+        minPlayers: patch.minPlayers ?? 1,
+        maxPlayers: patch.maxPlayers ?? 4,
+        tags: patch.tags ?? [],
+        averageDurationMins: patch.averageDurationMins ?? 90,
+        affinityByUser: new Map<string, GroupGameMemberAffinity>(),
+      };
+      map.set(key, created);
+      return created;
+    };
+
+    const mergeAffinity = (
+      entry: ReturnType<typeof ensureCandidate>,
+      player: PlayerProfile,
+      aff: Omit<GroupGameMemberAffinity, 'player'>
+    ) => {
+      if (!entry) return;
+      const prev = entry.affinityByUser.get(player.id);
+      if (!prev) {
+        entry.affinityByUser.set(player.id, { player, ...aff });
+        return;
+      }
+      entry.affinityByUser.set(player.id, {
+        player,
+        rating: prev.rating ?? aff.rating,
+        hoursPlayed: Math.max(prev.hoursPlayed ?? 0, aff.hoursPlayed ?? 0) || undefined,
+        recentHoursPlayed:
+          Math.max(prev.recentHoursPlayed ?? 0, aff.recentHoursPlayed ?? 0) || undefined,
+        burnedOut: Boolean(prev.burnedOut || aff.burnedOut),
+        sourceLabel: prev.sourceLabel.includes(aff.sourceLabel)
+          ? prev.sourceLabel
+          : `${prev.sourceLabel} · ${aff.sourceLabel}`,
+      });
+    };
+
+    // 1. Catalog games (Supabase)
+    const catalogById = new Map<string, Game>();
+    for (const g of games) {
+      catalogById.set(g.id, g);
+      if (linkedIds.has(g.id)) continue;
+      ensureCandidate(g.name, {
+        catalogGameId: g.id,
+        category: g.category,
+        coverUrl: g.coverUrl,
+        minPlayers: g.minPlayers,
+        maxPlayers: g.maxPlayers,
+        tags: g.tags,
+        averageDurationMins: g.averageDurationMins,
+      });
+    }
+
+    // 2. Group members' explicit preferences
+    for (const pref of preferences) {
+      if (!pref.plays) continue;
+      const member = memberById.get(pref.userId);
+      const catGame = catalogById.get(pref.gameId);
+      if (!member || !catGame || linkedIds.has(catGame.id)) continue;
+      const entry = ensureCandidate(catGame.name, {
+        catalogGameId: catGame.id,
+        category: catGame.category,
+        coverUrl: catGame.coverUrl,
+        minPlayers: catGame.minPlayers,
+        maxPlayers: catGame.maxPlayers,
+        tags: catGame.tags,
+        averageDurationMins: catGame.averageDurationMins,
+      });
+      mergeAffinity(entry, member, {
+        rating: pref.rating,
+        hoursPlayed: pref.hoursPlayed,
+        recentHoursPlayed: pref.recentHoursPlayed,
+        sourceLabel: 'Librería',
+      });
+    }
+
+    // 3. Group members' Steam libraries & external games
+    for (const member of currentMembers) {
+      for (const sg of member.steamProfile?.ownedGames || []) {
+        const hours = sg.manualHoursOverride ?? sg.playtimeHours;
+        const recent = sg.manualRecentHoursOverride ?? sg.playtimeRecentHours;
+        if (!sg.userRating && hours <= 0 && !sg.selectedForCatalog) continue;
+        const entry = ensureCandidate(sg.name, {
+          category: sg.genres[0] || 'Co-op Acción',
+          coverUrl: sg.headerImageUrl,
+          minPlayers: sg.minPlayers || 1,
+          maxPlayers: sg.isMultiplayer ? Math.max(4, sg.minPlayers || 4) : 1,
+          tags: sg.tags || [],
+        });
+        mergeAffinity(entry, member, {
+          rating: sg.userRating,
+          hoursPlayed: hours > 0 ? Math.round(hours * 10) / 10 : undefined,
+          recentHoursPlayed: recent > 0 ? Math.round(recent * 10) / 10 : undefined,
+          burnedOut: sg.burnedOut,
+          sourceLabel: 'Steam',
+        });
+      }
+
+      for (const ext of member.tasteProfile?.externalGames || []) {
+        const entry = ensureCandidate(ext.name, {
+          category: ext.category || 'Co-op Acción',
+          coverUrl: ext.coverUrl || '',
+          minPlayers: ext.minPlayers || 1,
+          maxPlayers: ext.maxPlayers || 4,
+          tags: ext.tags || [],
+        });
+        mergeAffinity(entry, member, {
+          rating: ext.rating,
+          hoursPlayed: ext.hoursPlayedEstimate,
+          burnedOut: ext.burnedOut,
+          sourceLabel: ext.platform,
+        });
+      }
+    }
+
+    // 4. Discovery pool (IGDB / SteamSpy or Knowledge Base fallback)
+    const discoveryPool =
+      groupDiscoveryGames.length > 0 ? groupDiscoveryGames : GLOBAL_GAMES_KNOWLEDGE_BASE;
+    for (const dg of discoveryPool) {
+      ensureCandidate(dg.name, {
+        category: dg.category,
+        coverUrl: dg.coverUrl,
+        minPlayers: dg.minPlayers,
+        maxPlayers: dg.maxPlayers,
+        tags: dg.tags,
+      });
+    }
+
+    // 5. Live search results
+    for (const lr of groupLiveSearchResults) {
+      ensureCandidate(lr.name, {
+        category: lr.category,
+        coverUrl: lr.headerImageUrl,
+        minPlayers: lr.minPlayers,
+        maxPlayers: lr.maxPlayers,
+        tags: lr.tags,
+      });
+    }
+
+    const query = groupGameSearch.trim().toLowerCase();
+    const list: GroupGameCandidate[] = [];
+
+    for (const raw of map.values()) {
+      const affinities = Array.from(raw.affinityByUser.values()).sort(
+        (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.hoursPlayed ?? 0) - (a.hoursPlayed ?? 0)
+      );
+      if (query) {
+        const matchesQuery =
+          raw.name.toLowerCase().includes(query) ||
+          raw.category.toLowerCase().includes(query) ||
+          raw.tags.some((t) => t.toLowerCase().includes(query)) ||
+          affinities.some((a) => a.player.displayName.toLowerCase().includes(query));
+        if (!matchesQuery) continue;
+      }
+
+      const rated = affinities.filter((a) => typeof a.rating === 'number');
+      const avgRating =
+        rated.length > 0
+          ? rated.reduce((sum, a) => sum + (a.rating ?? 0), 0) / rated.length
+          : 0;
+      const totalHours = affinities.reduce((sum, a) => sum + (a.hoursPlayed ?? 0), 0);
+
+      list.push({
+        key: raw.key,
+        catalogGameId: raw.catalogGameId,
+        name: raw.name,
+        category: raw.category,
+        coverUrl: raw.coverUrl,
+        minPlayers: raw.minPlayers,
+        maxPlayers: raw.maxPlayers,
+        tags: raw.tags,
+        averageDurationMins: raw.averageDurationMins,
+        memberAffinities: affinities,
+        avgRating,
+        totalHours,
+      });
+    }
+
+    list.sort((a, b) => {
+      if (b.memberAffinities.length !== a.memberAffinities.length) {
+        return b.memberAffinities.length - a.memberAffinities.length;
+      }
+      if (b.avgRating !== a.avgRating) {
+        return b.avgRating - a.avgRating;
+      }
+      if (b.totalHours !== a.totalHours) {
+        return b.totalHours - a.totalHours;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return list;
+  }, [
+    activeGroup,
+    groupGames,
+    currentMembers,
+    games,
+    preferences,
+    groupDiscoveryGames,
+    groupLiveSearchResults,
+    groupGameSearch,
+  ]);
+
+  const myPreferenceByGameId = useMemo(() => {
+    const map = new Map<string, (typeof preferences)[number]>();
+    for (const p of preferences) {
+      if (p.userId === currentUser.id) {
+        map.set(p.gameId, p);
+      }
+    }
+    return map;
+  }, [preferences, currentUser.id]);
+
+  const openAddToLibraryModal = (game: Game) => {
+    const existingPref = myPreferenceByGameId.get(game.id);
+    const normalizedTarget = normalizeGameName(game.name);
+    const steamMatch = currentUser.steamProfile?.ownedGames.find(
+      (sg) => normalizeGameName(sg.name) === normalizedTarget
+    );
+
+    const steamTotalHours = steamMatch
+      ? Math.round((steamMatch.manualHoursOverride ?? steamMatch.playtimeHours) * 10) / 10
+      : null;
+    const steamRecent = steamMatch
+      ? Math.round(
+          (steamMatch.manualRecentHoursOverride ?? steamMatch.playtimeRecentHours) * 10
+        ) / 10
+      : null;
+
+    setLibraryModalGame(game);
+    setLibraryRating(existingPref?.rating ?? steamMatch?.userRating ?? 4);
+    const initialHours =
+      existingPref?.hoursPlayed !== undefined && existingPref.hoursPlayed > 0
+        ? existingPref.hoursPlayed
+        : steamTotalHours ?? 0;
+    const initialRecent =
+      existingPref?.recentHoursPlayed !== undefined &&
+      existingPref.recentHoursPlayed > 0
+        ? existingPref.recentHoursPlayed
+        : steamRecent ?? 0;
+
+    setLibraryHours(String(initialHours));
+    setLibraryRecentHours(String(initialRecent));
+    setLibrarySteamAppId(steamMatch?.appId ?? null);
+    setLibrarySteamDetectedHours(steamTotalHours);
+  };
+
+  const handleSaveLibraryModal = () => {
+    if (!libraryModalGame) return;
+    const parsedHours = Math.max(0, Number(libraryHours) || 0);
+    const parsedRecent = Math.max(0, Number(libraryRecentHours) || 0);
+
+    updateGamePreference(
+      libraryModalGame.id,
+      true,
+      libraryRating,
+      parsedHours,
+      parsedRecent
+    );
+
+    if (librarySteamAppId !== null) {
+      updateSteamGameFeedback(librarySteamAppId, {
+        userRating: libraryRating,
+        selectedForCatalog: true,
+        manualHoursOverride: parsedHours,
+        manualRecentHoursOverride: parsedRecent,
+      });
+    }
+
+    setLibraryModalGame(null);
+  };
+
+  const handleAddCustomGameToGroup = () => {
+    if (!activeGroup) return;
+    const trimmed = customGameName.trim();
+    if (!trimmed) return;
+    const minP = Math.max(1, Math.min(customGameMinPlayers, customGameMaxPlayers));
+    const maxP = Math.max(minP, customGameMaxPlayers);
+    addAndLinkGameToGroup(activeGroup.id, {
+      name: trimmed,
+      category: customGameCategory,
+      coverUrl: '',
+      minPlayers: minP,
+      maxPlayers: maxP,
+      tags: [],
+      averageDurationMins: 90,
+    });
+    setCustomGameName('');
+    setShowCustomGameForm(false);
+  };
 
   const activeGroupSessions = useMemo(
     () => groupSessions.filter((s) => s.status !== 'finished'),
@@ -587,6 +1049,12 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       label: 'Miembros',
       icon: <Users className="w-4 h-4" strokeWidth={1.75} />,
       badge: activeGroup ? String(activeGroup.memberIds.length) : undefined,
+    },
+    {
+      key: 'games',
+      label: 'Juegos',
+      icon: <Gamepad2 className="w-4 h-4" strokeWidth={1.75} />,
+      badge: activeGroup ? String(activeGroup.gameIds.length) : undefined,
     },
     {
       key: 'discord',
@@ -1046,6 +1514,353 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 </div>
               )}
 
+              {/* SUBTAB: GAMES */}
+              {detailTab === 'games' && (
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader className="pb-3 border-b border-border flex flex-row items-center justify-between gap-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Gamepad2 className="w-4 h-4 text-primary" strokeWidth={1.75} />
+                        <span>Juegos del grupo ({groupGames.length})</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3">
+                      {groupGames.length === 0 ? (
+                        <div className="py-8 text-center text-xs text-muted-foreground">
+                          Este grupo todavía no tiene juegos cargados.
+                          {isCreatorOrAdmin
+                            ? ' Agregalos desde el catálogo o creá uno abajo.'
+                            : ' Pedile a un admin que agregue juegos.'}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {groupGames.map((game) => {
+                            const myPref = myPreferenceByGameId.get(game.id);
+                            const inMyLibrary = Boolean(myPref?.plays);
+                            return (
+                              <div
+                                key={game.id}
+                                className="p-3 rounded-lg bg-background/50 border border-border flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-xs font-semibold text-foreground truncate">
+                                      {game.name}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] shrink-0"
+                                    >
+                                      {game.category}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                    <span>
+                                      {game.minPlayers}–{game.maxPlayers} jug.
+                                    </span>
+                                    {inMyLibrary && myPref && (
+                                      <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                                        <Check className="w-3 h-3" strokeWidth={2} />
+                                        {myPref.rating}★ · {myPref.hoursPlayed ?? 0}h
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <Button
+                                    size="xs"
+                                    variant={inMyLibrary ? 'outline' : 'secondary'}
+                                    onClick={() => openAddToLibraryModal(game)}
+                                    title={
+                                      inMyLibrary
+                                        ? 'Editar puntaje y horas en mi librería'
+                                        : 'Agregar a mi librería'
+                                    }
+                                  >
+                                    <BookPlus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                    <span>
+                                      {inMyLibrary ? 'En librería' : 'Agregar a librería'}
+                                    </span>
+                                  </Button>
+                                  {isCreatorOrAdmin && (
+                                    <Button
+                                      size="xs"
+                                      variant="destructive"
+                                      className="w-7 px-0"
+                                      onClick={() =>
+                                        removeGameFromGroup(activeGroup.id, game.id)
+                                      }
+                                      title={`Sacar ${game.name} del grupo`}
+                                      aria-label={`Sacar ${game.name} del grupo`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {isCreatorOrAdmin && (
+                    <Card>
+                      <CardHeader className="pb-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Plus className="w-4 h-4 text-primary" strokeWidth={1.75} />
+                          <span>Agregar juego al grupo</span>
+                        </CardTitle>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <div className="relative flex-1 sm:w-52">
+                            <Search
+                              className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2"
+                              strokeWidth={1.75}
+                            />
+                            <Input
+                              value={groupGameSearch}
+                              onChange={(e) => setGroupGameSearch(e.target.value)}
+                              placeholder="Buscar catálogo..."
+                              className="pl-8 h-8 text-xs"
+                            />
+                          </div>
+                          <Button
+                            size="xs"
+                            variant={showCustomGameForm ? 'secondary' : 'outline'}
+                            onClick={() => setShowCustomGameForm((v) => !v)}
+                          >
+                            <Plus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                            <span>Nuevo</span>
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-3 space-y-3">
+                        {showCustomGameForm && (
+                          <div className="p-3 rounded-lg bg-background/60 border border-border space-y-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <Input
+                                value={customGameName}
+                                onChange={(e) => setCustomGameName(e.target.value)}
+                                placeholder="Nombre del juego (ej: Helldivers 2)"
+                                className="h-8 text-xs"
+                              />
+                              <select
+                                value={customGameCategory}
+                                onChange={(e) => setCustomGameCategory(e.target.value)}
+                                className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                              >
+                                {GAME_CATEGORIES.map((cat) => (
+                                  <option key={cat.id} value={cat.id}>
+                                    {cat.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span>Jugadores:</span>
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  max={20}
+                                  value={customGameMinPlayers}
+                                  onChange={(e) =>
+                                    setCustomGameMinPlayers(Number(e.target.value) || 1)
+                                  }
+                                  className="w-16 h-7 text-xs"
+                                />
+                                <span>a</span>
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  max={100}
+                                  value={customGameMaxPlayers}
+                                  onChange={(e) =>
+                                    setCustomGameMaxPlayers(Number(e.target.value) || 5)
+                                  }
+                                  className="w-16 h-7 text-xs"
+                                />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  onClick={() => setShowCustomGameForm(false)}
+                                >
+                                  Cancelar
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  disabled={!customGameName.trim()}
+                                  onClick={handleAddCustomGameToGroup}
+                                >
+                                  Crear y agregar
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {isSearchingGroupGames && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Buscando juegos en Steam / IGDB...
+                          </p>
+                        )}
+
+                        {groupGameCandidates.length === 0 ? (
+                          <p className="text-xs text-muted-foreground text-center py-4">
+                            No se encontraron juegos que coincidan con la búsqueda.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {groupGameCandidates
+                              .slice(0, groupGamePickerLimit)
+                              .map((candidate) => (
+                                <div
+                                  key={candidate.key}
+                                  className="p-2.5 rounded-lg bg-background/45 border border-border flex items-center justify-between gap-3 hover:border-primary/40 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    {candidate.coverUrl ? (
+                                      <img
+                                        src={candidate.coverUrl}
+                                        alt={candidate.name}
+                                        className="w-16 h-10 rounded object-cover shrink-0 border border-border/60"
+                                      />
+                                    ) : (
+                                      <div className="w-16 h-10 rounded bg-secondary/50 border border-border/60 flex items-center justify-center shrink-0 text-muted-foreground">
+                                        <Gamepad2 className="w-4 h-4" strokeWidth={1.75} />
+                                      </div>
+                                    )}
+
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-xs font-semibold text-foreground truncate">
+                                          {candidate.name}
+                                        </span>
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {candidate.category}
+                                        </Badge>
+                                        <span className="text-[10px] text-muted-foreground">
+                                          {candidate.minPlayers}–{candidate.maxPlayers}j
+                                        </span>
+                                      </div>
+
+                                      {candidate.memberAffinities.length > 0 && (
+                                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                                          <div className="flex items-center -space-x-1.5">
+                                            {candidate.memberAffinities.map((aff) => (
+                                              <div
+                                                key={aff.player.id}
+                                                className="relative group/avatar"
+                                              >
+                                                <img
+                                                  src={aff.player.avatarUrl}
+                                                  alt={aff.player.displayName}
+                                                  className={cn(
+                                                    'w-6 h-6 rounded-full object-cover border-2 bg-background cursor-help transition-transform group-hover/avatar:scale-110 group-hover/avatar:z-10',
+                                                    aff.burnedOut
+                                                      ? 'border-destructive/70 opacity-75'
+                                                      : aff.rating && aff.rating >= 4
+                                                        ? 'border-emerald-400/80'
+                                                        : 'border-border'
+                                                  )}
+                                                />
+                                                <div className="pointer-events-none hidden group-hover/avatar:block absolute left-0 bottom-full mb-1.5 z-40 w-48 p-2 rounded-md bg-popover border border-border shadow-xl text-[11px] space-y-1">
+                                                  <div className="font-semibold text-foreground flex items-center justify-between gap-1">
+                                                    <span className="truncate">
+                                                      {aff.player.displayName}
+                                                    </span>
+                                                    {aff.rating && (
+                                                      <span className="text-amber-400 font-mono shrink-0">
+                                                        {aff.rating}★
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                  <div className="text-muted-foreground flex items-center justify-between gap-2 text-[10px]">
+                                                    <span>{aff.sourceLabel}</span>
+                                                    {aff.hoursPlayed !== undefined && (
+                                                      <span className="font-mono">
+                                                        {aff.hoursPlayed}h
+                                                        {aff.recentHoursPlayed
+                                                          ? ` (${aff.recentHoursPlayed}h rec.)`
+                                                          : ''}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                  {aff.burnedOut && (
+                                                    <div className="text-[10px] text-destructive font-medium">
+                                                      Quemado de este juego
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                          <span className="text-[10px] text-emerald-400 font-medium">
+                                            {candidate.memberAffinities.length}{' '}
+                                            {candidate.memberAffinities.length === 1
+                                              ? 'jugador del grupo'
+                                              : 'jugadores del grupo'}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <Button
+                                    size="xs"
+                                    variant="secondary"
+                                    className="shrink-0"
+                                    onClick={() => {
+                                      if (candidate.catalogGameId) {
+                                        addGameToGroup(
+                                          activeGroup.id,
+                                          candidate.catalogGameId
+                                        );
+                                      } else {
+                                        addAndLinkGameToGroup(activeGroup.id, {
+                                          name: candidate.name,
+                                          category: candidate.category,
+                                          coverUrl: candidate.coverUrl,
+                                          minPlayers: candidate.minPlayers,
+                                          maxPlayers: candidate.maxPlayers,
+                                          tags: candidate.tags,
+                                          averageDurationMins:
+                                            candidate.averageDurationMins,
+                                        });
+                                      }
+                                    }}
+                                    title={`Agregar ${candidate.name} al grupo`}
+                                  >
+                                    <Plus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                    <span>Agregar</span>
+                                  </Button>
+                                </div>
+                              ))}
+
+                            {groupGameCandidates.length > groupGamePickerLimit && (
+                              <div className="pt-1 flex justify-center">
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  onClick={() =>
+                                    setGroupGamePickerLimit((n) => n + 30)
+                                  }
+                                >
+                                  Mostrar más ({groupGameCandidates.length - groupGamePickerLimit} restantes)
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+
               {/* SUBTAB 2: DISCORD WEBHOOK SETTINGS */}
               {detailTab === 'discord' && (
                 <div className="space-y-4">
@@ -1224,16 +2039,36 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               {detailTab === 'sessions' && (
                 <div className="space-y-4">
                   <Card>
-                    <CardHeader className="pb-3 border-b border-border flex flex-row items-center justify-between">
+                    <CardHeader className="pb-3 border-b border-border flex flex-row items-center justify-between gap-2">
                       <CardTitle className="text-sm">
                         Activas ({activeGroupSessions.length}) · Historial ({finishedGroupSessions.length})
                       </CardTitle>
-                      {onNavigateToSessions && (
-                        <Button size="xs" onClick={onNavigateToSessions}>
-                          <span>Sesiones</span>
-                          <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          size="xs"
+                          variant="secondary"
+                          disabled={activeGroupSessions.some(
+                            (s) => s.sessionKind === 'instant'
+                          )}
+                          onClick={() => setShowInstantModal(true)}
+                          title={
+                            activeGroupSessions.some(
+                              (s) => s.sessionKind === 'instant'
+                            )
+                              ? 'Ya hay una convocatoria instantánea en curso'
+                              : 'Convocar jugadores ahora'
+                          }
+                        >
+                          <Zap className="w-3.5 h-3.5 text-amber-400" strokeWidth={1.75} />
+                          <span>Convocar ahora</span>
                         </Button>
-                      )}
+                        {onNavigateToSessions && (
+                          <Button size="xs" onClick={onNavigateToSessions}>
+                            <span>Sesiones</span>
+                            <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                          </Button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent className="p-3 space-y-2">
                       {groupSessions.length === 0 ? (
@@ -1270,19 +2105,57 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                                 </p>
                               </div>
 
-                              <Button
-                                size="xs"
-                                variant="secondary"
-                                className="w-7 px-0 shrink-0"
-                                onClick={() => {
-                                  setActiveSessionId(sess.id);
-                                  onNavigateToSessions?.();
-                                }}
-                                title="Ver sesión"
-                                aria-label="Ver sesión"
-                              >
-                                <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-                              </Button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {(sess.createdBy === currentUser.id || isCreatorOrAdmin) && (
+                                  confirmDeleteGroupSessionId === sess.id ? (
+                                    <>
+                                      <Button
+                                        size="xs"
+                                        variant="destructive"
+                                        onClick={() => {
+                                          deleteSession(sess.id);
+                                          setConfirmDeleteGroupSessionId(null);
+                                        }}
+                                        title="Confirmar eliminación"
+                                      >
+                                        <span>Borrar</span>
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        onClick={() => setConfirmDeleteGroupSessionId(null)}
+                                        title="Cancelar"
+                                      >
+                                        <span>No</span>
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <Button
+                                      size="xs"
+                                      variant="destructive"
+                                      className="w-7 px-0"
+                                      onClick={() => setConfirmDeleteGroupSessionId(sess.id)}
+                                      title="Eliminar sesión"
+                                      aria-label="Eliminar sesión"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                    </Button>
+                                  )
+                                )}
+                                <Button
+                                  size="xs"
+                                  variant="secondary"
+                                  className="w-7 px-0 shrink-0"
+                                  onClick={() => {
+                                    setActiveSessionId(sess.id);
+                                    onNavigateToSessions?.();
+                                  }}
+                                  title="Ver sesión"
+                                  aria-label="Ver sesión"
+                                >
+                                  <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                </Button>
+                              </div>
                             </div>
                           );
                         })
@@ -1623,6 +2496,126 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ADD TO MY LIBRARY MODAL */}
+      <InstantSessionModal
+        open={showInstantModal}
+        onOpenChange={setShowInstantModal}
+        groupName={activeGroup?.name}
+        onSubmit={({ startsInMinutes, title }) => {
+          if (!activeGroup) return;
+          createInstantSession({
+            groupId: activeGroup.id,
+            startsInMinutes,
+            title,
+          });
+          onNavigateToSessions?.();
+        }}
+      />
+
+      <Dialog
+        open={libraryModalGame !== null}
+        onOpenChange={(open) => {
+          if (!open) setLibraryModalGame(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <BookPlus className="w-4 h-4 text-primary" strokeWidth={1.75} />
+              <span>Agregar a mi librería</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {libraryModalGame?.name} · {libraryModalGame?.category}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            {librarySteamDetectedHours !== null && (
+              <div className="p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-300 flex items-center justify-between gap-2">
+                <span>Detectado en tu cuenta de Steam</span>
+                <span className="font-mono font-semibold">
+                  {librarySteamDetectedHours}h
+                </span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground block">
+                Puntaje (1–5★)
+              </label>
+              <div className="flex items-center gap-1.5">
+                {([1, 2, 3, 4, 5] as GameRating[]).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setLibraryRating(r)}
+                    className={cn(
+                      'px-2.5 py-1.5 rounded-md border text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer',
+                      libraryRating >= r
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                        : 'bg-background/50 border-border text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    <Star
+                      className={cn(
+                        'w-3.5 h-3.5',
+                        libraryRating >= r ? 'fill-amber-400 text-amber-400' : ''
+                      )}
+                      strokeWidth={1.75}
+                    />
+                    <span>{r}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground" strokeWidth={1.75} />
+                  <span>Horas totales</span>
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  value={libraryHours}
+                  onChange={(e) => setLibraryHours(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground" strokeWidth={1.75} />
+                  <span>Últimas 2 sem. (opc.)</span>
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  value={libraryRecentHours}
+                  onChange={(e) => setLibraryRecentHours(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLibraryModalGame(null)}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" onClick={handleSaveLibraryModal}>
+              Guardar en librería
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

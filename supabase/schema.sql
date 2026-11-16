@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS groups (
   created_by TEXT REFERENCES profiles(id) ON DELETE SET NULL,
   member_ids TEXT[] NOT NULL DEFAULT '{}',
   admin_ids TEXT[] NOT NULL DEFAULT '{}',
+  game_ids TEXT[] NOT NULL DEFAULT '{}',
   discord_webhook_url TEXT NOT NULL DEFAULT '',
   discord_channel_name TEXT NOT NULL DEFAULT 'general-gaming',
   discord_guild_name TEXT NOT NULL DEFAULT '',
@@ -105,12 +106,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   scheduled_date DATE NOT NULL,
   mode TEXT NOT NULL CHECK (mode IN ('fixed', 'random')),
   selected_game_id TEXT REFERENCES games(id) ON DELETE SET NULL,
+  selected_game_ids TEXT[] DEFAULT NULL,
   roulette_winner_game_id TEXT REFERENCES games(id) ON DELETE SET NULL,
   status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'finished')) DEFAULT 'open',
   allow_split_lobbies BOOLEAN NOT NULL DEFAULT FALSE,
   discord_message_id TEXT,
   invited_user_ids TEXT[] DEFAULT NULL,
   callouts JSONB NOT NULL DEFAULT '[]'::JSONB,
+  session_kind TEXT NOT NULL DEFAULT 'scheduled',
+  instant_rsvps JSONB NOT NULL DEFAULT '[]'::JSONB,
   created_by TEXT REFERENCES profiles(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
