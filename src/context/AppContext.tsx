@@ -553,7 +553,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return prev;
         }
         const merged = [...data.players];
-        const activeLocal = prev.find((localP) => localP.id === currentUserId);
+        const activeId = activeSessionUserRef.current.userId;
+        const activeLocal = activeId ? prev.find((localP) => localP.id === activeId) : undefined;
         if (activeLocal && !merged.some((dbP) => dbP.id === activeLocal.id)) {
           merged.push(activeLocal);
         }
@@ -654,6 +655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const existing = prevPlayers.find((p) => p.id === userId);
             if (existing) {
               dbUpsertProfile(existing).catch(console.warn);
+              activeSessionUserRef.current = { userId, isAuthenticated: true };
               setTimeout(() => {
                 setCurrentUserId(userId);
                 setIsAuthenticated(true);
@@ -702,6 +704,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             };
 
             dbUpsertProfile(newProfile).catch(console.warn);
+            activeSessionUserRef.current = { userId, isAuthenticated: true };
             setTimeout(() => {
               setCurrentUserId(userId);
               setIsAuthenticated(true);
@@ -1419,6 +1422,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       const updatedPlayers = [...players, newProfile];
+      activeSessionUserRef.current = { userId: newProfile.id, isAuthenticated: true };
       setPlayers(updatedPlayers);
       syncChannel?.postMessage({ type: 'SYNC_PLAYERS', payload: updatedPlayers });
       dbUpsertProfile(newProfile).catch(console.warn);

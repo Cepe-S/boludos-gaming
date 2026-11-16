@@ -378,7 +378,7 @@ export async function dbUpsertPreference(pref: UserGamePreference) {
 
 export async function dbUpsertProfile(player: PlayerProfile): Promise<void> {
   if (!supabase) return;
-  await supabase.from('profiles').upsert(
+  const { error } = await supabase.from('profiles').upsert(
     {
       id: player.id,
       discord_id: player.discordId,
@@ -405,6 +405,9 @@ export async function dbUpsertProfile(player: PlayerProfile): Promise<void> {
     },
     { onConflict: 'id' }
   );
+  if (error) {
+    console.warn('Supabase dbUpsertProfile warning:', error);
+  }
 }
 
 export async function dbInsertGame(game: Game) {
