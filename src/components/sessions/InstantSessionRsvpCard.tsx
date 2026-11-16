@@ -243,7 +243,14 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
               Respuestas del grupo
             </span>
             <span className="font-mono">
-              {rsvps.length}/{groupMembers.length}
+              {
+                groupMembers.filter(
+                  (m) =>
+                    rsvps.some((r) => r.userId === m.id) ||
+                    activeSession.participants.some((p) => p.userId === m.id)
+                ).length
+              }
+              /{groupMembers.length}
             </span>
           </div>
 
@@ -255,6 +262,15 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
               const participant = activeSession.participants.find(
                 (p) => p.userId === member.id
               );
+              const isGoing =
+                rsvp?.status === 'going' ||
+                (rsvp?.status !== 'declined' && Boolean(participant));
+              const durationText =
+                rsvp?.durationMinutes !== undefined
+                  ? formatDurationLabel(rsvp.durationMinutes)
+                  : participant?.note?.includes('·')
+                    ? participant.note.split('·')[1].trim()
+                    : 'Sin límite';
               return (
                 <div
                   key={member.id}
@@ -271,10 +287,9 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
                     </span>
                   </div>
 
-                  {rsvp?.status === 'going' ? (
+                  {isGoing ? (
                     <Badge variant="success" className="text-[10px] font-mono shrink-0">
-                      {participant?.availableFrom || 'Ahora'} ·{' '}
-                      {formatDurationLabel(rsvp.durationMinutes)}
+                      {participant?.availableFrom || 'Ahora'} · {durationText}
                     </Badge>
                   ) : rsvp?.status === 'declined' ? (
                     <Badge variant="secondary" className="text-[10px] shrink-0">

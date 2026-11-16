@@ -91,10 +91,10 @@ import {
   dbUpdateChatReactions,
   dbUpdateDiscordConfig,
   dbUpdateSessionGame,
-  dbUpdateSessionInstantRsvps,
   dbUpdateSessionInvitesAndCallouts,
   dbUpsertAttendanceVote,
   dbUpsertGroup,
+  dbUpsertInstantRsvp,
   dbUpsertParticipant,
   dbUpsertPreference,
   dbUpsertProfile,
@@ -2266,11 +2266,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       const targetSession = sessions.find((s) => s.id === sessionId);
-      const existingRsvps = targetSession?.instantRsvps || [];
-      const nextRsvps = [
-        ...existingRsvps.filter((r) => r.userId !== targetUserId),
-        newRsvp,
-      ];
       const existingPart = targetSession?.participants.find(
         (p) => p.userId === targetUserId
       );
@@ -2332,7 +2327,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } else if (participantData) {
             await dbUpsertParticipant(sessionId, participantData);
           }
-          await dbUpdateSessionInstantRsvps(sessionId, nextRsvps);
+          await dbUpsertInstantRsvp(sessionId, newRsvp);
         } catch (err) {
           console.warn('Error persisting instant RSVP:', err);
         }

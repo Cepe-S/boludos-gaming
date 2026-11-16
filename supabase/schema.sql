@@ -302,6 +302,20 @@ AFTER INSERT ON sanctions
 FOR EACH ROW
 EXECUTE FUNCTION apply_sanction_karma_delta();
 
+CREATE OR REPLACE FUNCTION public.upsert_instant_rsvp(p_session_id TEXT, p_rsvp JSONB)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  UPDATE public.sessions
+  SET instant_rsvps = (
+    SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb) || jsonb_build_array(p_rsvp)
+    FROM jsonb_array_elements(COALESCE(instant_rsvps, '[]'::jsonb)) AS elem
+    WHERE elem->>'userId' IS DISTINCT FROM p_rsvp->>'userId'
+  )
+  WHERE id = p_session_id;
+$$;
+
 -- ------------------------------------------------------------------------------
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ------------------------------------------------------------------------------

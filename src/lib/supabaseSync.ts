@@ -525,6 +525,20 @@ export async function dbUpdateSessionInstantRsvps(
     .eq('id', sessionId);
 }
 
+export async function dbUpsertInstantRsvp(
+  sessionId: string,
+  rsvp: InstantSessionRsvp
+) {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('upsert_instant_rsvp', {
+    p_session_id: sessionId,
+    p_rsvp: rsvp,
+  });
+  if (error) {
+    console.warn('Supabase dbUpsertInstantRsvp warning:', error);
+  }
+}
+
 export async function dbDeleteParticipant(sessionId: string, userId: string) {
   if (!supabase) return;
   await supabase
