@@ -60,15 +60,22 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
 }) => {
   const rsvps = activeSession.instantRsvps || [];
   const myRsvp = rsvps.find((r) => r.userId === currentUser.id);
+  const myParticipant = activeSession.participants.find(
+    (p) => p.userId === currentUser.id
+  );
+  const isConfirmedGoing =
+    myRsvp?.status === 'going' ||
+    (myRsvp?.status !== 'declined' && Boolean(myParticipant));
 
   const [selectedStatus, setSelectedStatus] = useState<'going' | 'declined'>(
-    myRsvp?.status || 'going'
+    myRsvp?.status || (myParticipant ? 'going' : 'going')
   );
   const [etaMinutes, setEtaMinutes] = useState<number>(myRsvp?.etaMinutes ?? 0);
   const [durationMinutes, setDurationMinutes] = useState<number | undefined>(
     myRsvp?.durationMinutes
   );
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   const commitArrivalTime = formatClockWithOffset(etaMinutes);
   const commitEndTime =
@@ -77,18 +84,28 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
       : null;
 
   useEffect(() => {
+    setIsEditing(false);
+  }, [activeSession.id]);
+
+  useEffect(() => {
     if (myRsvp) {
       setSelectedStatus(myRsvp.status);
       if (myRsvp.etaMinutes !== undefined) setEtaMinutes(myRsvp.etaMinutes);
       setDurationMinutes(myRsvp.durationMinutes);
+    } else if (myParticipant) {
+      setSelectedStatus('going');
     } else {
       setSelectedStatus('going');
       setEtaMinutes(0);
       setDurationMinutes(undefined);
     }
-  }, [activeSession.id, myRsvp]);
+  }, [activeSession.id, myRsvp, myParticipant]);
 
-  const goingCount = rsvps.filter((r) => r.status === 'going').length;
+  const goingCount = groupMembers.filter((m) => {
+    const r = rsvps.find((item) => item.userId === m.id);
+    const p = activeSession.participants.find((item) => item.userId === m.id);
+    return r?.status === 'going' || (r?.status !== 'declined' && Boolean(p));
+  }).length;
   const declinedCount = rsvps.filter((r) => r.status === 'declined').length;
 
   const formatDurationLabel = (mins?: number) => {
@@ -120,31 +137,96 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Going / Declined Toggle */}
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            variant={selectedStatus === 'going' ? 'emerald' : 'outline'}
-            onClick={() => setSelectedStatus('going')}
-          >
-            <CheckCircle2 className="w-4 h-4" strokeWidth={1.75} />
-            <span>¡Estoy!</span>
-          </Button>
+        {isConfirmedGoing && !isEditing ? (
+          <div className="p-3 rounded-md bg-success/10 border border-success/35 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success">
+                <CheckCircle2 className="w-4 h-4" strokeWidth={2} />
+                ¡Ya confirmaste tu llegada!
+              </span>
+              <Badge variant="success" className="text-[10px] font-mono">
+                Confirmado
+              </Badge>
+            </div>
 
-          <Button
-            type="button"
-            variant={selectedStatus === 'declined' ? 'destructive' : 'outline'}
-            onClick={() => {
-              setSelectedStatus('declined');
-              onRespond({ status: 'declined' });
-            }}
-          >
-            <XCircle className="w-4 h-4" strokeWidth={1.75} />
-            <span>No puedo</span>
-          </Button>
-        </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 rounded bg-background/50 border border-border/70">
+                <span className="text-[10px] text-muted-foreground block">Llegada</span>
+                <span className="font-mono font-semibold text-foreground">
+                  {myParticipant?.availableFrom || commitArrivalTime}
+                </span>
+              </div>
+              <div className="p-2 rounded bg-background/50 border border-border/70">
+                <span className="text-[10px] text-muted-foreground block">Duración / Hasta</span>
+                <span className="font-mono font-semibold text-foreground">
+                  {myRsvp?.durationMinutes
+                    ? `${myParticipant?.availableUntil || commitEndTime || ''} (${formatDurationLabel(myRsvp.durationMinutes)})`
+                    : myParticipant?.note?.includes('·')
+                      ? myParticipant.note.split('·')[1].trim()
+                      : 'Sin límite'}
+                </span>
+              </div>
+            </div>
 
-        {selectedStatus === 'going' && (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setSelectedStatus('going');
+                  setIsEditing(true);
+                }}
+              >
+                <Clock className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>Cambiar horario</span>
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="destructive"
+                onClick={() => {
+                  setSelectedStatus('declined');
+                  setIsEditing(false);
+                  onRespond({ status: 'declined' });
+                }}
+              >
+                <XCircle className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>No puedo</span>
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Going / Declined Toggle */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={selectedStatus === 'going' ? 'emerald' : 'outline'}
+                onClick={() => setSelectedStatus('going')}
+              >
+                <CheckCircle2 className="w-4 h-4" strokeWidth={1.75} />
+                <span>¡Estoy!</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant={selectedStatus === 'declined' ? 'destructive' : 'outline'}
+                onClick={() => {
+                  setSelectedStatus('declined');
+                  setIsEditing(false);
+                  onRespond({ status: 'declined' });
+                }}
+              >
+                <XCircle className="w-4 h-4" strokeWidth={1.75} />
+                <span>No puedo</span>
+              </Button>
+            </div>
+          </>
+        )}
+
+        {!(isConfirmedGoing && !isEditing) && selectedStatus === 'going' && (
           <div className="space-y-3 p-3 rounded-md bg-background/45 border border-border">
             <div className="space-y-1.5">
               <Label className="text-[11px] flex items-center gap-1.5">
@@ -224,14 +306,25 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
               )}
             </div>
 
-            <Button
-              type="button"
-              className="w-full"
-              onClick={() => setShowConfirmModal(true)}
-            >
-              <Zap className="w-4 h-4" strokeWidth={1.75} />
-              <span>{myRsvp?.status === 'going' ? 'Actualizar llegada' : 'Confirmar llegada'}</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              {isEditing && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsEditing(false)}
+                >
+                  Cancelar
+                </Button>
+              )}
+              <Button
+                type="button"
+                className="flex-1"
+                onClick={() => setShowConfirmModal(true)}
+              >
+                <Zap className="w-4 h-4" strokeWidth={1.75} />
+                <span>{isConfirmedGoing ? 'Actualizar llegada' : 'Confirmar llegada'}</span>
+              </Button>
+            </div>
           </div>
         )}
 
@@ -359,6 +452,7 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
                   etaMinutes,
                   durationMinutes,
                 });
+                setIsEditing(false);
                 setShowConfirmModal(false);
               }}
             >
