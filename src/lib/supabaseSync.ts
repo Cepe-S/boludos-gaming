@@ -539,14 +539,18 @@ export async function dbUpdateSessionGame(
   selectedGameId: string | null,
   isRouletteWinner: boolean,
   selectedGameIds?: string[],
-  rouletteWinnerGameId?: string
+  rouletteWinnerGameId?: string | null
 ) {
   if (!supabase) return;
-  const winnerId = rouletteWinnerGameId ?? selectedGameId;
-  const payload: Record<string, unknown> = isRouletteWinner
+  const winnerId =
+    rouletteWinnerGameId !== undefined ? rouletteWinnerGameId : selectedGameId;
+  const basePayload: Record<string, unknown> = isRouletteWinner
     ? { selected_game_id: selectedGameId, roulette_winner_game_id: winnerId }
-    : { selected_game_id: selectedGameId };
+    : rouletteWinnerGameId !== undefined
+      ? { selected_game_id: selectedGameId, roulette_winner_game_id: rouletteWinnerGameId }
+      : { selected_game_id: selectedGameId };
 
+  const payload: Record<string, unknown> = { ...basePayload };
   if (selectedGameIds !== undefined) {
     payload.selected_game_ids = selectedGameIds.length > 0 ? selectedGameIds : null;
   }
@@ -554,14 +558,7 @@ export async function dbUpdateSessionGame(
   const { error } = await supabase.from('sessions').update(payload).eq('id', sessionId);
   if (error && selectedGameIds !== undefined && error.message?.includes('selected_game_ids')) {
     // Fallback if remote schema hasn't added selected_game_ids yet
-    await supabase
-      .from('sessions')
-      .update(
-        isRouletteWinner
-          ? { selected_game_id: selectedGameId, roulette_winner_game_id: winnerId }
-          : { selected_game_id: selectedGameId }
-      )
-      .eq('id', sessionId);
+    await supabase.from('sessions').update(basePayload).eq('id', sessionId);
   }
 }
 

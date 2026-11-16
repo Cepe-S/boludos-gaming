@@ -2897,6 +2897,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [sessions, syncChannel]
   );
 
+  const selectSessionGame = useCallback(
+    (sessionId: string, gameId: string) => {
+      const currentSession = sessions.find((s) => s.id === sessionId);
+      const currentIds =
+        currentSession?.selectedGameIds ??
+        (currentSession?.selectedGameId ? [currentSession.selectedGameId] : []);
+      const nextIds = [gameId, ...currentIds.filter((id) => id !== gameId)];
+
+      setSessions((prev) => {
+        const updated = prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          const prevIds = s.selectedGameIds ?? (s.selectedGameId ? [s.selectedGameId] : []);
+          const updatedIds = [gameId, ...prevIds.filter((id) => id !== gameId)];
+          return {
+            ...s,
+            selectedGameIds: updatedIds,
+            selectedGameId: gameId,
+            rouletteWinnerGameId: undefined,
+          };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_SESSIONS', payload: updated });
+        return updated;
+      });
+      dbUpdateSessionGame(sessionId, gameId, false, nextIds, null).catch(console.warn);
+    },
+    [sessions, syncChannel]
+  );
+
   // 4. Attendance, Check-in & Tribunal del Humo
   const checkInToSession = useCallback(
     (sessionId: string, simulatedTime?: string, userId?: string) => {
@@ -4530,6 +4558,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       leaveSession,
       spinSessionRoulette,
       lockSessionGame,
+      selectSessionGame,
 
       sanctions: visibleSanctions,
       checkInToSession,
@@ -4612,6 +4641,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       leaveSession,
       spinSessionRoulette,
       lockSessionGame,
+      selectSessionGame,
       visibleSanctions,
       checkInToSession,
       castAttendanceVote,

@@ -86,6 +86,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     leaveSession,
     spinSessionRoulette,
     lockSessionGame,
+    selectSessionGame,
     games,
     addGame,
     preferences,
@@ -629,6 +630,15 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                     slotReelGameName={slotReelGameName}
                     rouletteWinnerBanner={rouletteWinnerBanner}
                     onSpinRoulette={() => handleSpinRoulette(true)}
+                    chosenGameId={activeGame?.id}
+                    onSelectGame={(gameId) => {
+                      selectSessionGame(activeSession.id, gameId);
+                      setRouletteWinnerBanner(null);
+                      const chosen = games.find((g) => g.id === gameId);
+                      if (chosen) {
+                        showTempBanner(`🎮 Juego elegido: ${chosen.name}`);
+                      }
+                    }}
                     onOpenGamesTab={() => setSessionSubTab('games')}
                     onLockGame={(gameId) => {
                       const existingIds =
@@ -754,6 +764,15 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                 slotReelGameName={slotReelGameName}
                 rouletteWinnerBanner={rouletteWinnerBanner}
                 onSpinRoulette={() => handleSpinRoulette(false)}
+                chosenGameId={activeGame?.id}
+                onSelectGame={(gameId) => {
+                  selectSessionGame(activeSession.id, gameId);
+                  setRouletteWinnerBanner(null);
+                  const chosen = games.find((g) => g.id === gameId);
+                  if (chosen) {
+                    showTempBanner(`🎮 Juego elegido: ${chosen.name}`);
+                  }
+                }}
                 onLockGame={(gameId) => {
                   const existingIds =
                     activeSession.selectedGameIds ??

@@ -35,6 +35,10 @@ export interface SessionGameTileProps {
   actionIcon?: React.ReactNode;
   actionVariant?: 'default' | 'secondary' | 'emerald' | 'outline';
   onAction?: () => void;
+  secondaryActionIcon?: React.ReactNode;
+  secondaryActionVariant?: 'default' | 'secondary' | 'emerald' | 'outline';
+  secondaryActionTitle?: string;
+  onSecondaryAction?: () => void;
 }
 
 function getScorePillClasses(score: number): string {
@@ -133,6 +137,10 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
   actionIcon,
   actionVariant = 'secondary',
   onAction,
+  secondaryActionIcon,
+  secondaryActionVariant = 'outline',
+  secondaryActionTitle,
+  onSecondaryAction,
 }) => {
   const resolvedCoverUrl = getSafeCoverUrl(coverUrl);
 
@@ -213,17 +221,34 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
             {name}
           </span>
 
-          {onAction && actionLabel && (
-            <Button
-              type="button"
-              size="xs"
-              variant={isSelected ? 'emerald' : actionVariant}
-              onClick={onAction}
-              className="h-6 px-2 text-[10px] shrink-0"
-            >
-              {actionIcon}
-              <span>{actionLabel}</span>
-            </Button>
+          {(onSecondaryAction || (onAction && actionLabel)) && (
+            <div className="flex items-center gap-1 shrink-0">
+              {onSecondaryAction && secondaryActionIcon && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={secondaryActionVariant}
+                  onClick={onSecondaryAction}
+                  title={secondaryActionTitle}
+                  aria-label={secondaryActionTitle}
+                  className="h-6 w-6 px-0"
+                >
+                  {secondaryActionIcon}
+                </Button>
+              )}
+              {onAction && actionLabel && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={isSelected ? 'emerald' : actionVariant}
+                  onClick={onAction}
+                  className="h-6 px-2 text-[10px]"
+                >
+                  {actionIcon}
+                  <span>{actionLabel}</span>
+                </Button>
+              )}
+            </div>
           )}
         </div>
 

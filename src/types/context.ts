@@ -188,6 +188,7 @@ export interface AppContextValue {
   leaveSession: (sessionId: string, userId?: string) => void;
   spinSessionRoulette: (sessionId: string, options?: { onlyLocked?: boolean }) => Game | null;
   lockSessionGame: (sessionId: string, gameId: string) => void;
+  selectSessionGame: (sessionId: string, gameId: string) => void;
 
   // Attendance, Check-in & Tribunal del Humo Sanctions
   sanctions: SanctionRecord[];

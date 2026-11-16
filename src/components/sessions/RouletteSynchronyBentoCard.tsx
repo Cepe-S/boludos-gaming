@@ -29,6 +29,7 @@ import {
   Gamepad2,
   Lock,
   PartyPopper,
+  Play,
   RotateCw,
   Sparkles,
   Trophy,
@@ -103,6 +104,8 @@ export interface RouletteSynchronyBentoCardProps {
   rouletteWinnerBanner: Game | null;
   onSpinRoulette: () => void;
   onLockGame: (gameId: string) => void;
+  onSelectGame?: (gameId: string) => void;
+  chosenGameId?: string;
   onSelectRecommendation: (rec: GroupGameRecommendation) => void;
   onOpenGamesTab?: () => void;
 }
@@ -136,6 +139,8 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
   rouletteWinnerBanner,
   onSpinRoulette,
   onLockGame,
+  onSelectGame,
+  chosenGameId,
   onSelectRecommendation,
   onOpenGamesTab,
 }) => {
@@ -330,6 +335,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                 const isWinner =
                   rouletteWinnerBanner?.id === item.game.id ||
                   activeSession.rouletteWinnerGameId === item.game.id;
+                const isChosen = chosenGameId === item.game.id;
                 return (
                   <SessionGameTile
                     key={item.game.id}
@@ -337,9 +343,13 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                     coverUrl={item.game.coverUrl}
                     score={item.synchronyScore}
                     isSelected
-                    statusPill={isWinner ? 'Ruleta' : undefined}
+                    statusPill={isWinner ? 'Ruleta' : isChosen ? 'Elegido' : undefined}
                     infoContent={buildSynchronyInfoContent(item)}
                     playerAvatars={buildPlayerAvatarsFromBreakdown(item)}
+                    secondaryActionIcon={<Play className="w-3 h-3" strokeWidth={2} />}
+                    secondaryActionVariant={isChosen ? 'emerald' : 'outline'}
+                    secondaryActionTitle={isChosen ? 'Juego elegido' : 'Elegir sin tirar ruleta'}
+                    onSecondaryAction={onSelectGame ? () => onSelectGame(item.game.id) : undefined}
                     actionLabel="Quitar"
                     actionIcon={<X className="w-3 h-3" strokeWidth={2} />}
                     actionVariant="outline"
@@ -553,6 +563,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
               <div className={gridColsClass}>
                 {perfectGames.map((item, idx) => {
                   const isSelected = lockedGameIds.includes(item.game.id);
+                  const isChosen = chosenGameId === item.game.id;
                   return (
                     <SessionGameTile
                       key={item.game.id}
@@ -563,6 +574,10 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                       isSelected={isSelected}
                       infoContent={buildSynchronyInfoContent(item)}
                       playerAvatars={buildPlayerAvatarsFromBreakdown(item)}
+                      secondaryActionIcon={<Play className="w-3 h-3" strokeWidth={2} />}
+                      secondaryActionVariant={isChosen ? 'emerald' : 'outline'}
+                      secondaryActionTitle={isChosen ? 'Juego elegido' : 'Elegir sin tirar ruleta'}
+                      onSecondaryAction={onSelectGame ? () => onSelectGame(item.game.id) : undefined}
                       actionLabel={isSelected ? 'Fijado' : 'Fijar'}
                       actionIcon={
                         isSelected ? (
@@ -594,6 +609,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
               <div className={gridColsClass}>
                 {incompatibleGames.map((item) => {
                   const isSelected = lockedGameIds.includes(item.game.id);
+                  const isChosen = chosenGameId === item.game.id;
                   const reasonPill =
                     item.status === 'missing_owners'
                       ? `${item.playersWhoPlayCount}/${item.totalParticipants}`
@@ -611,6 +627,10 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                       statusPill={reasonPill}
                       infoContent={buildSynchronyInfoContent(item)}
                       playerAvatars={buildPlayerAvatarsFromBreakdown(item)}
+                      secondaryActionIcon={<Play className="w-3 h-3" strokeWidth={2} />}
+                      secondaryActionVariant={isChosen ? 'emerald' : 'outline'}
+                      secondaryActionTitle={isChosen ? 'Juego elegido' : 'Elegir sin tirar ruleta'}
+                      onSecondaryAction={onSelectGame ? () => onSelectGame(item.game.id) : undefined}
                       actionLabel={isSelected ? 'Fijado' : 'Fijar'}
                       actionIcon={
                         isSelected ? (
