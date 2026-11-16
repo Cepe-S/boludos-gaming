@@ -566,18 +566,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSessions((prev) => {
         const prevMap = new Map(prev.map((s) => [s.id, s]));
         return data.sessions.map((remote) => {
-          if (remote.selectedGameIds && remote.selectedGameIds.length > 0) {
-            return remote;
-          }
           const local = prevMap.get(remote.id);
-          if (local?.selectedGameIds && local.selectedGameIds.length > 0) {
-            return {
-              ...remote,
+          let nextSession = remote;
+
+          if (
+            (!remote.selectedGameIds || remote.selectedGameIds.length === 0) &&
+            local?.selectedGameIds &&
+            local.selectedGameIds.length > 0
+          ) {
+            nextSession = {
+              ...nextSession,
               selectedGameIds: local.selectedGameIds,
               selectedGameId: local.selectedGameIds[0],
             };
           }
-          return remote;
+
+          // For instant sessions, avoid transient flicker if a participant row is mid-flight
+          if (nextSession.sessionKind === 'instant' && local) {
+            const goingIds = new Set(
+              (nextSession.instantRsvps || [])
+                .filter((r) => r.status === 'going')
+                .map((r) => r.userId)
+            );
+            const remotePartIds = new Set(
+              nextSession.participants.map((p) => p.userId)
+            );
+            const missingFromRemote = local.participants.filter(
+              (p) => goingIds.has(p.userId) && !remotePartIds.has(p.userId)
+            );
+            if (missingFromRemote.length > 0) {
+              nextSession = {
+                ...nextSession,
+                participants: [...nextSession.participants, ...missingFromRemote],
+              };
+            }
+          }
+
+          return nextSession;
         });
       });
       setActiveSessionIdState((prev) =>
@@ -2240,51 +2265,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         respondedAt: now.toISOString(),
       };
 
-      let updatedRsvpsSnapshot: InstantSessionRsvp[] = [];
-      let updatedParticipantSnapshot: SessionParticipant | null = null;
+      const targetSession = sessions.find((s) => s.id === sessionId);
+      const existingRsvps = targetSession?.instantRsvps || [];
+      const nextRsvps = [
+        ...existingRsvps.filter((r) => r.userId !== targetUserId),
+        newRsvp,
+      ];
+      const existingPart = targetSession?.participants.find(
+        (p) => p.userId === targetUserId
+      );
+      const participantData: SessionParticipant | null =
+        params.status === 'declined'
+          ? null
+          : {
+              userId: targetUserId,
+              joinedAt: existingPart?.joinedAt || now.toISOString(),
+              availableFrom,
+              availableUntil,
+              precisionMinutes: 5,
+              attendanceStatus: existingPart?.attendanceStatus || 'pending',
+              checkedInAt: existingPart?.checkedInAt,
+              note: `${etaLabel} · ${durLabel}`,
+              isAutoEnrolled: false,
+              confirmationStatus: 'confirmed',
+              confidencePercentage: 100,
+            };
 
       setSessions((prev) => {
         const updated = prev.map((sess) => {
           if (sess.id !== sessionId) return sess;
 
-          const existingRsvps = sess.instantRsvps || [];
-          const nextRsvps = [
-            ...existingRsvps.filter((r) => r.userId !== targetUserId),
+          const sessRsvps = sess.instantRsvps || [];
+          const mergedRsvps = [
+            ...sessRsvps.filter((r) => r.userId !== targetUserId),
             newRsvp,
           ];
-          updatedRsvpsSnapshot = nextRsvps;
 
           if (params.status === 'declined') {
             return {
               ...sess,
-              instantRsvps: nextRsvps,
+              instantRsvps: mergedRsvps,
               participants: sess.participants.filter((p) => p.userId !== targetUserId),
             };
           }
 
-          const existingPart = sess.participants.find((p) => p.userId === targetUserId);
-          const participantData: SessionParticipant = {
-            userId: targetUserId,
-            joinedAt: existingPart?.joinedAt || now.toISOString(),
-            availableFrom,
-            availableUntil,
-            precisionMinutes: 5,
-            attendanceStatus: existingPart?.attendanceStatus || 'pending',
-            checkedInAt: existingPart?.checkedInAt,
-            note: `${etaLabel} · ${durLabel}`,
-            isAutoEnrolled: false,
-            confirmationStatus: 'confirmed',
-            confidencePercentage: 100,
-          };
-          updatedParticipantSnapshot = participantData;
-
-          const nextParticipants = existingPart
-            ? sess.participants.map((p) => (p.userId === targetUserId ? participantData : p))
-            : [...sess.participants, participantData];
+          const sessPart = sess.participants.find((p) => p.userId === targetUserId);
+          const nextParticipants = sessPart
+            ? sess.participants.map((p) => (p.userId === targetUserId ? participantData! : p))
+            : [...sess.participants, participantData!];
 
           return {
             ...sess,
-            instantRsvps: nextRsvps,
+            instantRsvps: mergedRsvps,
             participants: nextParticipants,
           };
         });
@@ -2293,14 +2325,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       });
 
-      dbUpdateSessionInstantRsvps(sessionId, updatedRsvpsSnapshot).catch(console.warn);
-      if (params.status === 'declined') {
-        dbDeleteParticipant(sessionId, targetUserId).catch(console.warn);
-      } else if (updatedParticipantSnapshot) {
-        dbUpsertParticipant(sessionId, updatedParticipantSnapshot).catch(console.warn);
-      }
+      void (async () => {
+        try {
+          if (params.status === 'declined') {
+            await dbDeleteParticipant(sessionId, targetUserId);
+          } else if (participantData) {
+            await dbUpsertParticipant(sessionId, participantData);
+          }
+          await dbUpdateSessionInstantRsvps(sessionId, nextRsvps);
+        } catch (err) {
+          console.warn('Error persisting instant RSVP:', err);
+        }
+      })();
     },
-    [currentUserId, syncChannel]
+    [currentUserId, sessions, syncChannel]
   );
 
   const joinOrUpdateSessionSchedule = useCallback(
