@@ -81,6 +81,8 @@ import {
 } from '../lib/pushService';
 import { isDiscordOAuthProviderEnabled, isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 import {
+  dbAddGameToGroup,
+  dbAddMemberToGroup,
   dbCreateSession,
   dbDeleteGroup,
   dbDeleteParticipant,
@@ -88,6 +90,8 @@ import {
   dbInsertChatMessage,
   dbInsertGame,
   dbInsertSanction,
+  dbRemoveGameFromGroup,
+  dbRemoveMemberFromGroup,
   dbUpdateChatReactions,
   dbUpdateDiscordConfig,
   dbUpdateSessionGame,
@@ -1208,10 +1212,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
 
       if (!alreadyMember) {
-        const nextGroups = groups.map((g) => (g.id === updatedGroup.id ? updatedGroup : g));
-        setGroups(nextGroups);
-        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
-        dbUpsertGroup(updatedGroup).catch(console.warn);
+        setGroups((prev) => {
+          const nextGroups = prev.map((g) => {
+            if (g.id !== updatedGroup.id) return g;
+            if (g.memberIds.includes(targetUserId)) return g;
+            return {
+              ...g,
+              memberIds: [...g.memberIds, targetUserId],
+              updatedAt: new Date().toISOString(),
+            };
+          });
+          syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+          return nextGroups;
+        });
+        dbAddMemberToGroup(updatedGroup.id, targetUserId).catch(console.warn);
 
         reconcileGroupOpenSessions(updatedGroup, players);
 
@@ -1252,10 +1266,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       };
 
-      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
-      setGroups(nextGroups);
-      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
-      dbUpsertGroup(updatedGroup).catch(console.warn);
+      setGroups((prev) => {
+        const nextGroups = prev.map((g) => {
+          if (g.id !== groupId) return g;
+          if (g.memberIds.includes(userId)) return g;
+          return {
+            ...g,
+            memberIds: [...g.memberIds, userId],
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+        return nextGroups;
+      });
+      dbAddMemberToGroup(groupId, userId).catch(console.warn);
 
       reconcileGroupOpenSessions(updatedGroup, players);
     },
@@ -1274,10 +1298,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       };
 
-      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
-      setGroups(nextGroups);
-      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
-      dbUpsertGroup(updatedGroup).catch(console.warn);
+      setGroups((prev) => {
+        const nextGroups = prev.map((g) => {
+          if (g.id !== groupId) return g;
+          return {
+            ...g,
+            memberIds: g.memberIds.filter((id) => id !== userId),
+            adminIds: g.adminIds.filter((id) => id !== userId),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+        return nextGroups;
+      });
+      dbRemoveMemberFromGroup(groupId, userId).catch(console.warn);
 
       reconcileGroupOpenSessions(updatedGroup, players);
     },
@@ -1286,41 +1320,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addGameToGroup = useCallback(
     (groupId: string, gameId: string) => {
-      const targetGroup = groups.find((g) => g.id === groupId);
-      if (!targetGroup) return;
-      if (targetGroup.gameIds.includes(gameId)) return;
-
-      const updatedGroup: GamingGroup = {
-        ...targetGroup,
-        gameIds: [...targetGroup.gameIds, gameId],
-        updatedAt: new Date().toISOString(),
-      };
-
-      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
-      setGroups(nextGroups);
-      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
-      dbUpsertGroup(updatedGroup).catch(console.warn);
+      setGroups((prev) => {
+        const nextGroups = prev.map((g) => {
+          if (g.id !== groupId) return g;
+          if (g.gameIds.includes(gameId)) return g;
+          return {
+            ...g,
+            gameIds: [...g.gameIds, gameId],
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+        return nextGroups;
+      });
+      dbAddGameToGroup(groupId, gameId).catch(console.warn);
     },
-    [groups, syncChannel]
+    [syncChannel]
   );
 
   const removeGameFromGroup = useCallback(
     (groupId: string, gameId: string) => {
-      const targetGroup = groups.find((g) => g.id === groupId);
-      if (!targetGroup || !targetGroup.gameIds.includes(gameId)) return;
-
-      const updatedGroup: GamingGroup = {
-        ...targetGroup,
-        gameIds: targetGroup.gameIds.filter((id) => id !== gameId),
-        updatedAt: new Date().toISOString(),
-      };
-
-      const nextGroups = groups.map((g) => (g.id === groupId ? updatedGroup : g));
-      setGroups(nextGroups);
-      syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
-      dbUpsertGroup(updatedGroup).catch(console.warn);
+      setGroups((prev) => {
+        const nextGroups = prev.map((g) => {
+          if (g.id !== groupId) return g;
+          if (!g.gameIds.includes(gameId)) return g;
+          return {
+            ...g,
+            gameIds: g.gameIds.filter((id) => id !== gameId),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+        return nextGroups;
+      });
+      dbRemoveGameFromGroup(groupId, gameId).catch(console.warn);
     },
-    [groups, syncChannel]
+    [syncChannel]
   );
 
   const testGroupDiscordWebhook = useCallback(

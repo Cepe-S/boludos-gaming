@@ -362,6 +362,50 @@ export async function dbDeleteGroup(groupId: string): Promise<void> {
   }
 }
 
+export async function dbAddGameToGroup(groupId: string, gameId: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('add_game_to_group', {
+    p_group_id: groupId,
+    p_game_id: gameId,
+  });
+  if (error) {
+    console.warn('Supabase dbAddGameToGroup warning:', error);
+  }
+}
+
+export async function dbRemoveGameFromGroup(groupId: string, gameId: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('remove_game_from_group', {
+    p_group_id: groupId,
+    p_game_id: gameId,
+  });
+  if (error) {
+    console.warn('Supabase dbRemoveGameFromGroup warning:', error);
+  }
+}
+
+export async function dbAddMemberToGroup(groupId: string, userId: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('add_member_to_group', {
+    p_group_id: groupId,
+    p_user_id: userId,
+  });
+  if (error) {
+    console.warn('Supabase dbAddMemberToGroup warning:', error);
+  }
+}
+
+export async function dbRemoveMemberFromGroup(groupId: string, userId: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('remove_member_from_group', {
+    p_group_id: groupId,
+    p_user_id: userId,
+  });
+  if (error) {
+    console.warn('Supabase dbRemoveMemberFromGroup warning:', error);
+  }
+}
+
 export async function dbUpsertPreference(pref: UserGamePreference) {
   if (!supabase) return;
   await supabase.from('user_game_preferences').upsert(

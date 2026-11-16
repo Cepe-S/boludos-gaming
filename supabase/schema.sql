@@ -316,6 +316,61 @@ AS $$
   WHERE id = p_session_id;
 $$;
 
+CREATE OR REPLACE FUNCTION public.add_game_to_group(p_group_id TEXT, p_game_id TEXT)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  UPDATE public.groups
+  SET
+    game_ids = CASE
+      WHEN COALESCE(game_ids, '{}'::text[]) @> ARRAY[p_game_id] THEN COALESCE(game_ids, '{}'::text[])
+      ELSE array_append(COALESCE(game_ids, '{}'::text[]), p_game_id)
+    END,
+    updated_at = NOW()
+  WHERE id = p_group_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.remove_game_from_group(p_group_id TEXT, p_game_id TEXT)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  UPDATE public.groups
+  SET
+    game_ids = array_remove(COALESCE(game_ids, '{}'::text[]), p_game_id),
+    updated_at = NOW()
+  WHERE id = p_group_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.add_member_to_group(p_group_id TEXT, p_user_id TEXT)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  UPDATE public.groups
+  SET
+    member_ids = CASE
+      WHEN COALESCE(member_ids, '{}'::text[]) @> ARRAY[p_user_id] THEN COALESCE(member_ids, '{}'::text[])
+      ELSE array_append(COALESCE(member_ids, '{}'::text[]), p_user_id)
+    END,
+    updated_at = NOW()
+  WHERE id = p_group_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.remove_member_from_group(p_group_id TEXT, p_user_id TEXT)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  UPDATE public.groups
+  SET
+    member_ids = array_remove(COALESCE(member_ids, '{}'::text[]), p_user_id),
+    admin_ids = array_remove(COALESCE(admin_ids, '{}'::text[]), p_user_id),
+    updated_at = NOW()
+  WHERE id = p_group_id;
+$$;
+
 -- ------------------------------------------------------------------------------
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ------------------------------------------------------------------------------
