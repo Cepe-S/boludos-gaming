@@ -4,7 +4,6 @@ import { useApp } from '@/context/AppContext';
 import {
   AttendanceVote,
   Game,
-  GroupGameRecommendation,
   PrecisionMinutes,
   SessionParticipant,
 } from '@/types/domain';
@@ -15,19 +14,14 @@ import {
   getEffectiveDailySchedule,
   parseTimeMinutes,
 } from '@/lib/matchmakingEngine';
-import {
-  GLOBAL_GAMES_KNOWLEDGE_BASE,
-  KnowledgeGameEntry,
-  generateGroupGameRecommendations,
-  normalizeGameName,
-} from '@/lib/tasteProfileEngine';
-import { fetchExternalDiscoveryGames } from '@/lib/steamService';
+import { useNewRecommendations } from '@/hooks/useNewRecommendations';
 import { GroupOnboardingEmptyState } from '@/components/sessions/GroupOnboardingEmptyState';
 import { ScheduleOverlapBentoCard } from '@/components/sessions/ScheduleOverlapBentoCard';
 import { PersonalCheckInBentoCard } from '@/components/sessions/PersonalCheckInBentoCard';
 import { InstantSessionRsvpCard } from '@/components/sessions/InstantSessionRsvpCard';
 import { InstantSessionModal } from '@/components/sessions/InstantSessionModal';
 import { RouletteSynchronyBentoCard } from '@/components/sessions/RouletteSynchronyBentoCard';
+import { SessionRecommendationsView } from '@/components/sessions/SessionRecommendationsView';
 import { SelectedSessionGameCard } from '@/components/sessions/SelectedSessionGameCard';
 import { ParticipantsTribunalBentoCard } from '@/components/sessions/ParticipantsTribunalBentoCard';
 import { SessionCreateModal } from '@/components/sessions/SessionCreateModal';
@@ -39,6 +33,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
+  Brain,
   Calendar,
   CalendarPlus,
   CheckCircle2,
@@ -165,7 +160,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   const [pingingUserId, setPingingUserId] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
-  const [sessionSubTab, setSessionSubTab] = useState<'session' | 'games'>('session');
+  const [sessionSubTab, setSessionSubTab] = useState<'session' | 'games' | 'recommendations'>('session');
 
   const canDeleteActiveSession = useMemo(() => {
     if (!activeSession) return false;
@@ -205,32 +200,20 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     };
   }, []);
 
-  // Optional live IGDB/Steam discovery pool for session recommendations
-  const [liveDiscoveryGames, setLiveDiscoveryGames] = useState<KnowledgeGameEntry[]>([]);
-  useEffect(() => {
-    if (!activeSession || liveDiscoveryGames.length > 0) return;
-    let cancelled = false;
-    fetchExternalDiscoveryGames({
-      igdbClientId: discordConfig.igdbClientId,
-      igdbClientSecret: discordConfig.igdbClientSecret,
-    })
-      .then((res) => {
-        if (!cancelled && res.length > 0) {
-          setLiveDiscoveryGames(res);
-        }
-      })
-      .catch(() => {
-        // Silently fall back to GLOBAL_GAMES_KNOWLEDGE_BASE
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeSession,
-    liveDiscoveryGames.length,
-    discordConfig.igdbClientId,
-    discordConfig.igdbClientSecret,
-  ]);
+  const sessionTargetPlayers = useMemo(() => {
+    if (!activeSession) return [];
+    const targetIds = new Set(activeSession.participants.map((p) => p.userId));
+    return targetIds.size > 0
+      ? players.filter((p) => targetIds.has(p.id))
+      : groupMembers;
+  }, [activeSession, players, groupMembers]);
+
+  const { newRecommendations, ensureCatalogGameFromRec } = useNewRecommendations({
+    targetPlayers: sessionTargetPlayers,
+    catalogGames: groupGames,
+    enabled: Boolean(activeSession),
+    maxResults: 9,
+  });
 
   // Computed Engine Values
   const scheduleOverlap = useMemo(() => {
@@ -267,26 +250,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     [synchronyResults]
   );
 
-  const sessionRecommendations = useMemo(() => {
-    if (!activeSession) {
-      return { readyToPlay: [], discovery: [], all: [] };
-    }
-    const targetIds = new Set(activeSession.participants.map((p) => p.userId));
-    const targetPlayers =
-      targetIds.size > 0
-        ? players.filter((p) => targetIds.has(p.id))
-        : groupMembers;
-
-    return generateGroupGameRecommendations({
-      targetPlayers,
-      catalogGames: groupGames,
-      preferences,
-      externalDiscoveryGames:
-        liveDiscoveryGames.length > 0 ? liveDiscoveryGames : GLOBAL_GAMES_KNOWLEDGE_BASE,
-      maxResultsPerCategory: 6,
-    });
-  }, [activeSession, players, groupMembers, groupGames, preferences, liveDiscoveryGames]);
-
   const activeGame = useMemo(() => {
     if (!activeSession) return null;
     const id =
@@ -320,27 +283,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     window.setTimeout(() => {
       setFeedbackBanner((prev) => (prev === msg ? null : prev));
     }, 4500);
-  };
-
-  // Sync a recommendation (ready_to_play or discovery) into catalog cleanly
-  const ensureCatalogGameFromRec = (rec: GroupGameRecommendation): Game | null => {
-    if (rec.catalogGameId) {
-      return games.find((g) => g.id === rec.catalogGameId) ?? null;
-    }
-    const norm = normalizeGameName(rec.name);
-    const existing = games.find((g) => normalizeGameName(g.name) === norm);
-    if (existing) return existing;
-
-    return addGame({
-      name: rec.name,
-      description: rec.description || 'Agregado desde Recomendaciones IA Grupales',
-      coverUrl: rec.coverUrl,
-      minPlayers: rec.minPlayers,
-      maxPlayers: rec.maxPlayers,
-      category: rec.category,
-      tags: rec.tags,
-      averageDurationMins: 60,
-    });
   };
 
   // Roulette Spin Handler with slot reel visual & confetti
@@ -591,10 +533,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
         </Card>
       ) : (
         <>
-          {/* Session Sub-Tabs: Sesión | Juegos */}
+          {/* Session Sub-Tabs: Sesión | Juegos | Recomendaciones */}
           <Tabs
             value={sessionSubTab}
-            onValueChange={(v) => setSessionSubTab(v as 'session' | 'games')}
+            onValueChange={(v) => setSessionSubTab(v as 'session' | 'games' | 'recommendations')}
             className="w-full space-y-3"
           >
             <TabsList className="w-full sm:w-auto">
@@ -605,6 +547,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
               <TabsTrigger value="games" className="gap-1.5 text-xs">
                 <Gamepad2 className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
                 <span>Juegos</span>
+              </TabsTrigger>
+              <TabsTrigger value="recommendations" className="gap-1.5 text-xs">
+                <Brain className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                <span>Recomendaciones ({newRecommendations.length})</span>
               </TabsTrigger>
             </TabsList>
 
@@ -625,7 +571,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                     perfectGames={perfectGames}
                     splitGames={splitGames}
                     incompatibleGames={incompatibleGames}
-                    sessionRecommendations={sessionRecommendations}
                     isSpinningRoulette={isSpinningRoulette}
                     slotReelGameName={slotReelGameName}
                     rouletteWinnerBanner={rouletteWinnerBanner}
@@ -653,16 +598,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                             ? `Juego quitado: ${locked.name}`
                             : `🔒 Juego fijado: ${locked.name}`
                         );
-                      }
-                    }}
-                    onSelectRecommendation={(rec) => {
-                      const game = ensureCatalogGameFromRec(rec);
-                      if (game) {
-                        if (activeGroup) {
-                          addGameToGroup(activeGroup.id, game.id);
-                        }
-                        lockSessionGame(activeSession.id, game.id);
-                        showTempBanner(`✨ Juego importado/fijado: ${game.name}`);
                       }
                     }}
                   />
@@ -759,7 +694,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                 perfectGames={perfectGames}
                 splitGames={splitGames}
                 incompatibleGames={incompatibleGames}
-                sessionRecommendations={sessionRecommendations}
                 isSpinningRoulette={isSpinningRoulette}
                 slotReelGameName={slotReelGameName}
                 rouletteWinnerBanner={rouletteWinnerBanner}
@@ -788,14 +722,23 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                     );
                   }
                 }}
-                onSelectRecommendation={(rec) => {
+              />
+            </TabsContent>
+
+            <TabsContent value="recommendations" className="mt-0">
+              <SessionRecommendationsView
+                recommendations={newRecommendations}
+                title="Descubrimiento para la Sesión"
+                emptyMessage="No hay recomendaciones nuevas sin agregar para los participantes de esta sesión."
+                actionLabel="Importar y fijar"
+                onImportRecommendation={(rec) => {
                   const game = ensureCatalogGameFromRec(rec);
                   if (game) {
                     if (activeGroup) {
                       addGameToGroup(activeGroup.id, game.id);
                     }
                     lockSessionGame(activeSession.id, game.id);
-                    showTempBanner(`✨ Juego importado/fijado para la sesión: ${game.name}`);
+                    showTempBanner(`✨ Juego importado y fijado: ${game.name}`);
                   }
                 }}
               />

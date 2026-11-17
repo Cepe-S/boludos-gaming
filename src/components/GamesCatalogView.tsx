@@ -35,9 +35,11 @@ import {
 } from '@/components/catalog/sharedCatalogConstants';
 import { GamerProfileSplitView } from '@/components/catalog/GamerProfileSplitView';
 import { ClubMatrixTableView } from '@/components/catalog/ClubMatrixTableView';
+import { SessionRecommendationsView } from '@/components/sessions/SessionRecommendationsView';
+import { useNewRecommendations } from '@/hooks/useNewRecommendations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, Library, UserCheck, X } from 'lucide-react';
+import { Brain, CheckCircle2, Library, UserCheck, X } from 'lucide-react';
 
 export interface GamesCatalogViewProps {
   /** Compact layout mode when embedded inside the interactive onboarding tour */
@@ -58,6 +60,7 @@ export function GamesCatalogView({
     preferences,
     updateGamePreference,
     addGame,
+    addGameToGroup,
     currentUser,
     players,
     activeGroup,
@@ -72,9 +75,32 @@ export function GamesCatalogView({
     !currentUser.steamProfile &&
     !(currentUser.tasteProfile?.topMultiplayerGames?.length);
 
-  const [activeTab, setActiveTab] = useState<'profiler' | 'catalog'>(() =>
+  const [activeTab, setActiveTab] = useState<'profiler' | 'catalog' | 'recommendations'>(() =>
     embeddedInTour || needsTasteSetup ? 'profiler' : 'catalog'
   );
+
+  const groupTargetPlayers = useMemo(() => {
+    if (!activeGroup) return players;
+    const memberSet = new Set(activeGroup.memberIds);
+    const members = players.filter((p) => memberSet.has(p.id));
+    return members.length > 0 ? members : players;
+  }, [activeGroup, players]);
+
+  const groupCatalogGames = useMemo(() => {
+    if (!activeGroup) return games;
+    const groupGameSet = new Set(activeGroup.gameIds);
+    return games.filter((g) => groupGameSet.has(g.id));
+  }, [activeGroup, games]);
+
+  const {
+    newRecommendations: groupNewRecommendations,
+    ensureCatalogGameFromRec,
+  } = useNewRecommendations({
+    targetPlayers: groupTargetPlayers,
+    catalogGames: groupCatalogGames,
+    enabled: !embeddedInTour,
+    maxResults: 9,
+  });
 
   // Two-phase profiling flow state preserved for OnboardingTourModal compatibility
   const [internalProfileRevealed, setInternalProfileRevealed] =
@@ -1034,10 +1060,10 @@ export function GamesCatalogView({
         </div>
       )}
 
-      {/* Primary Two-View Switcher (Mi Perfil vs Matriz) */}
+      {/* Primary View Switcher (Mi Perfil | Matriz | Recomendaciones) */}
       <Tabs
         value={activeTab}
-        onValueChange={(val) => setActiveTab(val as 'profiler' | 'catalog')}
+        onValueChange={(val) => setActiveTab(val as 'profiler' | 'catalog' | 'recommendations')}
         className="w-full"
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
@@ -1054,6 +1080,10 @@ export function GamesCatalogView({
             <TabsTrigger value="catalog" className="gap-1.5">
               <Library className="w-4 h-4" strokeWidth={1.75} />
               <span>Matriz ({games.length})</span>
+            </TabsTrigger>
+            <TabsTrigger value="recommendations" className="gap-1.5">
+              <Brain className="w-4 h-4 text-primary" strokeWidth={1.75} />
+              <span>Recomendaciones ({groupNewRecommendations.length})</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1167,6 +1197,24 @@ export function GamesCatalogView({
             onAddGame={(newGame) => {
               const created = addGame(newGame);
               showToast(`🎮 "${created.name}" agregado al catálogo grupal!`);
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="recommendations" className="mt-3">
+          <SessionRecommendationsView
+            recommendations={groupNewRecommendations}
+            title="Descubrimiento para todo el Grupo"
+            emptyMessage="No hay recomendaciones nuevas sin agregar para los miembros del grupo."
+            actionLabel={activeGroup ? 'Importar al grupo' : 'Importar al catálogo'}
+            onImportRecommendation={(rec) => {
+              const game = ensureCatalogGameFromRec(rec);
+              if (game) {
+                if (activeGroup) {
+                  addGameToGroup(activeGroup.id, game.id);
+                }
+                showToast(`✨ "${game.name}" importado al catálogo del grupo!`);
+              }
             }}
           />
         </TabsContent>

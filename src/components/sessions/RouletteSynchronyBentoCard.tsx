@@ -3,10 +3,7 @@ import {
   Game,
   GameSynchronyResult,
   GamingSession,
-  GroupGameRecommendation,
 } from '@/types/domain';
-import { GroupRecommendationsResult } from '@/lib/tasteProfileEngine';
-import { GroupRecommendationCard } from './GroupRecommendationCard';
 import {
   SessionGameTile,
   SessionPlayerAvatarRow,
@@ -19,11 +16,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   Ban,
-  Brain,
   Check,
   CheckCircle2,
   Clock,
-  Compass,
   Dices,
   Flame,
   Gamepad2,
@@ -31,7 +26,6 @@ import {
   PartyPopper,
   Play,
   RotateCw,
-  Sparkles,
   Trophy,
   Users,
   X,
@@ -98,7 +92,6 @@ export interface RouletteSynchronyBentoCardProps {
   perfectGames: GameSynchronyResult[];
   splitGames: GameSynchronyResult[];
   incompatibleGames: GameSynchronyResult[];
-  sessionRecommendations: GroupRecommendationsResult;
   isSpinningRoulette: boolean;
   slotReelGameName: string | null;
   rouletteWinnerBanner: Game | null;
@@ -106,7 +99,6 @@ export interface RouletteSynchronyBentoCardProps {
   onLockGame: (gameId: string) => void;
   onSelectGame?: (gameId: string) => void;
   chosenGameId?: string;
-  onSelectRecommendation: (rec: GroupGameRecommendation) => void;
   onOpenGamesTab?: () => void;
 }
 
@@ -133,7 +125,6 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
   perfectGames,
   splitGames,
   incompatibleGames,
-  sessionRecommendations,
   isSpinningRoulette,
   slotReelGameName,
   rouletteWinnerBanner,
@@ -141,7 +132,6 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
   onLockGame,
   onSelectGame,
   chosenGameId,
-  onSelectRecommendation,
   onOpenGamesTab,
 }) => {
   const lockedGameIds =
@@ -162,73 +152,6 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
     sectionMode === 'games'
       ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5'
       : 'grid grid-cols-2 sm:grid-cols-3 gap-2';
-
-  const recommendationsContent =
-    sessionRecommendations.all.length === 0 ? (
-      <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">
-        Sin recomendaciones disponibles.
-      </div>
-    ) : (
-      <div className="space-y-4">
-        {sessionRecommendations.readyToPlay.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-success flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />
-                En Catálogo ({sessionRecommendations.readyToPlay.length})
-              </span>
-            </div>
-            <div className={gridColsClass}>
-              {sessionRecommendations.readyToPlay.map((rec) => {
-                const isLocked =
-                  !!rec.catalogGameId && lockedGameIds.includes(rec.catalogGameId);
-                return (
-                  <GroupRecommendationCard
-                    key={rec.id}
-                    recommendation={rec}
-                    compact
-                    isSelectedOrLocked={isLocked}
-                    selectedBadgeLabel="Fijado"
-                    actionLabel={isLocked ? 'Fijado' : 'Fijar'}
-                    actionIcon={
-                      isLocked ? (
-                        <Check className="w-3 h-3" strokeWidth={2} />
-                      ) : (
-                        <Lock className="w-3 h-3" strokeWidth={1.75} />
-                      )
-                    }
-                    actionVariant={isLocked ? 'emerald' : 'secondary'}
-                    onAction={onSelectRecommendation}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {sessionRecommendations.discovery.length > 0 && (
-          <div className="space-y-2 pt-2 border-t border-border">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
-              <Compass className="w-3.5 h-3.5" strokeWidth={1.75} />
-              Descubrimiento ({sessionRecommendations.discovery.length})
-            </span>
-            <div className={gridColsClass}>
-              {sessionRecommendations.discovery.map((rec) => (
-                <GroupRecommendationCard
-                  key={rec.id}
-                  recommendation={rec}
-                  compact
-                  actionLabel="Importar"
-                  actionIcon={<Sparkles className="w-3 h-3" strokeWidth={1.75} />}
-                  actionVariant="default"
-                  onAction={onSelectRecommendation}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
 
   if (sectionMode === 'locked') {
     const lockedSyncItems = lockedGameIds
@@ -532,16 +455,12 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
           )}
         </div>
 
-        {/* Sincronía / Recomendaciones / Otros Tabs (Sub-Lobbies removed) */}
+        {/* Sincronía / Otros Tabs (Sub-Lobbies removed) */}
         <Tabs defaultValue="perfect" className="w-full flex-1 flex flex-col">
-          <TabsList className="grid w-full grid-cols-3 h-auto">
+          <TabsList className="grid w-full grid-cols-2 h-auto">
             <TabsTrigger value="perfect" className="gap-1.5 text-xs py-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-success" strokeWidth={1.75} />
               <span>Sincronía ({perfectGames.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="recommendations" className="gap-1.5 text-xs py-1.5">
-              <Brain className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-              <span>Recomendaciones ({sessionRecommendations.all.length})</span>
             </TabsTrigger>
             <TabsTrigger value="incompatible" className="gap-1.5 text-xs py-1.5">
               <Ban className="w-3.5 h-3.5 text-destructive" strokeWidth={1.75} />
@@ -594,12 +513,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
             )}
           </TabsContent>
 
-          {/* TAB 2: RECOMMENDATIONS */}
-          <TabsContent value="recommendations" className="max-h-[540px] overflow-y-auto pr-1">
-            {recommendationsContent}
-          </TabsContent>
-
-          {/* TAB 3: INCOMPATIBLE GAMES */}
+          {/* TAB 2: INCOMPATIBLE GAMES */}
           <TabsContent value="incompatible" className="max-h-[540px] overflow-y-auto pr-1">
             {incompatibleGames.length === 0 ? (
               <div className="p-6 text-center rounded-md border border-dashed border-border bg-background/45 text-xs text-muted-foreground">

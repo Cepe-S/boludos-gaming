@@ -8,7 +8,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Clock, Lock, PartyPopper, Star, ThumbsDown, Users } from 'lucide-react';
+import { CheckCircle2, Clock, Dices, MousePointerClick, Star, ThumbsDown, Users } from 'lucide-react';
 
 export interface SelectedSessionGameCardProps {
   game: Game;
@@ -26,6 +26,38 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
 
   return (
     <Card className="overflow-hidden border-success/40 bg-card/65">
+      {/* Selected Game Header */}
+      <div className="px-3.5 py-2 border-b border-border/60 bg-success/10 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <CheckCircle2 className="w-4 h-4 text-success shrink-0" strokeWidth={2} />
+          <span className="text-xs font-bold uppercase tracking-wider text-success truncate">
+            Juego Seleccionado
+          </span>
+        </div>
+
+        <Badge
+          variant={isRouletteWinner ? 'success' : 'secondary'}
+          className="text-[10px] shrink-0"
+          title={
+            isRouletteWinner
+              ? 'Seleccionado mediante la ruleta'
+              : 'Seleccionado manualmente'
+          }
+        >
+          {isRouletteWinner ? (
+            <>
+              <Dices className="w-3 h-3" strokeWidth={1.75} />
+              <span>Por ruleta</span>
+            </>
+          ) : (
+            <>
+              <MousePointerClick className="w-3 h-3" strokeWidth={1.75} />
+              <span>Manualmente</span>
+            </>
+          )}
+        </Badge>
+      </div>
+
       {/* Steam 460x215 Cover Header */}
       <div className="relative w-full aspect-[460/215] max-h-[155px] overflow-hidden bg-background">
         <img
@@ -43,20 +75,7 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
           className="relative z-10 h-full w-full object-contain select-none"
         />
 
-        <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5">
-          <Badge variant={isRouletteWinner ? 'success' : 'default'} className="text-[10px] shadow-sm">
-            {isRouletteWinner ? (
-              <>
-                <PartyPopper className="w-3 h-3" strokeWidth={1.75} />
-                <span>Ganador Ruleta</span>
-              </>
-            ) : (
-              <>
-                <Lock className="w-3 h-3" strokeWidth={1.75} />
-                <span>Juego Elegido</span>
-              </>
-            )}
-          </Badge>
+        <div className="absolute top-2 left-2 z-20">
           <Badge variant="outline" className="text-[10px] bg-background/85 backdrop-blur-sm">
             {game.category}
           </Badge>
