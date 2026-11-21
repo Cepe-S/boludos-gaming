@@ -3,11 +3,13 @@ import { useApp } from '@/context/AppContext';
 import { buildDemoLolDataset } from '@/lib/lolDemoData';
 import { DEFAULT_DDRAGON_VERSION, loadDdragonRunesAndSpells } from '@/lib/lolDdragon';
 import {
+  DEFAULT_LOL_QUEUE_FILTERS,
+  DEFAULT_LOL_TIME_RANGE,
   computeGroupLeaderboard,
   computeGroupLeaderboardByRole,
   computeGroupRecords,
   computePlayerAggregates,
-  getQueueCategory,
+  filterMatchesGlobally,
   isGroupMatch,
 } from '@/lib/lolPerformanceEngine';
 import {
@@ -21,18 +23,30 @@ import {
   unlinkRiotAccount,
 } from '@/lib/lolService';
 import { supabase } from '@/lib/supabaseClient';
-import { LolAccount, LolMatchSummary, LolPlatform, LolQueueCategory } from '@/types/lol';
+import {
+  LolAccount,
+  LolMatchSummary,
+  LolPlatform,
+  LolSpecificQueueCategory,
+  LolTimeRangeFilter,
+} from '@/types/lol';
 import { LolDurationScatterPanel } from './lol/LolDurationScatterPanel';
 import { LolGroupLeaderboard } from './lol/LolGroupLeaderboard';
 import { LolGroupRecordsPanel } from './lol/LolGroupRecordsPanel';
 import { LolHeaderBar } from './lol/LolHeaderBar';
+import {
+  LolBootPhases,
+  LolLoadingScreen,
+  collectLolCriticalImageUrls,
+  preloadLolImages,
+} from './lol/LolLoadingScreen';
 import { LolMatchDetailModal } from './lol/LolMatchDetailModal';
 import { LolRecentMatchesList } from './lol/LolRecentMatchesList';
 import { LolStatsComparisonPanel } from './lol/LolStatsComparisonPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { AlertCircle, CheckCircle2, Loader2, Sparkles, Swords } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Sparkles, Swords } from 'lucide-react';
 
 export const LeagueOfLegendsView: React.FC = () => {
   const {
@@ -51,10 +65,27 @@ export const LeagueOfLegendsView: React.FC = () => {
   }, [activeGroup, players]);
 
   const [isDemoMode, setIsDemoMode] = useState(false);
-  const [queueFilter, setQueueFilter] = useState<LolQueueCategory>('all');
+  const [selectedQueues, setSelectedQueues] = useState<LolSpecificQueueCategory[]>(
+    () => [...DEFAULT_LOL_QUEUE_FILTERS]
+  );
+  const [timeRange, setTimeRange] = useState<LolTimeRangeFilter>(DEFAULT_LOL_TIME_RANGE);
   const [recordsScope, setRecordsScope] = useState<'group' | 'all'>('group');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+
+  const handleToggleQueue = useCallback((queue: LolSpecificQueueCategory | 'all') => {
+    if (queue === 'all') {
+      setSelectedQueues([]);
+      return;
+    }
+    setSelectedQueues((prev) => {
+      if (prev.length === 0) return [queue];
+      if (prev.includes(queue)) {
+        return prev.filter((q) => q !== queue);
+      }
+      return [...prev, queue];
+    });
+  }, []);
 
   const [ddragonVersion, setDdragonVersion] = useState(DEFAULT_DDRAGON_VERSION);
   const [hasServerRiotKey, setHasServerRiotKey] = useState<boolean | null>(null);
@@ -69,21 +100,17 @@ export const LeagueOfLegendsView: React.FC = () => {
     message: string;
   } | null>(null);
 
-  useEffect(() => {
-    loadDdragonRunesAndSpells()
-      .then((ver) => setDdragonVersion(ver))
-      .catch(() => undefined);
+  const [isPageReady, setIsPageReady] = useState(false);
+  const [bootProgress, setBootProgress] = useState(0);
+  const [revealGen, setRevealGen] = useState(0);
+  const [bootPhases, setBootPhases] = useState<LolBootPhases>({
+    ddragon: 'loading',
+    edge: 'loading',
+    matches: 'loading',
+    assets: 'pending',
+  });
 
-    getRiotEdgeStatus()
-      .then((status) => {
-        setHasServerRiotKey(status.hasServerKey);
-        setServerKeyUpdatedAt(status.updatedAt ?? null);
-      })
-      .catch(() => {
-        setHasServerRiotKey(false);
-        setServerKeyUpdatedAt(null);
-      });
-  }, []);
+  const demoData = useMemo(() => buildDemoLolDataset(groupMembers), [groupMembers]);
 
   const loadLiveData = useCallback(async () => {
     const memberIds = groupMembers.map((m) => m.id);
@@ -91,7 +118,7 @@ export const LeagueOfLegendsView: React.FC = () => {
       setLiveAccounts([]);
       setLiveMatches([]);
       setIsLoadingLive(false);
-      return;
+      return { accounts: [] as LolAccount[], matches: [] as LolMatchSummary[] };
     }
 
     setIsLoadingLive(true);
@@ -103,13 +130,129 @@ export const LeagueOfLegendsView: React.FC = () => {
     if (res.error) {
       setFeedback({ type: 'error', message: res.error });
     }
+    return { accounts: res.accounts, matches: res.matches };
   }, [groupMembers]);
 
   useEffect(() => {
-    if (!isDemoMode) {
-      void loadLiveData();
-    }
-  }, [isDemoMode, loadLiveData]);
+    let cancelled = false;
+
+    const runFullBootPipeline = async () => {
+      setIsPageReady(false);
+      setBootProgress(8);
+      setBootPhases({
+        ddragon: 'loading',
+        edge: 'loading',
+        matches: 'loading',
+        assets: 'pending',
+      });
+
+      let resolvedVersion = ddragonVersion || DEFAULT_DDRAGON_VERSION;
+      let progressAcc = 8;
+
+      const bumpProgress = (delta: number) => {
+        if (cancelled) return;
+        progressAcc = Math.min(75, progressAcc + delta);
+        setBootProgress(progressAcc);
+      };
+
+      const ddragonPromise = loadDdragonRunesAndSpells()
+        .then((ver) => {
+          resolvedVersion = ver;
+          if (!cancelled) {
+            setDdragonVersion(ver);
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (!cancelled) {
+            setBootPhases((prev) => ({ ...prev, ddragon: 'done' }));
+            bumpProgress(22);
+          }
+        });
+
+      const edgePromise = getRiotEdgeStatus()
+        .then((status) => {
+          if (!cancelled) {
+            setHasServerRiotKey(status.hasServerKey);
+            setServerKeyUpdatedAt(status.updatedAt ?? null);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setHasServerRiotKey((prev) => (prev === null ? false : prev));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setBootPhases((prev) => ({ ...prev, edge: 'done' }));
+            bumpProgress(18);
+          }
+        });
+
+      const dataPromise = (async () => {
+        if (isDemoMode) {
+          return {
+            accounts: demoData.accounts,
+            matches: demoData.matches,
+            members: demoData.members,
+          };
+        }
+        const live = await loadLiveData();
+        return {
+          accounts: live.accounts,
+          matches: live.matches,
+          members: groupMembers,
+        };
+      })().finally(() => {
+        if (!cancelled) {
+          setBootPhases((prev) => ({ ...prev, matches: 'done' }));
+          bumpProgress(27);
+        }
+      });
+
+      const [, , resolvedData] = await Promise.all([
+        ddragonPromise,
+        edgePromise,
+        dataPromise,
+      ]);
+
+      if (cancelled) return;
+
+      setBootPhases((prev) => ({ ...prev, assets: 'loading' }));
+      setBootProgress(78);
+
+      const imageUrls = collectLolCriticalImageUrls({
+        accounts: resolvedData.accounts,
+        matches: resolvedData.matches,
+        members: resolvedData.members,
+        ddragonVersion: resolvedVersion,
+      });
+
+      await preloadLolImages(imageUrls, 1100, (loaded, total) => {
+        if (cancelled) return;
+        const ratio = total > 0 ? loaded / total : 1;
+        setBootProgress(Math.min(99, Math.round(78 + ratio * 21)));
+      });
+
+      if (cancelled) return;
+
+      setBootPhases({
+        ddragon: 'done',
+        edge: 'done',
+        matches: 'done',
+        assets: 'done',
+      });
+      setBootProgress(100);
+      setRevealGen((g) => g + 1);
+      setIsPageReady(true);
+    };
+
+    void runFullBootPipeline();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemoMode, loadLiveData, demoData, groupMembers]);
 
   useEffect(() => {
     if (!supabase || isDemoMode) return;
@@ -136,8 +279,6 @@ export const LeagueOfLegendsView: React.FC = () => {
       void client.removeChannel(channel);
     };
   }, [isDemoMode, loadLiveData]);
-
-  const demoData = useMemo(() => buildDemoLolDataset(groupMembers), [groupMembers]);
 
   const activeMembers = isDemoMode ? demoData.members : groupMembers;
   const activeAccounts = isDemoMode ? demoData.accounts : liveAccounts;
@@ -180,60 +321,58 @@ export const LeagueOfLegendsView: React.FC = () => {
     [activeAccounts]
   );
 
-  const queueFilteredMatches = useMemo(() => {
-    if (queueFilter === 'all') return activeMatches;
-    return activeMatches.filter(
-      (m) => getQueueCategory(m.queueId, m.gameMode) === queueFilter
-    );
-  }, [activeMatches, queueFilter]);
+  const globallyFilteredMatches = useMemo(
+    () => filterMatchesGlobally(activeMatches, selectedQueues, timeRange),
+    [activeMatches, selectedQueues, timeRange]
+  );
 
   const personalVsGroupStats = useMemo(() => {
     if (!selectedAccount) return null;
     return computePlayerAggregates(
-      activeMatches,
+      globallyFilteredMatches,
       selectedAccount.puuid,
       groupPuuids,
-      queueFilter
+      'all'
     );
-  }, [activeMatches, selectedAccount, groupPuuids, queueFilter]);
+  }, [globallyFilteredMatches, selectedAccount, groupPuuids]);
 
   const leaderboardEntries = useMemo(
     () =>
       computeGroupLeaderboard({
-        matches: activeMatches,
+        matches: globallyFilteredMatches,
         accounts: activeAccounts,
         playerProfiles: activeMembers,
-        queueFilter,
+        queueFilter: 'all',
       }),
-    [activeMatches, activeAccounts, activeMembers, queueFilter]
+    [globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
   const roleLeaderboard = useMemo(
     () =>
       computeGroupLeaderboardByRole({
-        matches: activeMatches,
+        matches: globallyFilteredMatches,
         accounts: activeAccounts,
         playerProfiles: activeMembers,
-        queueFilter,
+        queueFilter: 'all',
       }),
-    [activeMatches, activeAccounts, activeMembers, queueFilter]
+    [globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
   const hasGroupMatches = useMemo(
-    () => queueFilteredMatches.some((m) => isGroupMatch(m, groupPuuids)),
-    [queueFilteredMatches, groupPuuids]
+    () => globallyFilteredMatches.some((m) => isGroupMatch(m, groupPuuids)),
+    [globallyFilteredMatches, groupPuuids]
   );
 
   const groupRecords = useMemo(
     () =>
       computeGroupRecords({
-        matches: activeMatches,
+        matches: globallyFilteredMatches,
         accounts: activeAccounts,
         playerProfiles: activeMembers,
-        queueFilter,
+        queueFilter: 'all',
         scope: recordsScope,
       }),
-    [activeMatches, activeAccounts, activeMembers, queueFilter, recordsScope]
+    [globallyFilteredMatches, activeAccounts, activeMembers, recordsScope]
   );
 
   const selectedMatch = useMemo(
@@ -339,41 +478,58 @@ export const LeagueOfLegendsView: React.FC = () => {
     return { ok: false, error: res.error };
   };
 
-  return (
-    <div className="space-y-4">
-      <LolHeaderBar
-        userGroups={userGroups}
-        activeGroup={activeGroup}
-        onSelectGroup={setActiveGroupId}
-        groupMembers={activeMembers}
-        accounts={activeAccounts}
-        selectedUserId={selectedAccount?.userId ?? selectedUserId}
-        onSelectUser={(uid) => {
-          setSelectedUserId(uid);
-          setSelectedMatchId(null);
-        }}
-        queueFilter={queueFilter}
-        onChangeQueueFilter={setQueueFilter}
+  if (!isPageReady || (!isDemoMode && isLoadingLive && activeAccounts.length === 0)) {
+    return (
+      <LolLoadingScreen
+        progress={bootProgress}
+        phases={bootPhases}
+        groupName={activeGroup?.name}
         isDemoMode={isDemoMode}
-        onToggleDemoMode={(demo) => {
-          setIsDemoMode(demo);
-          setSelectedMatchId(null);
-        }}
-        isSyncing={isSyncing}
-        hasServerRiotKey={hasServerRiotKey}
-        serverKeyUpdatedAt={serverKeyUpdatedAt}
-        ddragonVersion={ddragonVersion}
-        onLinkAndSync={handleLinkAndSync}
-        onSyncPlayer={handleSyncPlayer}
-        onSyncGroup={handleSyncGroup}
-        onUnlinkAccount={handleUnlinkAccount}
-        onSaveServerRiotKey={handleSaveServerRiotKey}
       />
+    );
+  }
+
+  const filterAnimKey = `${revealGen}-${selectedAccount?.userId ?? 'none'}-${selectedQueues.join(',')}-${timeRange}`;
+
+  return (
+    <div key={`lol-ready-${revealGen}`} className="space-y-4">
+      <div className="animate-lol-reveal" style={{ animationDelay: '0ms' }}>
+        <LolHeaderBar
+          userGroups={userGroups}
+          activeGroup={activeGroup}
+          onSelectGroup={setActiveGroupId}
+          groupMembers={activeMembers}
+          accounts={activeAccounts}
+          selectedUserId={selectedAccount?.userId ?? selectedUserId}
+          onSelectUser={(uid) => {
+            setSelectedUserId(uid);
+            setSelectedMatchId(null);
+          }}
+          selectedQueues={selectedQueues}
+          onToggleQueue={handleToggleQueue}
+          timeRange={timeRange}
+          onChangeTimeRange={setTimeRange}
+          isDemoMode={isDemoMode}
+          onToggleDemoMode={(demo) => {
+            setIsDemoMode(demo);
+            setSelectedMatchId(null);
+          }}
+          isSyncing={isSyncing}
+          hasServerRiotKey={hasServerRiotKey}
+          serverKeyUpdatedAt={serverKeyUpdatedAt}
+          ddragonVersion={ddragonVersion}
+          onLinkAndSync={handleLinkAndSync}
+          onSyncPlayer={handleSyncPlayer}
+          onSyncGroup={handleSyncGroup}
+          onUnlinkAccount={handleUnlinkAccount}
+          onSaveServerRiotKey={handleSaveServerRiotKey}
+        />
+      </div>
 
       {feedback && (
         <div
           className={cn(
-            'px-3.5 py-2.5 rounded-md border text-xs font-medium flex items-center gap-2',
+            'px-3.5 py-2.5 rounded-md border text-xs font-medium flex items-center gap-2 animate-lol-card-pop',
             feedback.type === 'success'
               ? 'bg-success/10 border-success/40 text-success'
               : 'bg-destructive/10 border-destructive/40 text-destructive'
@@ -388,99 +544,101 @@ export const LeagueOfLegendsView: React.FC = () => {
         </div>
       )}
 
-      {!isDemoMode && isLoadingLive && activeAccounts.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 flex items-center justify-center gap-2 text-xs font-mono text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            <span>Cargando datos de League of Legends...</span>
-          </CardContent>
-        </Card>
-      ) : !selectedAccount || !personalVsGroupStats ? (
-        <Card>
-          <CardContent className="py-10 px-4 flex flex-col items-center justify-center text-center gap-3">
-            <div className="w-11 h-11 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary">
-              <Swords className="w-5 h-5" strokeWidth={1.75} />
-            </div>
-            <div className="space-y-1 max-w-md">
-              <h3 className="text-sm font-bold text-foreground">
-                Sin cuentas de Riot vinculadas en {activeGroup?.name || 'este grupo'}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Vinculá tu Riot ID arriba o activá el modo Demo para explorar todas las métricas.
-              </p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="default"
-              onClick={() => setIsDemoMode(true)}
-            >
-              <Sparkles className="w-4 h-4" strokeWidth={1.75} />
-              <span>Activar Modo Demo</span>
-            </Button>
-          </CardContent>
-        </Card>
+      {!selectedAccount || !personalVsGroupStats ? (
+        <div className="animate-lol-reveal" style={{ animationDelay: '70ms' }}>
+          <Card>
+            <CardContent className="py-10 px-4 flex flex-col items-center justify-center text-center gap-3">
+              <div className="w-11 h-11 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary animate-lol-card-pop">
+                <Swords className="w-5 h-5" strokeWidth={1.75} />
+              </div>
+              <div className="space-y-1 max-w-md">
+                <h3 className="text-sm font-bold text-foreground">
+                  Sin cuentas de Riot vinculadas en {activeGroup?.name || 'este grupo'}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Vinculá tu Riot ID arriba o activá el modo Demo para explorar todas las métricas.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                onClick={() => setIsDemoMode(true)}
+              >
+                <Sparkles className="w-4 h-4" strokeWidth={1.75} />
+                <span>Activar Modo Demo</span>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       ) : (
-        <>
-          <LolStatsComparisonPanel
-            account={selectedAccount}
-            displayName={selectedMemberProfile.displayName}
-            stats={personalVsGroupStats}
-            ddragonVersion={ddragonVersion}
-          />
-
-          {/* Bento Row 3: Compact Recent Matches (left) + Unified Time vs Duration Scatter (right) */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-            <div className="xl:col-span-7 min-w-0">
-              <LolRecentMatchesList
-                matches={queueFilteredMatches}
-                targetPuuid={selectedAccount.puuid}
-                groupPuuids={groupPuuids}
-                accountByPuuid={accountByPuuid}
-                ddragonVersion={ddragonVersion}
-                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
-              />
-            </div>
-
-            <div className="xl:col-span-5 min-w-0">
-              <LolDurationScatterPanel
-                matches={queueFilteredMatches}
-                targetPuuid={selectedAccount.puuid}
-                groupPuuids={groupPuuids}
-                accountByPuuid={accountByPuuid}
-                ddragonVersion={ddragonVersion}
-                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
-              />
-            </div>
+        <div key={filterAnimKey} className="space-y-4">
+          <div className="animate-lol-reveal" style={{ animationDelay: '65ms' }}>
+            <LolStatsComparisonPanel
+              account={selectedAccount}
+              displayName={selectedMemberProfile.displayName}
+              stats={personalVsGroupStats}
+              ddragonVersion={ddragonVersion}
+            />
           </div>
 
-          {/* Bento Row 4: Compact Group Leaderboard + Role Leaders (left) + Group Records (right) */}
+          {/* Bento Row 3 (Full Width): Panoramic Zoomable/Pannable Timeline + Group WR */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '130ms' }}>
+            <LolDurationScatterPanel
+              matches={globallyFilteredMatches}
+              targetPuuid={selectedAccount.puuid}
+              groupPuuids={groupPuuids}
+              accountByPuuid={accountByPuuid}
+              ddragonVersion={ddragonVersion}
+              onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+            />
+          </div>
+
+          {/* Bento Row 4: Compact Recent Matches (left) + Group Leaderboard / Role Leaders (right) */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-            <div className="xl:col-span-6 min-w-0">
+            <div
+              className="xl:col-span-7 min-w-0 animate-lol-reveal"
+              style={{ animationDelay: '195ms' }}
+            >
+              <LolRecentMatchesList
+                matches={globallyFilteredMatches}
+                targetPuuid={selectedAccount.puuid}
+                groupPuuids={groupPuuids}
+                accountByPuuid={accountByPuuid}
+                ddragonVersion={ddragonVersion}
+                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+              />
+            </div>
+
+            <div
+              className="xl:col-span-5 min-w-0 animate-lol-reveal"
+              style={{ animationDelay: '260ms' }}
+            >
               <LolGroupLeaderboard
                 entries={leaderboardEntries}
                 roleLeaderboard={roleLeaderboard}
                 selectedUserId={selectedAccount.userId}
-                queueFilter={queueFilter}
+                queueFilter={selectedQueues.length === 0 ? 'all' : selectedQueues[0]}
                 ddragonVersion={ddragonVersion}
                 onSelectPlayer={(uid) => setSelectedUserId(uid)}
-              />
-            </div>
-
-            <div className="xl:col-span-6 min-w-0">
-              <LolGroupRecordsPanel
-                records={groupRecords}
-                scope={recordsScope}
-                onChangeScope={setRecordsScope}
-                hasGroupMatches={hasGroupMatches}
-                selectedUserId={selectedAccount.userId}
-                ddragonVersion={ddragonVersion}
-                onSelectPlayer={(uid) => setSelectedUserId(uid)}
-                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
               />
             </div>
           </div>
-        </>
+
+          {/* Bento Row 5 (Full Width): Group Records Bento Grid */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '325ms' }}>
+            <LolGroupRecordsPanel
+              records={groupRecords}
+              scope={recordsScope}
+              onChangeScope={setRecordsScope}
+              hasGroupMatches={hasGroupMatches}
+              selectedUserId={selectedAccount.userId}
+              ddragonVersion={ddragonVersion}
+              onSelectPlayer={(uid) => setSelectedUserId(uid)}
+              onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+            />
+          </div>
+        </div>
       )}
 
       {selectedMatch && selectedAccount && (

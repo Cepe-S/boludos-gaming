@@ -15,6 +15,7 @@ import { getGradeFromScore, RIFT_ROLE_KEYS } from '@/lib/lolPerformanceEngine';
 import {
   LOL_FF_CHIP_CLASS,
   LOL_STAT_GLOSSARY,
+  LolAnimatedNumber,
   LolChampionAvatar,
   LolInfoTip,
 } from './LolPrimitives';
@@ -250,7 +251,7 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                   </TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody key={`general-${sortBy}`}>
                 {sortedEntries.map((entry, idx) => {
                   const isSelected = selectedUserId === entry.userId;
                   const grade = getGradeFromScore(entry.groupPerformanceAvg);
@@ -259,15 +260,16 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                   return (
                     <TableRow
                       key={entry.userId}
+                      style={{ animationDelay: `${idx * 40}ms` }}
                       onClick={() => onSelectPlayer(entry.userId)}
                       className={cn(
-                        'cursor-pointer',
+                        'cursor-pointer animate-lol-row-slide transition-colors',
                         isSelected && 'bg-primary/10 hover:bg-primary/15'
                       )}
                     >
                       <TableCell className="font-mono font-bold px-2.5 py-2">
                         {idx === 0 && entry.groupGamesScored > 0 ? (
-                          <Trophy className="w-3.5 h-3.5 text-amber-400" strokeWidth={1.75} />
+                          <Trophy className="w-3.5 h-3.5 text-amber-400 animate-pulse" strokeWidth={1.75} />
                         ) : (
                           <span className="text-xs text-muted-foreground">#{idx + 1}</span>
                         )}
@@ -323,9 +325,12 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                         {entry.groupGamesScored > 0 ? (
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1.5 text-[11px]">
-                              <span className="font-bold text-primary">
-                                {entry.groupRankScore.toFixed(1)}
-                              </span>
+                              <LolAnimatedNumber
+                                value={entry.groupRankScore}
+                                decimals={1}
+                                durationMs={520}
+                                className="font-bold text-primary"
+                              />
                               <span
                                 className={cn(
                                   'px-1 py-0 rounded border text-[9.5px] font-bold leading-tight',
@@ -337,9 +342,10 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                             </div>
                             <div className="h-1 w-20 rounded-full bg-secondary overflow-hidden">
                               <div
-                                className="h-full rounded-full bg-primary"
+                                className="h-full rounded-full bg-primary animate-lol-bar-grow"
                                 style={{
                                   width: `${Math.min(100, Math.max(0, entry.groupRankScore))}%`,
+                                  animationDelay: `${idx * 40 + 60}ms`,
                                 }}
                               />
                             </div>
@@ -385,14 +391,15 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
         ) : selectedLane === 'ALL' ? (
           /* View: 5 Lanes Summary */
           <div className="p-3 pt-1 max-h-[380px] overflow-y-auto scroller-thin space-y-2">
-            {RIFT_ROLE_KEYS.map((lane) => {
+            {RIFT_ROLE_KEYS.map((lane, lIdx) => {
               const laneList = roleLeaderboard[lane] || [];
               const leader = laneList[0] ?? null;
 
               return (
                 <div
                   key={lane}
-                  className="p-2 rounded-md border border-border bg-background/45 space-y-1.5"
+                  style={{ animationDelay: `${lIdx * 40}ms` }}
+                  className="p-2 rounded-md border border-border bg-background/45 space-y-1.5 animate-lol-row-slide transition-colors hover:border-border/90"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
@@ -513,16 +520,17 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                     <TableHead className="px-2.5 text-right">Partidas / KDA</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody key={`lane-${selectedLane}`}>
                   {activeLaneEntries.map((entry, idx) => {
                     const grade = getGradeFromScore(entry.avgPerformance);
                     const isSelected = selectedUserId === entry.userId;
                     return (
                       <TableRow
                         key={entry.userId}
+                        style={{ animationDelay: `${idx * 40}ms` }}
                         onClick={() => onSelectPlayer(entry.userId)}
                         className={cn(
-                          'cursor-pointer',
+                          'cursor-pointer animate-lol-row-slide',
                           isSelected && 'bg-primary/10 hover:bg-primary/15'
                         )}
                       >

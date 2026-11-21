@@ -346,7 +346,7 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {parts.map((p) => {
+            {parts.map((p, pIdx) => {
               const isInspected = p.puuid === inspectedSummary?.puuid;
               const isGroup = groupPuuids.has(p.puuid);
               const groupAcc = accountByPuuid.get(p.puuid);
@@ -355,9 +355,10 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
               return (
                 <TableRow
                   key={`${p.puuid}-${p.participantId}`}
+                  style={{ animationDelay: `${pIdx * 35}ms` }}
                   onClick={() => setInspectedPuuid(p.puuid)}
                   className={cn(
-                    'cursor-pointer',
+                    'cursor-pointer animate-lol-row-slide',
                     isInspected && 'bg-primary/15 hover:bg-primary/20'
                   )}
                 >
@@ -434,8 +435,14 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-0.5">
                       <div
-                        className={cn('h-full rounded-full', isBlue ? 'bg-sky-400' : 'bg-rose-400')}
-                        style={{ width: `${dmgWidth}%` }}
+                        className={cn(
+                          'h-full rounded-full animate-lol-bar-grow',
+                          isBlue ? 'bg-sky-400' : 'bg-rose-400'
+                        )}
+                        style={{
+                          width: `${dmgWidth}%`,
+                          animationDelay: `${pIdx * 35 + 60}ms`,
+                        }}
                       />
                     </div>
                   </TableCell>
@@ -484,7 +491,7 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
       aria-label={`Detalle de partida ${match.matchId}`}
     >
       <div
-        className="w-full max-w-[95vw] xl:max-w-[1320px] h-[92vh] flex flex-col overflow-hidden rounded-md border border-white/15 bg-card/95 backdrop-blur-xl text-card-foreground shadow-[0_28px_80px_-16px_rgba(0,0,0,0.9)] ring-1 ring-inset ring-white/5"
+        className="w-full max-w-[95vw] xl:max-w-[1320px] h-[92vh] flex flex-col overflow-hidden rounded-md border border-white/15 bg-card/95 backdrop-blur-xl text-card-foreground shadow-[0_28px_80px_-16px_rgba(0,0,0,0.9)] ring-1 ring-inset ring-white/5 animate-lol-modal-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -927,7 +934,10 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
             </div>
 
             {inspectedSummary && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <div
+                key={`perf-${inspectedSummary.puuid}`}
+                className="grid grid-cols-1 lg:grid-cols-12 gap-4 animate-lol-card-pop"
+              >
                 {/* Performance BG-PERF Breakdown */}
                 <div className="lg:col-span-6 p-3.5 rounded-md border border-border bg-background/45 space-y-3">
                   <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/80">

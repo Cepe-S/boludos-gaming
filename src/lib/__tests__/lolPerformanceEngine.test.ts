@@ -8,6 +8,9 @@ import {
   computeGroupRecords,
   computePlayerAggregates,
   countGroupMembersInMatch,
+  DEFAULT_LOL_QUEUE_FILTERS,
+  DEFAULT_LOL_TIME_RANGE,
+  filterMatchesGlobally,
   getGradeFromScore,
   getQueueCategory,
   getRegionalClusterForPlatform,
@@ -238,9 +241,65 @@ describe('BG-PERF v2 LoL Performance Engine', () => {
       expect(getQueueCategory(440)).toBe('ranked_flex');
       expect(getQueueCategory(400)).toBe('normal');
       expect(getQueueCategory(490)).toBe('normal');
+      expect(getQueueCategory(710)).toBe('mode_5v5');
+      expect(getQueueCategory(700)).toBe('mode_5v5');
       expect(getQueueCategory(450)).toBe('aram');
       expect(getQueueCategory(1700)).toBe('arena');
+      expect(getQueueCategory(1750, 'CHERRY')).toBe('arena');
       expect(getQueueCategory(900, 'URF')).toBe('other');
+    });
+
+    it('filters matches globally with default 30d + Normal/Flex/5v5 filters', () => {
+      const now = 1_760_000_000_000;
+      const dayMs = 24 * 60 * 60 * 1000;
+
+      const makeTimedMatch = (matchId: string, queueId: number, daysAgo: number, gameMode = 'CLASSIC'): LolMatchSummary => ({
+        matchId,
+        platformId: 'LA2',
+        regionalCluster: 'americas',
+        queueId,
+        queueCategory: getQueueCategory(queueId, gameMode),
+        gameMode,
+        gameType: 'MATCHED_GAME',
+        gameVersion: '16.23.1',
+        mapId: queueId === 450 ? 12 : 11,
+        gameCreation: now - daysAgo * dayMs,
+        gameStartTimestamp: now - daysAgo * dayMs,
+        gameEndTimestamp: now - daysAgo * dayMs + 1800_000,
+        gameDuration: 1800,
+        endOfGameResult: 'GameComplete',
+        participantPuuids: [],
+        teams: [],
+        participants: [],
+      });
+
+      const pool = [
+        makeTimedMatch('m-normal-recent', 400, 5),
+        makeTimedMatch('m-flex-recent', 440, 15),
+        makeTimedMatch('m-5v5-recent', 710, 29),
+        makeTimedMatch('m-soloq-recent', 420, 2),
+        makeTimedMatch('m-aram-recent', 450, 3, 'ARAM'),
+        makeTimedMatch('m-arena-recent', 1750, 1, 'CHERRY'),
+        makeTimedMatch('m-flex-old', 440, 35),
+      ];
+
+      expect(DEFAULT_LOL_TIME_RANGE).toBe('30d');
+      expect(DEFAULT_LOL_QUEUE_FILTERS).toEqual(['normal', 'ranked_flex', 'mode_5v5']);
+
+      const filtered = filterMatchesGlobally(
+        pool,
+        DEFAULT_LOL_QUEUE_FILTERS,
+        DEFAULT_LOL_TIME_RANGE,
+        now
+      );
+      expect(filtered.map((m) => m.matchId)).toEqual([
+        'm-normal-recent',
+        'm-flex-recent',
+        'm-5v5-recent',
+      ]);
+
+      // Clearing queues + 'all' time returns everything
+      expect(filterMatchesGlobally(pool, [], 'all', now)).toHaveLength(7);
     });
 
     it('resolves participant roles including ARAM, ARENA, and blank fallback', () => {

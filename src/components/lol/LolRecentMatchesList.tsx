@@ -80,7 +80,7 @@ const ParticipantHoverPortal: React.FC<{
   const card = (
     <div
       style={{ left: `${left}px`, top: `${top}px`, width: `${width}px` }}
-      className="fixed z-[75] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-2.5 text-popover-foreground shadow-[0_20px_50px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2"
+      className="fixed z-[75] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-2.5 text-popover-foreground shadow-[0_20px_50px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2 animate-lol-popover-in"
     >
       {/* Top identity */}
       <div className="flex items-start justify-between gap-2 pb-1.5 border-b border-border/80">
@@ -318,12 +318,15 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
 
       <CardContent className="p-3 pt-1 flex-1 min-h-0">
         {filteredRows.length === 0 ? (
-          <div className="py-10 text-center text-xs text-muted-foreground border border-dashed border-border rounded-md bg-background/30">
+          <div className="py-10 text-center text-xs text-muted-foreground border border-dashed border-border rounded-md bg-background/30 animate-lol-card-pop">
             No hay partidas para los filtros seleccionados.
           </div>
         ) : (
-          <div className="max-h-[396px] overflow-y-auto scroller-thin pr-1 space-y-2">
-            {filteredRows.map(({ match, userPart, groupCount }) => {
+          <div
+            key={`${targetPuuid}-${outcomeFilter}-${onlyGroup}`}
+            className="max-h-[396px] overflow-y-auto scroller-thin pr-1 space-y-2"
+          >
+            {filteredRows.map(({ match, userPart, groupCount }, idx) => {
               const mins = Math.max(1, match.gameDuration / 60);
               const team = match.teams.find((t) => t.teamId === userPart.teamId);
               const teamTotalDmg = Math.max(1, team?.totalDamageToChampions ?? 1);
@@ -365,6 +368,7 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                   key={match.matchId}
                   role="button"
                   tabIndex={0}
+                  style={{ animationDelay: `${Math.min(idx, 12) * 35}ms` }}
                   onClick={() => onSelectMatch(match.matchId)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -373,7 +377,7 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                     }
                   }}
                   className={cn(
-                    'rounded-md border border-border border-l-4 p-2.5 transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring',
+                    'rounded-md border border-border border-l-4 p-2.5 transition-all duration-150 hover:translate-x-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring animate-lol-row-slide',
                     leftBorderClass,
                     bgTintClass
                   )}

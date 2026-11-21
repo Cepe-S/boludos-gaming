@@ -82,11 +82,14 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
         match.gameDuration * 1000;
   const eventTimeLabel =
     Number.isFinite(eventMs) && eventMs > 0
-      ? new Date(eventMs).toLocaleTimeString('es-AR', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
+      ? (() => {
+          const d = new Date(eventMs);
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          return `${dd}/${mm} ${hh}:${min}hs`;
+        })()
       : '';
 
   const groupMates = match.participants.filter((p) => groupPuuids.has(p.puuid));
@@ -94,7 +97,7 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
   const content = (
     <div
       style={{ left: `${position.left}px`, top: `${position.top}px`, width: `${cardWidth}px` }}
-      className="fixed z-[70] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-3 text-popover-foreground shadow-[0_20px_56px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2.5"
+      className="fixed z-[70] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-3 text-popover-foreground shadow-[0_20px_56px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2.5 animate-lol-popover-in"
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/80">
@@ -114,7 +117,7 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
           {eventTimeLabel && (
             <>
               <span>·</span>
-              <span className="text-foreground font-semibold">{eventTimeLabel}hs</span>
+              <span className="text-foreground font-semibold">{eventTimeLabel}</span>
             </>
           )}
           <span>·</span>

@@ -56,9 +56,14 @@ export type LolQueueCategory =
   | 'ranked_solo'
   | 'ranked_flex'
   | 'normal'
+  | 'mode_5v5'
   | 'aram'
   | 'arena'
   | 'other';
+
+export type LolSpecificQueueCategory = Exclude<LolQueueCategory, 'all'>;
+
+export type LolTimeRangeFilter = '7d' | '30d' | '90d' | 'all';
 
 export type LolRoleKey =
   | 'TOP'

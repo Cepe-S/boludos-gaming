@@ -238,8 +238,8 @@ const SCENARIO_SPECS: ScenarioSpec[] = [
   { idSuffix: '004', hoursAgo: 14, queueId: 420, gameMode: 'CLASSIC', durationSec: 960, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 2] },
   // 5: 4-stack ARAM Win 18m (0-20)
   { idSuffix: '005', hoursAgo: 20, queueId: 450, gameMode: 'ARAM', durationSec: 1090, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 1, 2, 4] },
-  // 6: 5-stack Normal Enemy FF Win 17m (0-20 enemySurrendered!)
-  { idSuffix: '006', hoursAgo: 26, queueId: 400, gameMode: 'CLASSIC', durationSec: 1030, team100Win: true, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 1, 2, 3, 4] },
+  // 6: 5-stack Modo 5v5 Enemy FF Win 17m (0-20 enemySurrendered!)
+  { idSuffix: '006', hoursAgo: 26, queueId: 710, gameMode: 'CLASSIC', durationSec: 1030, team100Win: true, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 1, 2, 3, 4] },
   // 7: Remake 3m15s (0-5)
   { idSuffix: '007', hoursAgo: 31, queueId: 420, gameMode: 'CLASSIC', durationSec: 195, team100Win: false, isSurrender: false, isEarlySurrender: true, groupIndices: [0, 1] },
   // 8: Trio Flex Loss 38m (30+)
@@ -248,8 +248,8 @@ const SCENARIO_SPECS: ScenarioSpec[] = [
   { idSuffix: '009', hoursAgo: 45, queueId: 420, gameMode: 'CLASSIC', durationSec: 1750, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0] },
   // 10: Duo Flex Win 23m (20-30)
   { idSuffix: '010', hoursAgo: 52, queueId: 440, gameMode: 'CLASSIC', durationSec: 1380, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 3] },
-  // 11: 4-stack Normal FF 19m (0-20)
-  { idSuffix: '011', hoursAgo: 60, queueId: 400, gameMode: 'CLASSIC', durationSec: 1140, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 2, 3, 4] },
+  // 11: 4-stack Modo 5v5 FF 19m (0-20)
+  { idSuffix: '011', hoursAgo: 60, queueId: 710, gameMode: 'CLASSIC', durationSec: 1140, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 2, 3, 4] },
   // 12: SoloQ Win 35m (30+)
   { idSuffix: '012', hoursAgo: 68, queueId: 420, gameMode: 'CLASSIC', durationSec: 2110, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0] },
   // 13: Duo Flex Loss FF 25m (20-30)

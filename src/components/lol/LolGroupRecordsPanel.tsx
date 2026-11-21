@@ -108,7 +108,7 @@ export const LolGroupRecordsPanel: React.FC<LolGroupRecordsPanelProps> = ({
 
       <CardContent className="p-3 pt-1 flex-1 min-h-0">
         {records.length === 0 ? (
-          <div className="py-10 text-center text-xs text-muted-foreground border border-dashed border-border rounded-md bg-background/30 space-y-2">
+          <div className="py-10 text-center text-xs text-muted-foreground border border-dashed border-border rounded-md bg-background/30 space-y-2 animate-lol-card-pop">
             <p>
               {scope === 'group' && !hasGroupMatches
                 ? 'Sin partidas con ≥2 del grupo en el filtro actual.'
@@ -125,8 +125,11 @@ export const LolGroupRecordsPanel: React.FC<LolGroupRecordsPanelProps> = ({
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[380px] overflow-y-auto scroller-thin pr-1">
-            {records.map((rec) => {
+          <div
+            key={`records-${scope}`}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2"
+          >
+            {records.map((rec, idx) => {
               const isSelected = selectedUserId === rec.userId;
 
               const toneContainer =
@@ -152,6 +155,7 @@ export const LolGroupRecordsPanel: React.FC<LolGroupRecordsPanelProps> = ({
                   key={rec.id}
                   role="button"
                   tabIndex={0}
+                  style={{ animationDelay: `${idx * 35}ms` }}
                   onClick={() => {
                     onSelectPlayer(rec.userId);
                     if (rec.matchId) {
@@ -168,14 +172,16 @@ export const LolGroupRecordsPanel: React.FC<LolGroupRecordsPanelProps> = ({
                     }
                   }}
                   className={cn(
-                    'rounded-md border p-2.5 transition-colors cursor-pointer space-y-1.5 focus:outline-none focus:ring-1 focus:ring-ring',
+                    'group rounded-md border p-2.5 transition-all duration-200 hover:-translate-y-0.5 cursor-pointer space-y-1.5 focus:outline-none focus:ring-1 focus:ring-ring animate-lol-card-pop',
                     toneContainer,
                     isSelected && 'ring-1 ring-primary'
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      {RECORD_ICON_MAP[rec.id]}
+                      <span className="transition-transform duration-150 group-hover:scale-110 shrink-0">
+                        {RECORD_ICON_MAP[rec.id]}
+                      </span>
                       <span className="text-[11px] font-semibold text-foreground truncate">
                         {rec.title}
                       </span>

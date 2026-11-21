@@ -261,3 +261,194 @@
   animation: dropTargetPulse 240ms ease-out infinite;
   will-change: transform, opacity;
 }
+
+/* League of Legends View — Tactical Entrance & Micro-Animations */
+@keyframes lolRevealUp {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lolCardPop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.975);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lolRowSlide {
+  0% {
+    opacity: 0;
+    transform: translateX(-8px) translateY(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+  }
+}
+
+@keyframes lolBarGrow {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes lolDotPop {
+  0% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.16);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes lolRingPulse {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes lolPopoverIn {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lolModalIn {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lolOrbitSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lolOrbitSpinReverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes lolProgressShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-lol-reveal {
+  animation: lolRevealUp 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-lol-card-pop {
+  animation: lolCardPop 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-lol-row-slide {
+  animation: lolRowSlide 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-lol-bar-grow {
+  transform-origin: left center;
+  animation: lolBarGrow 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform;
+}
+
+.animate-lol-dot-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lolDotPop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-lol-ring-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lolRingPulse 2.4s ease-in-out infinite;
+}
+
+.animate-lol-popover-in {
+  animation: lolPopoverIn 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-lol-modal-in {
+  animation: lolModalIn 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-lol-orbit {
+  animation: lolOrbitSpin 8s linear infinite;
+}
+
+.animate-lol-orbit-reverse {
+  animation: lolOrbitSpinReverse 6s linear infinite;
+}
+
+.animate-lol-shimmer {
+  background-size: 200% 100%;
+  animation: lolProgressShimmer 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-lol-reveal,
+  .animate-lol-card-pop,
+  .animate-lol-row-slide,
+  .animate-lol-bar-grow,
+  .animate-lol-dot-pop,
+  .animate-lol-ring-pulse,
+  .animate-lol-popover-in,
+  .animate-lol-modal-in,
+  .animate-lol-orbit,
+  .animate-lol-orbit-reverse,
+  .animate-lol-shimmer {
+    animation: none !important;
+  }
+}

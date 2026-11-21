@@ -3,7 +3,12 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { GamingGroup, PlayerProfile } from '@/types/domain';
-import { LolAccount, LolPlatform, LolQueueCategory } from '@/types/lol';
+import {
+  LolAccount,
+  LolPlatform,
+  LolSpecificQueueCategory,
+  LolTimeRangeFilter,
+} from '@/types/lol';
 import {
   DEFAULT_DDRAGON_VERSION,
   LOL_PLATFORM_OPTIONS,
@@ -38,6 +43,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   AlertCircle,
+  Calendar,
   FolderKanban,
   KeyRound,
   Link2,
@@ -78,13 +84,21 @@ const linkRiotSchema = z.object({
 
 type LinkRiotFormValues = z.infer<typeof linkRiotSchema>;
 
-const QUEUE_FILTERS: Array<{ id: LolQueueCategory; label: string }> = [
+const QUEUE_FILTERS: Array<{ id: LolSpecificQueueCategory | 'all'; label: string }> = [
   { id: 'all', label: 'Todas' },
-  { id: 'ranked_solo', label: 'SoloQ' },
-  { id: 'ranked_flex', label: 'Flex' },
   { id: 'normal', label: 'Normal' },
+  { id: 'ranked_flex', label: 'Flex' },
+  { id: 'mode_5v5', label: '5v5' },
+  { id: 'ranked_solo', label: 'SoloQ' },
   { id: 'aram', label: 'ARAM' },
   { id: 'arena', label: 'Arena' },
+];
+
+const TIME_RANGE_FILTERS: Array<{ id: LolTimeRangeFilter; label: string }> = [
+  { id: '7d', label: '7d' },
+  { id: '30d', label: '30d' },
+  { id: '90d', label: '90d' },
+  { id: 'all', label: 'Todo' },
 ];
 
 export interface LolHeaderBarProps {
@@ -95,8 +109,10 @@ export interface LolHeaderBarProps {
   accounts: LolAccount[];
   selectedUserId: string | null;
   onSelectUser: (userId: string) => void;
-  queueFilter: LolQueueCategory;
-  onChangeQueueFilter: (queue: LolQueueCategory) => void;
+  selectedQueues: LolSpecificQueueCategory[];
+  onToggleQueue: (queue: LolSpecificQueueCategory | 'all') => void;
+  timeRange: LolTimeRangeFilter;
+  onChangeTimeRange: (range: LolTimeRangeFilter) => void;
   isDemoMode: boolean;
   onToggleDemoMode: (demo: boolean) => void;
   isSyncing: boolean;
@@ -135,8 +151,10 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
   accounts,
   selectedUserId,
   onSelectUser,
-  queueFilter,
-  onChangeQueueFilter,
+  selectedQueues,
+  onToggleQueue,
+  timeRange,
+  onChangeTimeRange,
   isDemoMode,
   onToggleDemoMode,
   isSyncing,
@@ -262,16 +280,17 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                   className="w-4 h-4 text-primary shrink-0"
                   strokeWidth={1.75}
                 />
-                {userGroups.map((g) => (
+                {userGroups.map((g, idx) => (
                   <button
                     key={g.id}
                     type="button"
                     onClick={() => onSelectGroup(g.id)}
+                    style={{ animationDelay: `${idx * 25}ms` }}
                     className={cn(
-                      'px-2 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer',
+                      'px-2 py-1 rounded-md border text-[11px] font-medium transition-all duration-150 active:scale-95 cursor-pointer animate-lol-card-pop',
                       activeGroup?.id === g.id
-                        ? 'bg-primary/15 border-primary text-foreground'
-                        : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
+                        ? 'bg-primary/15 border-primary text-foreground shadow-[0_0_12px_-4px_rgba(88,101,242,0.5)]'
+                        : 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:border-border/90'
                     )}
                   >
                     {g.name}
@@ -280,21 +299,52 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
               </div>
             )}
 
-            {/* Queue Filters */}
+            {/* Global Queue Filters (Multi-select) */}
             <div className="flex flex-wrap items-center gap-1">
-              {QUEUE_FILTERS.map((q) => (
+              {QUEUE_FILTERS.map((q, idx) => {
+                const isActive =
+                  q.id === 'all'
+                    ? selectedQueues.length === 0
+                    : selectedQueues.includes(q.id);
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => onToggleQueue(q.id)}
+                    style={{ animationDelay: `${idx * 25 + 30}ms` }}
+                    className={cn(
+                      'px-2.5 py-1 rounded-md border text-[11px] font-medium transition-all duration-150 active:scale-95 cursor-pointer animate-lol-card-pop',
+                      isActive
+                        ? 'bg-primary/15 border-primary text-primary font-semibold shadow-[0_0_10px_-3px_rgba(88,101,242,0.45)]'
+                        : 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:-translate-y-0.5'
+                    )}
+                  >
+                    {q.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Global Time Range Filter */}
+            <div className="flex items-center gap-1 pl-2 border-l border-border">
+              <Calendar
+                className="w-3.5 h-3.5 text-muted-foreground shrink-0"
+                strokeWidth={1.75}
+              />
+              {TIME_RANGE_FILTERS.map((tr, idx) => (
                 <button
-                  key={q.id}
+                  key={tr.id}
                   type="button"
-                  onClick={() => onChangeQueueFilter(q.id)}
+                  onClick={() => onChangeTimeRange(tr.id)}
+                  style={{ animationDelay: `${idx * 25 + 120}ms` }}
                   className={cn(
-                    'px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer',
-                    queueFilter === q.id
+                    'px-2 py-1 rounded-md border text-[11px] font-mono font-medium transition-all duration-150 active:scale-95 cursor-pointer animate-lol-card-pop',
+                    timeRange === tr.id
                       ? 'bg-primary/15 border-primary text-primary font-semibold'
-                      : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
+                      : 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:-translate-y-0.5'
                   )}
                 >
-                  {q.label}
+                  {tr.label}
                 </button>
               ))}
             </div>
@@ -413,13 +463,14 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
             Invocador:
           </span>
-          {groupMembers.map((member) => {
+          {groupMembers.map((member, idx) => {
             const acc = accountByUserId.get(member.id);
             const isSelected = selectedUserId === member.id;
             return (
               <button
                 key={member.id}
                 type="button"
+                style={{ animationDelay: `${idx * 35 + 40}ms` }}
                 onClick={() => {
                   if (acc) {
                     onSelectUser(member.id);
@@ -428,12 +479,12 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                   }
                 }}
                 className={cn(
-                  'inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs transition-colors shrink-0 cursor-pointer',
+                  'group inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs transition-all duration-150 shrink-0 cursor-pointer active:scale-95 animate-lol-card-pop',
                   isSelected
-                    ? 'bg-primary/15 border-primary text-foreground font-semibold'
+                    ? 'bg-primary/15 border-primary text-foreground font-semibold shadow-[0_0_12px_-3px_rgba(88,101,242,0.5)] animate-tile-selected'
                     : acc
-                      ? 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:bg-muted/60'
-                      : 'bg-background/25 border-dashed border-border/70 text-muted-foreground/70 hover:text-foreground'
+                      ? 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:bg-muted/60 hover:-translate-y-0.5'
+                      : 'bg-background/25 border-dashed border-border/70 text-muted-foreground/70 hover:text-foreground hover:-translate-y-0.5'
                 )}
               >
                 <img
@@ -446,7 +497,7 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                       : member.avatarUrl
                   }
                   alt={member.displayName}
-                  className="w-5 h-5 rounded-full object-cover border border-border shrink-0"
+                  className="w-5 h-5 rounded-full object-cover border border-border shrink-0 transition-transform duration-150 group-hover:scale-110"
                 />
                 <span>{member.displayName}</span>
                 {acc ? (

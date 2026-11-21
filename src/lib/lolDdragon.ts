@@ -263,6 +263,7 @@ export const QUEUE_LABELS: Record<number, string> = {
   480: 'Partida Rápida',
   490: 'Quickplay',
   700: 'Clash',
+  710: 'Modo 5v5',
   720: 'ARAM Clash',
   830: 'Co-op Intro',
   840: 'Co-op Principiante',
@@ -276,6 +277,8 @@ export const QUEUE_LABELS: Record<number, string> = {
   1400: 'Libro Definitivo',
   1700: 'Arena',
   1710: 'Arena',
+  1740: 'Arena',
+  1750: 'Arena',
   1900: 'URF',
 };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_DDRAGON_VERSION,
   getChampionIconUrl,
@@ -485,6 +485,91 @@ export const LolPerformanceBadge: React.FC<{
   );
 };
 
+export function useLolAnimatedNumber(
+  target: number,
+  durationMs = 520
+): number {
+  const [current, setCurrent] = useState<number>(target);
+  const prevRef = useRef<number>(0);
+
+  useEffect(() => {
+    const safeTarget = Number.isFinite(target) ? target : 0;
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      setCurrent(safeTarget);
+      prevRef.current = safeTarget;
+      return;
+    }
+
+    const startVal = prevRef.current;
+    const delta = safeTarget - startVal;
+    if (Math.abs(delta) < 0.001 || durationMs <= 0) {
+      setCurrent(safeTarget);
+      prevRef.current = safeTarget;
+      return;
+    }
+
+    let rafId = 0;
+    const startTime = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, Math.max(0, elapsed / durationMs));
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const nextVal = startVal + delta * eased;
+      setCurrent(nextVal);
+      if (progress < 1) {
+        rafId = window.requestAnimationFrame(tick);
+      } else {
+        setCurrent(safeTarget);
+        prevRef.current = safeTarget;
+      }
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+      }
+      prevRef.current = safeTarget;
+    };
+  }, [target, durationMs]);
+
+  return current;
+}
+
+export const LolAnimatedNumber: React.FC<{
+  value: number;
+  decimals?: number;
+  suffix?: string;
+  prefix?: string;
+  durationMs?: number;
+  formatFn?: (n: number) => string;
+  className?: string;
+}> = ({
+  value,
+  decimals = 0,
+  suffix = '',
+  prefix = '',
+  durationMs = 520,
+  formatFn,
+  className,
+}) => {
+  const animated = useLolAnimatedNumber(value, durationMs);
+  const formatted = formatFn
+    ? formatFn(animated)
+    : decimals > 0
+      ? animated.toFixed(decimals)
+      : String(Math.round(animated));
+  return (
+    <span className={className}>
+      {prefix}
+      {formatted}
+      {suffix}
+    </span>
+  );
+};
+
 export const LolPillarBars: React.FC<{
   pillars: LolPerformancePillarScores;
   weights?: LolPerformancePillarScores;
@@ -500,11 +585,15 @@ export const LolPillarBars: React.FC<{
 
   return (
     <div className={cn('grid gap-1.5', compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3')}>
-      {PILLAR_META.map((item) => {
+      {PILLAR_META.map((item, idx) => {
         const val = Math.round(pillars[item.key] ?? 0);
         const weight = weights ? Math.round((weights[item.key] ?? 0) * 100) : null;
         return (
-          <div key={item.key} className="space-y-0.5">
+          <div
+            key={item.key}
+            className="space-y-0.5 animate-lol-card-pop"
+            style={{ animationDelay: `${idx * 40}ms` }}
+          >
             <div className="flex items-center justify-between text-[10px] font-mono gap-1">
               <span className="inline-flex items-center gap-1 text-muted-foreground min-w-0">
                 <span className="truncate">
@@ -521,12 +610,22 @@ export const LolPillarBars: React.FC<{
                   <span className="opacity-60">{weight}%</span>
                 ) : null}
               </span>
-              <span className="text-foreground font-semibold shrink-0">{val}</span>
+              <LolAnimatedNumber
+                value={val}
+                durationMs={480}
+                className="text-foreground font-semibold shrink-0"
+              />
             </div>
             <div className="h-1 rounded-full bg-secondary overflow-hidden">
               <div
-                className={cn('h-full rounded-full transition-all', getBarColor(val))}
-                style={{ width: `${Math.min(100, Math.max(0, val))}%` }}
+                className={cn(
+                  'h-full rounded-full transition-all duration-500 animate-lol-bar-grow',
+                  getBarColor(val)
+                )}
+                style={{
+                  width: `${Math.min(100, Math.max(0, val))}%`,
+                  animationDelay: `${idx * 45 + 60}ms`,
+                }}
               />
             </div>
           </div>

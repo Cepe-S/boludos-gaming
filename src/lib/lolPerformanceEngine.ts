@@ -35,9 +35,19 @@ import type {
   LolRoleLeaderboardByLane,
   LolRoleLeaderboardEntry,
   LolRoleKey,
+  LolSpecificQueueCategory,
+  LolTimeRangeFilter,
   RiotMatchV5,
   RiotMatchV5Participant,
 } from '../types/lol';
+
+export const DEFAULT_LOL_QUEUE_FILTERS: LolSpecificQueueCategory[] = [
+  'normal',
+  'ranked_flex',
+  'mode_5v5',
+];
+
+export const DEFAULT_LOL_TIME_RANGE: LolTimeRangeFilter = '30d';
 
 export const RIFT_ROLE_KEYS: LolRiftRoleKey[] = [
   'TOP',
@@ -138,13 +148,57 @@ export function getQueueCategory(
   if (queueId === 400 || queueId === 430 || queueId === 480 || queueId === 490) {
     return 'normal';
   }
+  if (queueId === 700 || queueId === 710) {
+    return 'mode_5v5';
+  }
   if (queueId === 450 || queueId === 720 || queueId === 930 || gameMode === 'ARAM') {
     return 'aram';
   }
-  if (queueId === 1700 || queueId === 1710 || gameMode === 'CHERRY') {
+  if (
+    queueId === 1700 ||
+    queueId === 1710 ||
+    queueId === 1740 ||
+    queueId === 1750 ||
+    gameMode === 'CHERRY'
+  ) {
     return 'arena';
   }
   return 'other';
+}
+
+const TIME_RANGE_DAYS: Record<Exclude<LolTimeRangeFilter, 'all'>, number> = {
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+};
+
+export function filterMatchesGlobally(
+  matches: LolMatchSummary[],
+  selectedQueues: LolSpecificQueueCategory[],
+  timeRange: LolTimeRangeFilter,
+  nowMs: number = Date.now()
+): LolMatchSummary[] {
+  const cutoffMs =
+    timeRange === 'all'
+      ? null
+      : nowMs - TIME_RANGE_DAYS[timeRange] * 24 * 60 * 60 * 1000;
+  const queueSet = selectedQueues.length > 0 ? new Set(selectedQueues) : null;
+
+  return matches.filter((m) => {
+    if (cutoffMs !== null) {
+      const ts = m.gameCreation > 0 ? m.gameCreation : m.gameStartTimestamp;
+      if (ts > 0 && ts < cutoffMs) {
+        return false;
+      }
+    }
+    if (queueSet !== null) {
+      const cat = getQueueCategory(m.queueId, m.gameMode);
+      if (!queueSet.has(cat)) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 function normalizeRiftRoleToken(raw?: string): LolRoleKey | null {
