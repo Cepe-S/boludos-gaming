@@ -35,7 +35,6 @@ import { LolGroupLeaderboard } from './lol/LolGroupLeaderboard';
 import { LolGroupRecordsPanel } from './lol/LolGroupRecordsPanel';
 import { LolHeaderBar } from './lol/LolHeaderBar';
 import {
-  LolBootPhases,
   LolLoadingScreen,
   collectLolCriticalImageUrls,
   preloadLolImages,
@@ -101,14 +100,7 @@ export const LeagueOfLegendsView: React.FC = () => {
   } | null>(null);
 
   const [isPageReady, setIsPageReady] = useState(false);
-  const [bootProgress, setBootProgress] = useState(0);
   const [revealGen, setRevealGen] = useState(0);
-  const [bootPhases, setBootPhases] = useState<LolBootPhases>({
-    ddragon: 'loading',
-    edge: 'loading',
-    matches: 'loading',
-    assets: 'pending',
-  });
 
   const demoData = useMemo(() => buildDemoLolDataset(groupMembers), [groupMembers]);
 
@@ -138,22 +130,8 @@ export const LeagueOfLegendsView: React.FC = () => {
 
     const runFullBootPipeline = async () => {
       setIsPageReady(false);
-      setBootProgress(8);
-      setBootPhases({
-        ddragon: 'loading',
-        edge: 'loading',
-        matches: 'loading',
-        assets: 'pending',
-      });
 
       let resolvedVersion = ddragonVersion || DEFAULT_DDRAGON_VERSION;
-      let progressAcc = 8;
-
-      const bumpProgress = (delta: number) => {
-        if (cancelled) return;
-        progressAcc = Math.min(75, progressAcc + delta);
-        setBootProgress(progressAcc);
-      };
 
       const ddragonPromise = loadDdragonRunesAndSpells()
         .then((ver) => {
@@ -162,13 +140,7 @@ export const LeagueOfLegendsView: React.FC = () => {
             setDdragonVersion(ver);
           }
         })
-        .catch(() => undefined)
-        .finally(() => {
-          if (!cancelled) {
-            setBootPhases((prev) => ({ ...prev, ddragon: 'done' }));
-            bumpProgress(22);
-          }
-        });
+        .catch(() => undefined);
 
       const edgePromise = getRiotEdgeStatus()
         .then((status) => {
@@ -180,12 +152,6 @@ export const LeagueOfLegendsView: React.FC = () => {
         .catch(() => {
           if (!cancelled) {
             setHasServerRiotKey((prev) => (prev === null ? false : prev));
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setBootPhases((prev) => ({ ...prev, edge: 'done' }));
-            bumpProgress(18);
           }
         });
 
@@ -203,12 +169,7 @@ export const LeagueOfLegendsView: React.FC = () => {
           matches: live.matches,
           members: groupMembers,
         };
-      })().finally(() => {
-        if (!cancelled) {
-          setBootPhases((prev) => ({ ...prev, matches: 'done' }));
-          bumpProgress(27);
-        }
-      });
+      })();
 
       const [, , resolvedData] = await Promise.all([
         ddragonPromise,
@@ -218,9 +179,6 @@ export const LeagueOfLegendsView: React.FC = () => {
 
       if (cancelled) return;
 
-      setBootPhases((prev) => ({ ...prev, assets: 'loading' }));
-      setBootProgress(78);
-
       const imageUrls = collectLolCriticalImageUrls({
         accounts: resolvedData.accounts,
         matches: resolvedData.matches,
@@ -228,21 +186,10 @@ export const LeagueOfLegendsView: React.FC = () => {
         ddragonVersion: resolvedVersion,
       });
 
-      await preloadLolImages(imageUrls, 1100, (loaded, total) => {
-        if (cancelled) return;
-        const ratio = total > 0 ? loaded / total : 1;
-        setBootProgress(Math.min(99, Math.round(78 + ratio * 21)));
-      });
+      await preloadLolImages(imageUrls, 1100);
 
       if (cancelled) return;
 
-      setBootPhases({
-        ddragon: 'done',
-        edge: 'done',
-        matches: 'done',
-        assets: 'done',
-      });
-      setBootProgress(100);
       setRevealGen((g) => g + 1);
       setIsPageReady(true);
     };
@@ -479,14 +426,7 @@ export const LeagueOfLegendsView: React.FC = () => {
   };
 
   if (!isPageReady || (!isDemoMode && isLoadingLive && activeAccounts.length === 0)) {
-    return (
-      <LolLoadingScreen
-        progress={bootProgress}
-        phases={bootPhases}
-        groupName={activeGroup?.name}
-        isDemoMode={isDemoMode}
-      />
-    );
+    return <LolLoadingScreen />;
   }
 
   const filterAnimKey = `${revealGen}-${selectedAccount?.userId ?? 'none'}-${selectedQueues.join(',')}-${timeRange}`;
@@ -589,6 +529,7 @@ export const LeagueOfLegendsView: React.FC = () => {
               targetPuuid={selectedAccount.puuid}
               groupPuuids={groupPuuids}
               accountByPuuid={accountByPuuid}
+              timeRange={timeRange}
               ddragonVersion={ddragonVersion}
               onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
             />

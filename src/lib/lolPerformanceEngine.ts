@@ -166,7 +166,7 @@ export function getQueueCategory(
   return 'other';
 }
 
-const TIME_RANGE_DAYS: Record<Exclude<LolTimeRangeFilter, 'all'>, number> = {
+export const TIME_RANGE_DAYS: Record<Exclude<LolTimeRangeFilter, 'all'>, number> = {
   '7d': 7,
   '30d': 30,
   '90d': 90,

@@ -5,8 +5,13 @@ import {
   LolDurationBucketStats,
   LolMatchParticipantSummary,
   LolMatchSummary,
+  LolTimeRangeFilter,
 } from '@/types/lol';
-import { computeDurationBuckets, isGroupMatch } from '@/lib/lolPerformanceEngine';
+import {
+  computeDurationBuckets,
+  isGroupMatch,
+  TIME_RANGE_DAYS,
+} from '@/lib/lolPerformanceEngine';
 import { DEFAULT_DDRAGON_VERSION } from '@/lib/lolDdragon';
 import { LolMatchHoverCard } from './LolMatchHoverCard';
 import {
@@ -36,6 +41,7 @@ export interface LolDurationScatterPanelProps {
   targetPuuid: string;
   groupPuuids: Set<string>;
   accountByPuuid: Map<string, LolAccount>;
+  timeRange: LolTimeRangeFilter;
   ddragonVersion?: string;
   onSelectMatch: (matchId: string) => void;
 }
@@ -46,7 +52,9 @@ interface ScatterPoint {
   match: LolMatchSummary;
   participant: LolMatchParticipantSummary;
   eventMs: number;
-  durationMins: number;
+  /** Average performanceScore (0-100) of all group members present in the game */
+  groupPerf: number;
+  groupScorers: number;
   isGroup: boolean;
 }
 
@@ -58,6 +66,12 @@ interface GroupWrPoint {
   lossesSoFar: number;
   totalSoFar: number;
   won: boolean;
+}
+
+interface CrosshairState {
+  ms: number;
+  perf: number | null;
+  scorers: number | null;
 }
 
 function bucketMatchesDuration(key: LolDurationBucketKey, sec: number): boolean {
@@ -77,48 +91,103 @@ function resolveEventTimestampMs(match: LolMatchSummary): number {
   return Number.isFinite(endMs) && endMs > 0 ? endMs : Date.now();
 }
 
-function formatAxisTimestamp(ms: number, spanMs: number): string {
-  const d = new Date(ms);
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
+const WEEKDAYS_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'] as const;
 
-  const dayMs = 24 * 60 * 60 * 1000;
-  if (spanMs <= 18 * 60 * 60 * 1000) {
-    return `${dd}/${mm} ${hh}:${min}`;
-  }
-  if (spanMs <= 5 * dayMs) {
-    return `${dd}/${mm} ${hh}h`;
-  }
-  return `${dd}/${mm}`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+function formatDayLabel(ms: number): string {
+  const d = new Date(ms);
+  return `${WEEKDAYS_ES[d.getDay()]} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+}
+
+function formatHourLabel(ms: number): string {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function formatFullDateTime(ms: number): string {
-  const d = new Date(ms);
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${dd}/${mm} ${hh}:${min}hs`;
+  return `${formatDayLabel(ms)} · ${formatHourLabel(ms)}hs`;
+}
+
+const MIN_MS = 60 * 1000;
+const HOUR_MS = 60 * MIN_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+const TICK_STEPS_MS = [
+  10 * MIN_MS,
+  15 * MIN_MS,
+  30 * MIN_MS,
+  HOUR_MS,
+  2 * HOUR_MS,
+  3 * HOUR_MS,
+  6 * HOUR_MS,
+  12 * HOUR_MS,
+  DAY_MS,
+  2 * DAY_MS,
+  3 * DAY_MS,
+  4 * DAY_MS,
+  7 * DAY_MS,
+  14 * DAY_MS,
+  30 * DAY_MS,
+] as const;
+
+/** Builds calendar-aligned (local time) ticks: hour boundaries or local midnights. */
+function buildTimeTicks(
+  minMs: number,
+  maxMs: number,
+  targetCount = 10
+): { ticks: number[]; stepMs: number } {
+  const span = Math.max(1, maxMs - minMs);
+  const stepMs =
+    TICK_STEPS_MS.find((s) => span / s <= targetCount) ??
+    TICK_STEPS_MS[TICK_STEPS_MS.length - 1];
+  const ticks: number[] = [];
+
+  if (stepMs < DAY_MS) {
+    const offsetMs = new Date(minMs).getTimezoneOffset() * MIN_MS;
+    let t = Math.ceil((minMs - offsetMs) / stepMs) * stepMs + offsetMs;
+    while (t <= maxMs && ticks.length < 60) {
+      ticks.push(t);
+      t += stepMs;
+    }
+  } else {
+    const stepDays = Math.round(stepMs / DAY_MS);
+    const d = new Date(minMs);
+    d.setHours(0, 0, 0, 0);
+    if (d.getTime() < minMs) d.setDate(d.getDate() + 1);
+    while (d.getTime() <= maxMs && ticks.length < 60) {
+      ticks.push(d.getTime());
+      d.setDate(d.getDate() + stepDays);
+    }
+  }
+
+  return { ticks, stepMs };
 }
 
 const SVG_W = 1120;
-const SVG_H = 268;
+const SVG_H = 292;
 const PAD_L = 44;
 const PAD_R = 46;
-const PAD_T = 16;
-const PAD_B = 30;
+const PAD_T = 30;
+const PAD_B = 38;
 const PLOT_W = SVG_W - PAD_L - PAD_R;
 const PLOT_H = SVG_H - PAD_T - PAD_B;
-const MIN_ZOOM_SPAN_MS = 20 * 60 * 1000; // 20 minutes
-const WR_TICKS = [0, 25, 50, 75, 100] as const;
+const MIN_ZOOM_SPAN_MS = 20 * MIN_MS;
+const Y_TICKS = [0, 25, 50, 75, 100] as const;
+const GRADE_LINES: ReadonlyArray<{ score: number; grade: string }> = [
+  { score: 45, grade: 'C' },
+  { score: 66, grade: 'A' },
+  { score: 82, grade: 'S' },
+];
+const CROSSHAIR_LABEL_W = 210;
+const SNAP_DISTANCE = 12;
 
 export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = ({
   matches,
   targetPuuid,
   groupPuuids,
   accountByPuuid,
+  timeRange,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
   onSelectMatch,
 }) => {
@@ -132,11 +201,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
     participant: LolMatchParticipantSummary;
     rect: { left: number; top: number; right: number; bottom: number };
   } | null>(null);
-  const [hoveredWrNode, setHoveredWrNode] = useState<{
-    point: GroupWrPoint;
-    xPct: number;
-    yPct: number;
-  } | null>(null);
+  const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
 
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
@@ -154,7 +219,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
   });
   const [isDragging, setIsDragging] = useState(false);
 
-  const { allPoints, groupWrSeries, buckets, maxMins, fullDomain } = useMemo(() => {
+  const { allPoints, groupWrSeries, buckets, fullDomain } = useMemo(() => {
     const samples: Array<{
       match: LolMatchSummary;
       participant: LolMatchParticipantSummary;
@@ -165,6 +230,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       if (p) samples.push({ match, participant: p });
     }
 
+    // Duration buckets remain the source of truth for "minute of win / loss / FF"
     const bucketStats = computeDurationBuckets(
       samples.map((s) => ({
         durationSeconds: s.match.gameDuration,
@@ -172,23 +238,28 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       }))
     );
 
-    const maxDuration = samples.reduce(
-      (max, s) => Math.max(max, s.match.gameDuration / 60),
-      35
-    );
-    const computedMaxMins = Math.max(40, Math.ceil(maxDuration / 5) * 5);
-
-    const points: ScatterPoint[] = samples
-      .map(({ match, participant }) => ({
+    const points: ScatterPoint[] = [];
+    for (const { match, participant } of samples) {
+      const scorers = match.participants.filter(
+        (p) =>
+          (groupPuuids.has(p.puuid) || p.puuid === targetPuuid) &&
+          p.outcome !== 'remake' &&
+          Number.isFinite(p.performanceScore)
+      );
+      if (scorers.length === 0) continue;
+      const avg = scorers.reduce((sum, p) => sum + p.performanceScore, 0) / scorers.length;
+      points.push({
         match,
         participant,
         eventMs: resolveEventTimestampMs(match),
-        durationMins: Math.max(0.5, match.gameDuration / 60),
+        groupPerf: Math.round(avg * 10) / 10,
+        groupScorers: scorers.length,
         isGroup: isGroupMatch(match, groupPuuids),
-      }))
-      .sort((a, b) => a.eventMs - b.eventMs);
+      });
+    }
+    points.sort((a, b) => a.eventMs - b.eventMs);
 
-    // Build chronological Group Winrate line across ALL group matches in the active global filter
+    // Chronological cumulative Group Winrate across ALL group (≥2) games in the active filter
     const groupChronological = matches
       .filter((m) => isGroupMatch(m, groupPuuids))
       .map((m) => {
@@ -223,36 +294,39 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       };
     });
 
-    const allTimestamps = [
-      ...points.map((p) => p.eventMs),
-      ...wrSeries.map((w) => w.eventMs),
-    ];
-
+    // X domain follows the global timeframe filter (7d / 30d / 90d) — "Todo" fits the data
     const now = Date.now();
-    let rawMin = now - 7 * 24 * 60 * 60 * 1000;
-    let rawMax = now;
-    if (allTimestamps.length > 0) {
-      rawMin = Math.min(...allTimestamps);
-      rawMax = Math.max(...allTimestamps);
-      if (rawMax - rawMin < 60 * 60 * 1000) {
-        rawMin -= 30 * 60 * 1000;
-        rawMax += 30 * 60 * 1000;
+    let domain: { minMs: number; maxMs: number };
+    if (timeRange !== 'all') {
+      const startMs = now - TIME_RANGE_DAYS[timeRange] * DAY_MS;
+      const span = now - startMs;
+      domain = { minMs: startMs - span * 0.005, maxMs: now + span * 0.012 };
+    } else {
+      const allTimestamps = [
+        ...points.map((p) => p.eventMs),
+        ...wrSeries.map((w) => w.eventMs),
+      ];
+      let rawMin = now - 30 * DAY_MS;
+      let rawMax = now;
+      if (allTimestamps.length > 0) {
+        rawMin = Math.min(...allTimestamps);
+        rawMax = Math.max(now, ...allTimestamps);
       }
+      const pad = Math.max(HOUR_MS, (rawMax - rawMin) * 0.02);
+      domain = { minMs: rawMin - pad, maxMs: rawMax + pad };
     }
 
-    const pad = Math.max(15 * 60 * 1000, (rawMax - rawMin) * 0.04);
     return {
       allPoints: points,
       groupWrSeries: wrSeries,
       buckets: bucketStats,
-      maxMins: computedMaxMins,
-      fullDomain: { minMs: rawMin - pad, maxMs: rawMax + pad },
+      fullDomain: domain,
     };
-  }, [matches, targetPuuid, groupPuuids]);
+  }, [matches, targetPuuid, groupPuuids, timeRange]);
 
   const [viewDomain, setViewDomain] = useState<{ minMs: number; maxMs: number }>(fullDomain);
 
-  // Reset zoom whenever underlying data range changes (e.g. timeframe/queue/user switch)
+  // Reset zoom whenever the timeframe / data range changes
   useEffect(() => {
     setViewDomain(fullDomain);
   }, [fullDomain.minMs, fullDomain.maxMs]);
@@ -313,8 +387,6 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0) return;
-
-      // Map clientX into plot area ratio [0..1]
       const svgX = ((e.clientX - rect.left) / rect.width) * SVG_W;
       const ratio = (svgX - PAD_L) / PLOT_W;
       const factor = e.deltaY < 0 ? 0.8 : 1.25;
@@ -326,6 +398,44 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       el.removeEventListener('wheel', onWheel);
     };
   }, [zoomAtRatio]);
+
+  const visiblePoints = useMemo(() => {
+    if (outcomeFilter === 'all') return allPoints;
+    return allPoints.filter((pt) => pt.participant.outcome === outcomeFilter);
+  }, [allPoints, outcomeFilter]);
+
+  const toX = (ms: number) => PAD_L + ((ms - viewDomain.minMs) / viewSpanMs) * PLOT_W;
+  const toY = (value0to100: number) =>
+    PAD_T + PLOT_H - Math.min(1, Math.max(0, value0to100 / 100)) * PLOT_H;
+
+  const updateCrosshair = (clientX: number, containerEl: HTMLDivElement) => {
+    const rect = containerEl.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const svgX = ((clientX - rect.left) / rect.width) * SVG_W;
+    if (svgX < PAD_L || svgX > SVG_W - PAD_R) {
+      setCrosshair(null);
+      return;
+    }
+
+    // Snap to the nearest game (scatter dot) when close enough
+    let best: ScatterPoint | null = null;
+    let bestDist = Infinity;
+    for (const pt of visiblePoints) {
+      const dist = Math.abs(toX(pt.eventMs) - svgX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = pt;
+      }
+    }
+
+    if (best && bestDist <= SNAP_DISTANCE) {
+      setCrosshair({ ms: best.eventMs, perf: best.groupPerf, scorers: best.groupScorers });
+      return;
+    }
+
+    const ms = viewDomain.minMs + ((svgX - PAD_L) / PLOT_W) * viewSpanMs;
+    setCrosshair({ ms, perf: null, scorers: null });
+  };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -342,13 +452,16 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const st = dragStateRef.current;
-    if (!st.active) return;
+    if (!st.active) {
+      updateCrosshair(e.clientX, e.currentTarget);
+      return;
+    }
 
     const dxPx = e.clientX - st.startClientX;
     st.movedPx = Math.max(st.movedPx, Math.abs(dxPx));
     if (st.movedPx > 3) {
       setHoveredState(null);
-      setHoveredWrNode(null);
+      setCrosshair(null);
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -368,75 +481,30 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
     }
   };
 
-  const visiblePoints = useMemo(() => {
-    let list = allPoints;
-    if (outcomeFilter === 'win') {
-      list = list.filter((pt) => pt.participant.outcome === 'win');
-    } else if (outcomeFilter === 'loss') {
-      list = list.filter((pt) => pt.participant.outcome === 'loss');
-    } else if (outcomeFilter === 'ff') {
-      list = list.filter(
-        (pt) => pt.participant.outcome === 'ff' || pt.participant.outcome === 'remake'
-      );
-    }
-    return list;
-  }, [allPoints, outcomeFilter]);
-
-  const inViewCount = useMemo(
+  const inViewPoints = useMemo(
     () =>
       visiblePoints.filter(
         (pt) => pt.eventMs >= viewDomain.minMs && pt.eventMs <= viewDomain.maxMs
-      ).length,
+      ),
     [visiblePoints, viewDomain.minMs, viewDomain.maxMs]
   );
 
-  const yTicks = useMemo(() => {
-    const base = [0, 5, 15, 20, 30, 40];
-    if (maxMins >= 50) base.push(50);
-    if (maxMins >= 60) base.push(60);
-    return base.filter((m) => m <= maxMins);
-  }, [maxMins]);
+  const avgGroupPerfInView = useMemo(() => {
+    if (inViewPoints.length === 0) return null;
+    const sum = inViewPoints.reduce((acc, pt) => acc + pt.groupPerf, 0);
+    return Math.round(sum / inViewPoints.length);
+  }, [inViewPoints]);
 
-  const xTicks = useMemo(() => {
-    const count = 7;
-    const out: number[] = [];
-    for (let i = 0; i <= count; i++) {
-      out.push(viewDomain.minMs + (viewSpanMs * i) / count);
-    }
-    return out;
-  }, [viewDomain.minMs, viewSpanMs]);
-
-  const toX = (ms: number) =>
-    PAD_L + ((ms - viewDomain.minMs) / viewSpanMs) * PLOT_W;
-  const toYMin = (mins: number) =>
-    PAD_T + PLOT_H - Math.min(1, Math.max(0, mins / maxMins)) * PLOT_H;
-  const toYWr = (wrPct: number) =>
-    PAD_T + PLOT_H - Math.min(1, Math.max(0, wrPct / 100)) * PLOT_H;
-
-  const bucketBandRect = useMemo(() => {
-    if (!highlightedBucket) return null;
-    const minM =
-      highlightedBucket === '20-30' ? 20 : highlightedBucket === '30+' ? 30 : 0;
-    const maxM =
-      highlightedBucket === '0-5'
-        ? 5
-        : highlightedBucket === '0-20'
-          ? 20
-          : highlightedBucket === '20-30'
-            ? 30
-            : maxMins;
-    const yTop = toYMin(maxM);
-    const yBot = toYMin(minM);
-    return {
-      y: yTop,
-      height: Math.max(4, yBot - yTop),
-    };
-  }, [highlightedBucket, maxMins]);
+  const { ticks: xTicks, stepMs: xStepMs } = useMemo(
+    () => buildTimeTicks(viewDomain.minMs, viewDomain.maxMs),
+    [viewDomain.minMs, viewDomain.maxMs]
+  );
+  const showTickHours = xStepMs < DAY_MS;
 
   const groupWrPolyline = useMemo(() => {
     if (!showGroupWrLine || groupWrSeries.length === 0) return '';
     return groupWrSeries
-      .map((pt) => `${toX(pt.eventMs).toFixed(1)},${toYWr(pt.winRate).toFixed(1)}`)
+      .map((pt) => `${toX(pt.eventMs).toFixed(1)},${toY(pt.winRate).toFixed(1)}`)
       .join(' ');
   }, [showGroupWrLine, groupWrSeries, viewDomain.minMs, viewSpanMs]);
 
@@ -445,7 +513,10 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
     const first = groupWrSeries[0];
     const last = groupWrSeries[groupWrSeries.length - 1];
     const lineSegs = groupWrSeries
-      .map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${toX(pt.eventMs).toFixed(1)} ${toYWr(pt.winRate).toFixed(1)}`)
+      .map(
+        (pt, idx) =>
+          `${idx === 0 ? 'M' : 'L'} ${toX(pt.eventMs).toFixed(1)} ${toY(pt.winRate).toFixed(1)}`
+      )
       .join(' ');
     return `${lineSegs} L ${toX(last.eventMs).toFixed(1)} ${(PAD_T + PLOT_H).toFixed(1)} L ${toX(first.eventMs).toFixed(1)} ${(PAD_T + PLOT_H).toFixed(1)} Z`;
   }, [showGroupWrLine, groupWrSeries, viewDomain.minMs, viewSpanMs]);
@@ -453,34 +524,51 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
   const latestGroupWr =
     groupWrSeries.length > 0 ? groupWrSeries[groupWrSeries.length - 1].winRate : null;
 
+  const crosshairX = crosshair ? toX(crosshair.ms) : null;
+  const crosshairLabelX =
+    crosshairX !== null
+      ? Math.min(
+          SVG_W - PAD_R - CROSSHAIR_LABEL_W / 2,
+          Math.max(PAD_L + CROSSHAIR_LABEL_W / 2, crosshairX)
+        )
+      : 0;
+
   return (
     <Card className="w-full">
       <CardHeader className="pb-2 pt-3 px-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-1.5 text-sm">
             <Activity className="w-4 h-4 text-primary" strokeWidth={1.75} />
-            <span>Duración vs Día y Hora</span>
+            <span>Performance del Grupo</span>
             <Badge variant="secondary" className="font-mono text-[10px]">
-              {inViewCount}/{visiblePoints.length}G
+              {inViewPoints.length}/{visiblePoints.length}G
             </Badge>
+            {avgGroupPerfInView !== null && (
+              <Badge
+                variant="outline"
+                className="font-mono text-[10px] border-primary/45 bg-primary/10 text-primary"
+                title="Performance promedio del grupo en las partidas visibles"
+              >
+                Prom {avgGroupPerfInView}
+              </Badge>
+            )}
             {latestGroupWr !== null && showGroupWrLine && (
               <Badge
                 variant="outline"
                 className="font-mono text-[10px] border-indigo-400/50 bg-indigo-500/15 text-indigo-300"
               >
                 <TrendingUp className="w-3 h-3" strokeWidth={1.75} />
-                WR Grupo {latestGroupWr}%
+                WR {latestGroupWr}%
               </Badge>
             )}
             <LolInfoTip
-              acronym="Timeline"
-              title="Duración y WR Grupo vs Fecha/Hora"
-              description="Eje X: día y hora exacta de cada partida. Eje Y izq.: minuto en que terminó. Eje Y der.: evolución del Winrate del grupo (≥2). Usá la rueda para zoom y arrastrá con el click para desplazarte."
+              acronym="Perf"
+              title="Performance del Grupo vs Día y Hora"
+              description="Cada punto es una partida. Eje Y izq.: performance promedio (0-100) de los integrantes del grupo en ese game. Eje Y der.: WR acumulado del grupo (≥2). Rueda: zoom · Arrastrar: desplazar."
             />
           </CardTitle>
 
           <div className="flex flex-wrap items-center gap-1.5">
-            {/* Group WR Line Toggle */}
             <button
               type="button"
               onClick={() => setShowGroupWrLine((prev) => !prev)}
@@ -496,59 +584,39 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
               <span>WR Grupo</span>
             </button>
 
-            {/* Unified Outcome Filters */}
             <div className="inline-flex items-center rounded-md border border-border bg-background/55 p-0.5 text-[11px] gap-0.5">
-              <button
-                type="button"
-                onClick={() => setOutcomeFilter('all')}
-                className={cn(
-                  'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors',
-                  outcomeFilter === 'all'
-                    ? 'bg-primary/20 text-primary font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Todos
-              </button>
-              <button
-                type="button"
-                onClick={() => setOutcomeFilter('win')}
-                className={cn(
-                  'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors',
-                  outcomeFilter === 'win'
-                    ? 'bg-success/20 text-success font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Wins
-              </button>
-              <button
-                type="button"
-                onClick={() => setOutcomeFilter('loss')}
-                className={cn(
-                  'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors',
-                  outcomeFilter === 'loss'
-                    ? 'bg-destructive/20 text-destructive font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Derrotas
-              </button>
-              <button
-                type="button"
-                onClick={() => setOutcomeFilter('ff')}
-                className={cn(
-                  'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors border border-transparent',
-                  outcomeFilter === 'ff'
-                    ? 'bg-[#4C0519]/90 border-[#9F1239] text-[#FDA4AF] font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                FF
-              </button>
+              {(
+                [
+                  { key: 'all', label: 'Todos', active: 'bg-primary/20 text-primary' },
+                  { key: 'win', label: 'Wins', active: 'bg-success/20 text-success' },
+                  {
+                    key: 'loss',
+                    label: 'Derrotas',
+                    active: 'bg-destructive/20 text-destructive',
+                  },
+                  {
+                    key: 'ff',
+                    label: 'FF',
+                    active: 'bg-[#4C0519]/90 border-[#9F1239] text-[#FDA4AF]',
+                  },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setOutcomeFilter(opt.key)}
+                  className={cn(
+                    'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors border border-transparent',
+                    outcomeFilter === opt.key
+                      ? cn(opt.active, 'font-semibold')
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
-            {/* Zoom & Pan Controls */}
             <div className="inline-flex items-center gap-0.5 pl-1 border-l border-border">
               <Button
                 type="button"
@@ -578,7 +646,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 variant="outline"
                 disabled={!isZoomed}
                 className="h-6 px-1.5 text-[10px]"
-                title="Restablecer zoom"
+                title="Restablecer al filtro de tiempo"
                 aria-label="Restablecer zoom"
                 onClick={() => setViewDomain(fullDomain)}
               >
@@ -590,8 +658,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       </CardHeader>
 
       <CardContent className="p-3.5 pt-1 space-y-3">
-        {/* Panoramic Interactive Timeline Chart */}
-        <div className="rounded-md border border-border bg-background/45 p-2.5 space-y-2">
+        <div className="rounded-md border border-border bg-background/45 p-2.5 space-y-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-muted-foreground">
             <div className="flex flex-wrap items-center gap-3">
               <span className="inline-flex items-center gap-1">
@@ -607,10 +674,6 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 FF
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-2 h-2 rotate-45 bg-muted-foreground inline-block" />
-                Remake
-              </span>
-              <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-full border-2 border-primary" />
                 Grupo ≥2
               </span>
@@ -621,10 +684,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 </span>
               )}
             </div>
-
-            <span className="opacity-75">
-              Rueda: zoom · Click + arrastrar: desplazar
-            </span>
+            <span className="opacity-75">Rueda: zoom · Arrastrar: desplazar</span>
           </div>
 
           <div
@@ -633,42 +693,33 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onPointerLeave={() => {
+              if (!dragStateRef.current.active) setCrosshair(null);
+            }}
             className={cn(
               'relative w-full select-none touch-none',
-              isDragging ? 'cursor-grabbing' : 'cursor-grab'
+              isDragging ? 'cursor-grabbing' : 'cursor-crosshair'
             )}
           >
             <svg
               viewBox={`0 0 ${SVG_W} ${SVG_H}`}
               className="w-full h-auto block overflow-visible"
               role="img"
-              aria-label="Gráfico interactivo de duración y winrate del grupo vs día y hora exacta"
+              aria-label="Performance promedio del grupo por partida vs día y hora"
             >
               <defs>
                 <clipPath id="lol-timeline-plot-clip">
                   <rect x={PAD_L} y={PAD_T - 6} width={PLOT_W} height={PLOT_H + 12} />
                 </clipPath>
                 <linearGradient id="lol-wr-area-grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#818CF8" stopOpacity="0.22" />
+                  <stop offset="0%" stopColor="#818CF8" stopOpacity="0.18" />
                   <stop offset="100%" stopColor="#818CF8" stopOpacity="0.01" />
                 </linearGradient>
               </defs>
 
-              {/* Horizontal Highlighted Bucket Band on Left Y-Axis */}
-              {bucketBandRect && (
-                <rect
-                  x={PAD_L}
-                  y={bucketBandRect.y}
-                  width={PLOT_W}
-                  height={bucketBandRect.height}
-                  fill="rgba(88, 101, 242, 0.12)"
-                />
-              )}
-
-              {/* Horizontal Grid & Left Y-Axis (Game Minutes) */}
-              {yTicks.map((tick) => {
-                const y = toYMin(tick);
-                const isThreshold = tick === 5 || tick === 20 || tick === 30;
+              {/* Horizontal grid + Left Y-axis (Group performance 0-100) */}
+              {Y_TICKS.map((tick) => {
+                const y = toY(tick);
                 return (
                   <g key={`y-${tick}`}>
                     <line
@@ -676,12 +727,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                       y1={y}
                       x2={SVG_W - PAD_R}
                       y2={y}
-                      stroke={
-                        isThreshold
-                          ? 'rgba(148, 155, 164, 0.24)'
-                          : 'rgba(255,255,255,0.06)'
-                      }
-                      strokeDasharray={isThreshold ? '3 3' : undefined}
+                      stroke="rgba(255,255,255,0.06)"
                       strokeWidth={1}
                     />
                     <text
@@ -692,38 +738,10 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                       fontSize="10"
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                     >
-                      {tick}m
+                      {tick}
                     </text>
-                  </g>
-                );
-              })}
-
-              {/* Right Y-Axis (Group Winrate 0% - 100%) */}
-              {showGroupWrLine && (
-                <g>
-                  <line
-                    x1={SVG_W - PAD_R}
-                    y1={PAD_T}
-                    x2={SVG_W - PAD_R}
-                    y2={PAD_T + PLOT_H}
-                    stroke="rgba(129, 140, 248, 0.3)"
-                    strokeWidth={1}
-                  />
-                  {/* 50% WR reference line */}
-                  <line
-                    x1={PAD_L}
-                    y1={toYWr(50)}
-                    x2={SVG_W - PAD_R}
-                    y2={toYWr(50)}
-                    stroke="rgba(129, 140, 248, 0.22)"
-                    strokeDasharray="4 4"
-                    strokeWidth={1}
-                  />
-                  {WR_TICKS.map((pct) => {
-                    const y = toYWr(pct);
-                    return (
+                    {showGroupWrLine && (
                       <text
-                        key={`wr-${pct}`}
                         x={SVG_W - PAD_R + 7}
                         y={y + 3}
                         textAnchor="start"
@@ -731,18 +749,46 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                         fontSize="9.5"
                         fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                       >
-                        {pct}%
+                        {tick}%
                       </text>
-                    );
-                  })}
-                </g>
-              )}
+                    )}
+                  </g>
+                );
+              })}
 
-              {/* Vertical X Grid & Exact Date/Time Ticks */}
-              {xTicks.map((ts, idx) => {
+              {/* Grade reference lines (C / A / S) */}
+              {GRADE_LINES.map(({ score, grade }) => {
+                const y = toY(score);
+                return (
+                  <g key={`grade-${grade}`}>
+                    <line
+                      x1={PAD_L}
+                      y1={y}
+                      x2={SVG_W - PAD_R}
+                      y2={y}
+                      stroke="rgba(148, 155, 164, 0.22)"
+                      strokeDasharray="3 4"
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={PAD_L + 5}
+                      y={y - 3}
+                      fill="rgba(148, 155, 164, 0.7)"
+                      fontSize="9"
+                      fontWeight={700}
+                      fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                    >
+                      {grade}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Vertical X grid + calendar-aligned day/hour ticks */}
+              {xTicks.map((ts) => {
                 const x = toX(ts);
                 return (
-                  <g key={`x-${idx}`}>
+                  <g key={`x-${ts}`}>
                     <line
                       x1={x}
                       y1={PAD_T}
@@ -756,24 +802,37 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                       y1={PAD_T + PLOT_H}
                       x2={x}
                       y2={PAD_T + PLOT_H + 4}
-                      stroke="rgba(255,255,255,0.18)"
+                      stroke="rgba(255,255,255,0.22)"
                       strokeWidth={1}
                     />
                     <text
                       x={x}
-                      y={SVG_H - 8}
+                      y={PAD_T + PLOT_H + 15}
                       textAnchor="middle"
-                      fill="#949BA4"
+                      fill="#B5BAC1"
                       fontSize="9.5"
+                      fontWeight={600}
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                     >
-                      {formatAxisTimestamp(ts, viewSpanMs)}
+                      {formatDayLabel(ts)}
                     </text>
+                    {showTickHours && (
+                      <text
+                        x={x}
+                        y={PAD_T + PLOT_H + 27}
+                        textAnchor="middle"
+                        fill="#80848E"
+                        fontSize="9"
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                      >
+                        {formatHourLabel(ts)}
+                      </text>
+                    )}
                   </g>
                 );
               })}
 
-              {/* Left & Bottom Axes Frame */}
+              {/* Axes frame */}
               <line
                 x1={PAD_L}
                 y1={PAD_T}
@@ -790,17 +849,43 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 stroke="rgba(255,255,255,0.16)"
                 strokeWidth={1}
               />
+              {showGroupWrLine && (
+                <line
+                  x1={SVG_W - PAD_R}
+                  y1={PAD_T}
+                  x2={SVG_W - PAD_R}
+                  y2={PAD_T + PLOT_H}
+                  stroke="rgba(129, 140, 248, 0.3)"
+                  strokeWidth={1}
+                />
+              )}
 
-              {/* Clipped Data Layer: Group Winrate Line + Scatter Dots */}
               <g clipPath="url(#lol-timeline-plot-clip)">
-                {/* Group Winrate Area + Line */}
+                {/* Game rug: exact time of every game on the X axis */}
+                {visiblePoints.map((pt) => {
+                  const x = toX(pt.eventMs);
+                  return (
+                    <line
+                      key={`rug-${pt.match.matchId}`}
+                      x1={x}
+                      y1={PAD_T + PLOT_H - 5}
+                      x2={x}
+                      y2={PAD_T + PLOT_H}
+                      stroke="rgba(181, 186, 193, 0.45)"
+                      strokeWidth={1}
+                    />
+                  );
+                })}
+
+                {/* Group Winrate area + line */}
                 {showGroupWrLine && groupWrSeries.length >= 2 && (
                   <>
                     <path d={groupWrAreaPath} fill="url(#lol-wr-area-grad)" />
                     <polyline
                       fill="none"
                       stroke="#818CF8"
-                      strokeWidth={2}
+                      strokeOpacity={0.85}
+                      strokeWidth={1.75}
                       strokeLinejoin="round"
                       strokeLinecap="round"
                       points={groupWrPolyline}
@@ -808,52 +893,27 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                   </>
                 )}
 
-                {showGroupWrLine &&
-                  groupWrSeries.map((wrPt) => {
-                    const cx = toX(wrPt.eventMs);
-                    const cy = toYWr(wrPt.winRate);
-                    if (cx < PAD_L - 12 || cx > SVG_W - PAD_R + 12) return null;
-                    const isActive = hoveredWrNode?.point.matchId === wrPt.matchId;
+                {/* Hover crosshair line */}
+                {crosshairX !== null && !isDragging && (
+                  <line
+                    x1={crosshairX}
+                    y1={PAD_T}
+                    x2={crosshairX}
+                    y2={PAD_T + PLOT_H}
+                    stroke="rgba(242, 243, 245, 0.55)"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                    pointerEvents="none"
+                  />
+                )}
 
-                    return (
-                      <g
-                        key={`wr-node-${wrPt.matchId}`}
-                        className="cursor-pointer"
-                        onMouseEnter={() => {
-                          if (dragStateRef.current.active) return;
-                          setHoveredWrNode({
-                            point: wrPt,
-                            xPct: (cx / SVG_W) * 100,
-                            yPct: (cy / SVG_H) * 100,
-                          });
-                        }}
-                        onMouseLeave={() => setHoveredWrNode(null)}
-                        onClick={(e) => {
-                          if (dragStateRef.current.movedPx > 4) return;
-                          e.stopPropagation();
-                          onSelectMatch(wrPt.matchId);
-                        }}
-                      >
-                        <circle cx={cx} cy={cy} r={8} fill="transparent" />
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r={isActive ? 4.5 : 2.8}
-                          fill="#A5B4FC"
-                          stroke="#11141A"
-                          strokeWidth={1.2}
-                        />
-                      </g>
-                    );
-                  })}
-
-                {/* Scatter Match Dots */}
+                {/* Game dots: Y = group average performance */}
                 {visiblePoints.map((pt) => {
                   const cx = toX(pt.eventMs);
                   if (cx < PAD_L - 14 || cx > SVG_W - PAD_R + 14) return null;
                   const cy = Math.min(
                     PAD_T + PLOT_H - 4,
-                    Math.max(PAD_T + 4, toYMin(pt.durationMins))
+                    Math.max(PAD_T + 4, toY(pt.groupPerf))
                   );
                   const outcome = pt.participant.outcome;
                   const isDimmed =
@@ -866,9 +926,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                       ? LOL_WIN_DOT_FILL
                       : outcome === 'ff'
                         ? LOL_FF_DOT_FILL
-                        : outcome === 'remake'
-                          ? '#949BA4'
-                          : LOL_LOSS_DOT_FILL;
+                        : LOL_LOSS_DOT_FILL;
 
                   const strokeColor =
                     outcome === 'ff'
@@ -906,7 +964,6 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                       }}
                     >
                       <circle cx={cx} cy={cy} r={10} fill="transparent" />
-
                       {pt.isGroup && (
                         <circle
                           cx={cx}
@@ -918,54 +975,64 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                           strokeOpacity={0.85}
                         />
                       )}
-
-                      {outcome === 'remake' ? (
-                        <polygon
-                          points={`${cx},${cy - 5.2} ${cx + 5.2},${cy} ${cx},${cy + 5.2} ${cx - 5.2},${cy}`}
-                          fill={fillColor}
-                          stroke={strokeColor}
-                          strokeWidth={1.4}
-                        />
-                      ) : (
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r={isHovered ? 7 : outcome === 'ff' ? 5.8 : 5.2}
-                          fill={fillColor}
-                          stroke={strokeColor}
-                          strokeWidth={
-                            outcome === 'ff' ||
-                            (outcome === 'win' && pt.participant.enemySurrendered)
-                              ? 1.9
-                              : 1.3
-                          }
-                        />
-                      )}
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={isHovered ? 7 : outcome === 'ff' ? 5.8 : 5.2}
+                        fill={fillColor}
+                        stroke={strokeColor}
+                        strokeWidth={
+                          outcome === 'ff' ||
+                          (outcome === 'win' && pt.participant.enemySurrendered)
+                            ? 1.9
+                            : 1.3
+                        }
+                      />
                     </g>
                   );
                 })}
               </g>
-            </svg>
 
-            {/* Inline WR Line Hover Chip */}
-            {hoveredWrNode && !hoveredState && (
-              <div
-                style={{
-                  left: `${Math.min(82, Math.max(12, hoveredWrNode.xPct))}%`,
-                  top: `${Math.max(8, hoveredWrNode.yPct - 16)}%`,
-                }}
-                className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-md border border-indigo-400/50 bg-popover/95 px-2.5 py-1.5 text-[10.5px] font-mono text-popover-foreground shadow-lg whitespace-nowrap z-20"
-              >
-                <div className="font-bold text-indigo-300">
-                  WR Grupo: {hoveredWrNode.point.winRate}% ({hoveredWrNode.point.winsSoFar}V /{' '}
-                  {hoveredWrNode.point.lossesSoFar}D)
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  {formatFullDateTime(hoveredWrNode.point.eventMs)} ·{' '}
-                  {hoveredWrNode.point.won ? 'Victoria' : 'Derrota'}
-                </div>
-              </div>
-            )}
+              {/* Crosshair date/time label — above the plot, outside the chart area */}
+              {crosshair && crosshairX !== null && !isDragging && (
+                <g pointerEvents="none">
+                  <rect
+                    x={crosshairLabelX - CROSSHAIR_LABEL_W / 2}
+                    y={3}
+                    width={CROSSHAIR_LABEL_W}
+                    height={19}
+                    rx={4}
+                    fill="#1E1F22"
+                    stroke="rgba(255,255,255,0.18)"
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={crosshairLabelX}
+                    y={16.5}
+                    textAnchor="middle"
+                    fill="#F2F3F5"
+                    fontSize="10.5"
+                    fontWeight={600}
+                    fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                  >
+                    {formatFullDateTime(crosshair.ms)}
+                    {crosshair.perf !== null && (
+                      <tspan fill="#949BA4" fontWeight={500}>
+                        {`  ·  Perf ${Math.round(crosshair.perf)}`}
+                      </tspan>
+                    )}
+                  </text>
+                  <line
+                    x1={crosshairX}
+                    y1={22}
+                    x2={crosshairX}
+                    y2={PAD_T}
+                    stroke="rgba(242, 243, 245, 0.55)"
+                    strokeWidth={1}
+                  />
+                </g>
+              )}
+            </svg>
 
             {visiblePoints.length === 0 && groupWrSeries.length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -977,12 +1044,12 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
           </div>
         </div>
 
-        {/* Duration Buckets Strip inside same component: 0-5, 0-20, 20-30, 30+ */}
+        {/* Minute of Win / Loss / FF — duration buckets */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-              <span>Balance por Duración (0-5 / 0-20 / 20-30 / 30+)</span>
+              <span>Minuto de Victoria / Derrota / FF</span>
             </span>
             {highlightedBucket && (
               <button
@@ -1008,10 +1075,9 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                   key={bucket.key}
                   type="button"
                   onClick={() =>
-                    setHighlightedBucket((prev) =>
-                      prev === bucket.key ? null : bucket.key
-                    )
+                    setHighlightedBucket((prev) => (prev === bucket.key ? null : bucket.key))
                   }
+                  title="Resaltar partidas de esta duración en el gráfico"
                   className={cn(
                     'text-left p-2 rounded-md border transition-colors cursor-pointer space-y-1.5',
                     isSelected
@@ -1028,7 +1094,6 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                     </span>
                   </div>
 
-                  {/* Stacked bar: Win (green) | Loss (red) | FF (bordó) */}
                   <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden flex">
                     {bucket.total > 0 && (
                       <>
