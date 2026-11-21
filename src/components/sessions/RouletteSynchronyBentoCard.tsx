@@ -4,6 +4,7 @@ import {
   GameSynchronyResult,
   GamingSession,
 } from '@/types/domain';
+import { resolveGameOfficialUrl } from '@/lib/tasteProfileEngine';
 import {
   SessionGameTile,
   SessionPlayerAvatarRow,
@@ -20,6 +21,7 @@ import {
   CheckCircle2,
   Clock,
   Dices,
+  ExternalLink,
   Flame,
   Gamepad2,
   Lock,
@@ -50,9 +52,12 @@ function buildSynchronyInfoContent(item: GameSynchronyResult): React.ReactNode {
         </Badge>
       </div>
       <div className="text-[10px] text-muted-foreground space-y-0.5">
-        <div>
-          👥 {item.game.minPlayers}–{item.game.maxPlayers} jug. · ~{item.game.averageDurationMins}m · ★{' '}
-          {item.averageRating.toFixed(1)}
+        <div className="flex items-center gap-1">
+          <Users className="w-3 h-3 shrink-0" strokeWidth={1.75} />
+          <span>
+            {item.game.minPlayers}–{item.game.maxPlayers} jug. · ~{item.game.averageDurationMins}m · ★{' '}
+            {item.averageRating.toFixed(1)}
+          </span>
         </div>
         <div>
           {item.playersWhoPlayCount}/{item.totalParticipants} juegan · Peso{' '}
@@ -264,6 +269,8 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                     key={item.game.id}
                     name={item.game.name}
                     coverUrl={item.game.coverUrl}
+                    tags={item.game.tags}
+                    gameId={item.game.id}
                     score={item.synchronyScore}
                     isSelected
                     statusPill={isWinner ? 'Ruleta' : isChosen ? 'Elegido' : undefined}
@@ -362,15 +369,35 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
           ) : activeGame ? (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <img
-                  src={activeGame.coverUrl || DEFAULT_COVER}
-                  alt={activeGame.name}
-                  onError={(e) => {
-                    const img = e.currentTarget;
-                    if (img.src !== DEFAULT_COVER) img.src = DEFAULT_COVER;
-                  }}
-                  className="w-14 h-16 object-cover rounded border border-border shrink-0"
-                />
+                <a
+                  href={resolveGameOfficialUrl({
+                    name: activeGame.name,
+                    coverUrl: activeGame.coverUrl,
+                    tags: activeGame.tags,
+                    id: activeGame.id,
+                  })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Ver página oficial de ${activeGame.name}`}
+                  aria-label={`Ver página oficial de ${activeGame.name}`}
+                  className="group/cover relative block shrink-0 rounded border border-border overflow-hidden hover:border-primary/60 transition-colors cursor-pointer"
+                >
+                  <img
+                    src={activeGame.coverUrl || DEFAULT_COVER}
+                    alt={activeGame.name}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (img.src !== DEFAULT_COVER) img.src = DEFAULT_COVER;
+                    }}
+                    className="w-14 h-16 object-cover block"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute bottom-1 right-1 inline-flex items-center justify-center w-4 h-4 rounded bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-0 group-hover/cover:opacity-100 transition-opacity"
+                  >
+                    <ExternalLink className="w-2.5 h-2.5" strokeWidth={1.75} />
+                  </span>
+                </a>
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     {rouletteWinnerBanner?.id === activeGame.id ? (
@@ -488,6 +515,8 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                       key={item.game.id}
                       name={item.game.name}
                       coverUrl={item.game.coverUrl}
+                      tags={item.game.tags}
+                      gameId={item.game.id}
                       score={item.synchronyScore}
                       rank={idx + 1}
                       isSelected={isSelected}
@@ -535,6 +564,8 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                       key={item.game.id}
                       name={item.game.name}
                       coverUrl={item.game.coverUrl}
+                      tags={item.game.tags}
+                      gameId={item.game.id}
                       score={item.synchronyScore}
                       isSelected={isSelected}
                       muted={!isSelected}

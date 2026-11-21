@@ -220,6 +220,10 @@ export interface GroupDiscordConfig {
   useEveryoneMention: boolean;
 }
 
+export type RecommendationVoteValue = 'up' | 'down';
+
+export type GroupRecommendationVotesMap = Record<string, Record<string, RecommendationVoteValue>>;
+
 export interface GamingGroup {
   id: string;
   name: string;
@@ -231,6 +235,7 @@ export interface GamingGroup {
   adminIds: string[];
   gameIds: string[];
   discordConfig: GroupDiscordConfig;
+  recommendationVotes?: GroupRecommendationVotesMap;
   createdAt: string;
   updatedAt?: string;
 }
@@ -625,6 +630,11 @@ export interface PlayerAffinityBreakdown {
 
 export interface GroupGameRecommendation {
   id: string;
+  recKey?: string;
+  steamAppId?: number;
+  igdbId?: number;
+  releaseYear?: number;
+  isNewRelease?: boolean;
   name: string;
   coverUrl: string;
   category: string;
@@ -633,6 +643,9 @@ export interface GroupGameRecommendation {
   minPlayers: number;
   maxPlayers: number;
   groupArithmeticScore: number; // Equal-weight arithmetic mean across all target players
+  groupConsensusScore?: number;
+  approvalCount?: number;
+  ownedByCount?: number;
   recommendationType: 'ready_to_play' | 'discovery';
   catalogGameId?: string;
   sharedDimensions: string[];

@@ -55,6 +55,7 @@ interface IgdbCoverRef {
 interface IgdbExternalGameRef {
   id: number;
   category?: number;
+  external_game_source?: number;
   uid?: string;
 }
 
@@ -75,7 +76,10 @@ interface IgdbGameRaw {
   id: number;
   name: string;
   summary?: string;
+  first_release_date?: number;
+  hypes?: number;
   total_rating?: number;
+  total_rating_count?: number;
   cover?: IgdbCoverRef;
   genres?: IgdbNamedRef[];
   themes?: IgdbNamedRef[];
@@ -98,6 +102,8 @@ interface NormalizedExternalGameItem {
   minPlayers: number;
   maxPlayers: number;
   rating?: number;
+  releaseYear?: number;
+  isNewRelease?: boolean;
   source: 'igdb' | 'steam';
 }
 
@@ -443,10 +449,12 @@ function parseIgdbGame(g: IgdbGameRaw): NormalizedExternalGameItem {
     ? g.game_modes.map((x) => x.name).filter((n): n is string => Boolean(n))
     : [];
 
-  // Extract linked Steam App ID (IGDB external category 1 = Steam)
+  // Extract linked Steam App ID (IGDB external category/source 1 = Steam)
   let steamAppId: number | undefined;
   if (Array.isArray(g.external_games)) {
-    const steamRef = g.external_games.find((eg) => eg.category === 1 && eg.uid);
+    const steamRef = g.external_games.find(
+      (eg) => (eg.category === 1 || eg.external_game_source === 1) && eg.uid
+    );
     if (steamRef?.uid) {
       const parsed = Number(steamRef.uid);
       if (Number.isFinite(parsed) && parsed > 0) {
@@ -454,6 +462,16 @@ function parseIgdbGame(g: IgdbGameRaw): NormalizedExternalGameItem {
       }
     }
   }
+
+  // Extract release year from IGDB UNIX timestamp
+  let releaseYear: number | undefined;
+  if (typeof g.first_release_date === 'number' && Number.isFinite(g.first_release_date)) {
+    const parsedYear = new Date(g.first_release_date * 1000).getUTCFullYear();
+    if (Number.isFinite(parsedYear) && parsedYear > 1980) {
+      releaseYear = parsedYear;
+    }
+  }
+  const isNewRelease = releaseYear !== undefined && releaseYear >= 2022;
 
   // Player limits & multiplayer flags from game_modes & multiplayer_modes
   const modesLower = gameModes.map((m) => m.toLowerCase());
@@ -516,6 +534,8 @@ function parseIgdbGame(g: IgdbGameRaw): NormalizedExternalGameItem {
     minPlayers,
     maxPlayers,
     rating: g.total_rating ? Math.round(g.total_rating) : undefined,
+    releaseYear,
+    isNewRelease,
     source: 'igdb',
   };
 }
@@ -582,6 +602,28 @@ async function fetchSteamSpyDetails(
   }
 }
 
+async function fetchSteamStoreReleaseYear(appId: number): Promise<number | undefined> {
+  try {
+    const res = await fetch(
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=release_date`,
+      { signal: AbortSignal.timeout(2000) }
+    );
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as Record<
+      string,
+      { success?: boolean; data?: { release_date?: { coming_soon?: boolean; date?: string } } }
+    >;
+    const dateStr = data?.[String(appId)]?.data?.release_date?.date;
+    if (!dateStr || typeof dateStr !== 'string') return undefined;
+    const match = dateStr.match(/\b(19\d{2}|20\d{2})\b/);
+    if (!match) return undefined;
+    const year = Number(match[1]);
+    return Number.isFinite(year) && year > 1980 ? year : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 Deno.serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -618,92 +660,169 @@ Deno.serve(async (req: Request) => {
   const { clientId: igdbClientId, clientSecret: igdbClientSecret } = resolveIgdbCredentials(body);
 
   // ----------------------------------------------------------------------------
-  // ACTION: discover_games (Live IGDB v4 PC Multiplayer + SteamSpy fallback)
+  // ACTION: discover_games (Live IGDB v4 PC Multiplayer + SteamSpy supplement/fallback)
   // ----------------------------------------------------------------------------
   if (action === 'discover_games') {
     const token = await getIgdbAccessToken(igdbClientId, igdbClientSecret);
-    if (token) {
-      const apicalypse = `
-        fields id, name, summary, cover.image_id, genres.name, themes.name, game_modes.name, multiplayer_modes.*, external_games.category, external_games.uid, platforms.name, total_rating, total_rating_count;
-        where game_modes = (2,3,6) & platforms = (6) & total_rating_count >= 25 & version_parent = null;
-        sort total_rating desc;
-        limit 40;
-      `;
-      const igdbGames = await queryIgdbGames(igdbClientId, token, apicalypse);
-      const parsed = igdbGames
-        .map(parseIgdbGame)
-        .filter((g) => g.isMultiplayer && g.maxPlayers >= 3 && !isNonGameSteamApp(g));
+    const mergedItems: NormalizedExternalGameItem[] = [];
+    const seenIgdbIds = new Set<number>();
+    const seenAppIds = new Set<number>();
+    const seenNames = new Set<string>();
 
-      if (parsed.length > 0) {
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            source: 'igdb',
-            igdbConnected: true,
-            items: parsed,
-          }),
-          {
-            status: 200,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          }
-        );
+    const addUniqueItem = (item: NormalizedExternalGameItem): boolean => {
+      const lowerName = item.name.trim().toLowerCase();
+      if (!lowerName) return false;
+      if (item.igdbId !== undefined && seenIgdbIds.has(item.igdbId)) return false;
+      if (item.appId !== undefined && seenAppIds.has(item.appId)) return false;
+      if (seenNames.has(lowerName)) return false;
+
+      if (item.igdbId !== undefined) seenIgdbIds.add(item.igdbId);
+      if (item.appId !== undefined) seenAppIds.add(item.appId);
+      seenNames.add(lowerName);
+      mergedItems.push(item);
+      return true;
+    };
+
+    const igdbFields =
+      'fields id, name, summary, first_release_date, hypes, cover.image_id, genres.name, themes.name, game_modes.name, multiplayer_modes.*, external_games.category, external_games.external_game_source, external_games.uid, platforms.name, total_rating, total_rating_count;';
+
+    const igdbPromise = token
+      ? Promise.all([
+          // a) Recent quality (2022-2026)
+          queryIgdbGames(
+            igdbClientId,
+            token,
+            `
+              ${igdbFields}
+              where first_release_date >= 1640995200 & game_modes = (2,3,5,6) & platforms = (6) & total_rating_count >= 4 & version_parent = null;
+              sort total_rating_count desc;
+              limit 50;
+            `
+          ),
+          // b) Brand-new & hyped (2024-2026, even with 0 ratings)
+          queryIgdbGames(
+            igdbClientId,
+            token,
+            `
+              ${igdbFields}
+              where first_release_date >= 1704067200 & game_modes = (2,3,5,6) & platforms = (6) & version_parent = null;
+              sort hypes desc;
+              limit 50;
+            `
+          ),
+          // c) Modern evergreen classics (2018+)
+          queryIgdbGames(
+            igdbClientId,
+            token,
+            `
+              ${igdbFields}
+              where first_release_date >= 1514764800 & game_modes = (2,3,5,6) & platforms = (6) & total_rating_count >= 35 & version_parent = null;
+              sort total_rating desc;
+              limit 35;
+            `
+          ),
+        ])
+      : Promise.resolve<[IgdbGameRaw[], IgdbGameRaw[], IgdbGameRaw[]]>([[], [], []]);
+
+    const spyTopPromise = fetch('https://steamspy.com/api.php?request=top100in2weeks', {
+      signal: AbortSignal.timeout(4000),
+    })
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json()) as Record<string, { appid: number; name: string }>;
+      })
+      .catch(() => null);
+
+    const [[recentQualityRaw, brandNewHypedRaw, evergreenClassicsRaw], spyMap] = await Promise.all([
+      igdbPromise,
+      spyTopPromise,
+    ]);
+
+    let igdbAddedCount = 0;
+    for (const raw of [...recentQualityRaw, ...brandNewHypedRaw, ...evergreenClassicsRaw]) {
+      const parsed = parseIgdbGame(raw);
+      if (parsed.isMultiplayer && parsed.maxPlayers >= 3 && !isNonGameSteamApp(parsed)) {
+        if (addUniqueItem(parsed)) {
+          igdbAddedCount += 1;
+        }
       }
     }
 
-    // Fallback without IGDB keys: live SteamSpy top multiplayer games
-    try {
-      const spyRes = await fetch('https://steamspy.com/api.php?request=top100in2weeks', {
-        signal: AbortSignal.timeout(4000),
-      });
-      if (spyRes.ok) {
-        const spyMap = (await spyRes.json()) as Record<string, { appid: number; name: string }>;
-        const topList = Object.values(spyMap || {}).slice(0, 20);
-        const enriched = await Promise.all(
-          topList.map(async (item): Promise<NormalizedExternalGameItem> => {
-            const spyDetails = await fetchSteamSpyDetails(item.appid);
-            const tags = spyDetails?.tags || [];
-            const genres = spyDetails?.genres || [];
-            const tagVotes = spyDetails?.tagVotes;
-            const allLower = [...tags, ...genres].map((x) => x.toLowerCase());
-            const isMulti = allLower.some(
-              (x) =>
-                x.includes('multiplayer') ||
-                x.includes('co-op') ||
-                x.includes('pvp') ||
-                x.includes('team') ||
-                x.includes('survival') ||
-                x.includes('mmo')
-            );
-            return {
-              appId: item.appid,
-              name: item.name,
-              headerImageUrl: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${item.appid}/header.jpg`,
-              genres,
-              tags,
-              tagVotes,
-              isMultiplayer: isMulti,
-              minPlayers: isMulti ? 1 : 1,
-              maxPlayers: isMulti ? 6 : 1,
-              source: 'steam',
-            };
-          })
-        );
+    // Supplement with SteamSpy top100in2weeks (viral Steam hits or fallback when IGDB is absent)
+    let steamSpyAddedCount = 0;
+    if (spyMap) {
+      const topCandidates = Object.values(spyMap)
+        .filter((item) => {
+          if (!item?.appid || !item?.name) return false;
+          if (NON_GAME_STEAM_APP_IDS.has(item.appid)) return false;
+          if (seenAppIds.has(item.appid)) return false;
+          if (seenNames.has(item.name.trim().toLowerCase())) return false;
+          return true;
+        })
+        .slice(0, 40);
 
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            source: 'steamspy',
-            igdbConnected: false,
-            items: enriched.filter((g) => g.isMultiplayer && !isNonGameSteamApp(g)),
-          }),
-          {
-            status: 200,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      const enriched = await Promise.all(
+        topCandidates.map(async (item): Promise<NormalizedExternalGameItem> => {
+          const [spyDetails, releaseYear] = await Promise.all([
+            fetchSteamSpyDetails(item.appid),
+            fetchSteamStoreReleaseYear(item.appid),
+          ]);
+          const tags = spyDetails?.tags || [];
+          const genres = spyDetails?.genres || [];
+          const tagVotes = spyDetails?.tagVotes;
+          const allLower = [...tags, ...genres].map((x) => x.toLowerCase());
+          const isMulti = allLower.some(
+            (x) =>
+              x.includes('multiplayer') ||
+              x.includes('co-op') ||
+              x.includes('coop') ||
+              x.includes('pvp') ||
+              /\bteam\b/.test(x) ||
+              x.includes('survival') ||
+              x.includes('mmo')
+          );
+          const isNewRelease = releaseYear !== undefined && releaseYear >= 2022;
+          return {
+            appId: item.appid,
+            name: item.name,
+            headerImageUrl: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${item.appid}/header.jpg`,
+            genres,
+            tags,
+            tagVotes,
+            isMultiplayer: isMulti,
+            minPlayers: 1,
+            maxPlayers: isMulti ? 6 : 1,
+            releaseYear,
+            isNewRelease,
+            source: 'steam',
+          };
+        })
+      );
+
+      for (const item of enriched) {
+        if (item.isMultiplayer && !isNonGameSteamApp(item)) {
+          if (addUniqueItem(item)) {
+            steamSpyAddedCount += 1;
           }
-        );
+        }
       }
-    } catch {
-      // ignore timeout and return empty gracefully
+    }
+
+    if (mergedItems.length > 0) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          source: igdbAddedCount > 0 ? 'igdb' : 'steamspy',
+          igdbConnected: Boolean(token && igdbAddedCount > 0),
+          igdbCount: igdbAddedCount,
+          steamSpyCount: steamSpyAddedCount,
+          items: mergedItems,
+        }),
+        {
+          status: 200,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     return new Response(
@@ -735,7 +854,7 @@ Deno.serve(async (req: Request) => {
       const escapedQuery = query.replace(/"/g, '\\"');
       const apicalypse = `
         search "${escapedQuery}";
-        fields id, name, summary, cover.image_id, genres.name, themes.name, game_modes.name, multiplayer_modes.*, external_games.category, external_games.uid, platforms.name, total_rating;
+        fields id, name, summary, first_release_date, cover.image_id, genres.name, themes.name, game_modes.name, multiplayer_modes.*, external_games.category, external_games.external_game_source, external_games.uid, platforms.name, total_rating;
         where version_parent = null;
         limit 18;
       `;
@@ -1038,7 +1157,7 @@ Deno.serve(async (req: Request) => {
     if (token && considerableTargets.length > 0) {
       const uidList = considerableTargets.map((g) => `"${g.appid}"`).join(',');
       const igdbApicalypse = `
-        fields id, name, summary, cover.image_id, genres.name, themes.name, game_modes.name, multiplayer_modes.*, external_games.category, external_games.uid;
+        fields id, name, summary, first_release_date, cover.image_id, genres.name, themes.name, game_modes.name, multiplayer_modes.*, external_games.category, external_games.external_game_source, external_games.uid;
         where external_games.category = 1 & external_games.uid = (${uidList});
         limit 50;
       `;

@@ -208,11 +208,15 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
       : groupMembers;
   }, [activeSession, players, groupMembers]);
 
-  const { newRecommendations, ensureCatalogGameFromRec } = useNewRecommendations({
+  const {
+    newRecommendations,
+    readyToPlayRecommendations,
+    ensureCatalogGameFromRec,
+  } = useNewRecommendations({
     targetPlayers: sessionTargetPlayers,
     catalogGames: groupGames,
     enabled: Boolean(activeSession),
-    maxResults: 9,
+    maxResults: 30,
   });
 
   // Computed Engine Values
@@ -728,9 +732,26 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
             <TabsContent value="recommendations" className="mt-0">
               <SessionRecommendationsView
                 recommendations={newRecommendations}
-                title="Descubrimiento para la Sesión"
+                readyToPlayRecommendations={readyToPlayRecommendations}
+                readyTitle="Para Jugar en esta Sesión · Juegos del Grupo"
+                title="Nuevas Recomendaciones · Para la Sesión"
+                targetPlayers={sessionTargetPlayers}
+                showAffinitySearch={true}
+                lockedGameIds={
+                  activeSession.selectedGameIds ??
+                  (activeSession.selectedGameId ? [activeSession.selectedGameId] : [])
+                }
+                chosenGameId={activeGame?.id}
                 emptyMessage="No hay recomendaciones nuevas sin agregar para los participantes de esta sesión."
                 actionLabel="Importar y fijar"
+                eligibleVoterIds={groupMembers.map((m) => m.id)}
+                onSelectExistingGame={(rec) => {
+                  if (rec.catalogGameId) {
+                    selectSessionGame(activeSession.id, rec.catalogGameId);
+                    setRouletteWinnerBanner(null);
+                    showTempBanner(`Juego elegido para jugar: ${rec.name}`);
+                  }
+                }}
                 onImportRecommendation={(rec) => {
                   const game = ensureCatalogGameFromRec(rec);
                   if (game) {
@@ -738,7 +759,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                       addGameToGroup(activeGroup.id, game.id);
                     }
                     lockSessionGame(activeSession.id, game.id);
-                    showTempBanner(`✨ Juego importado y fijado: ${game.name}`);
+                    showTempBanner(`Juego importado y fijado: ${game.name}`);
                   }
                 }}
               />

@@ -8,12 +8,14 @@ import {
   GameRating,
   GamingGroup,
   GamingSession,
+  GroupRecommendationVotesMap,
   InstantSessionRsvp,
   ParticipantConfirmationStatus,
   PlayerProfile,
   PlayerSteamProfile,
   PlayerTasteProfile,
   PrecisionMinutes,
+  RecommendationVoteValue,
   SanctionRecord,
   SessionCalloutRecord,
   SessionKind,
@@ -53,6 +55,11 @@ export function mapGroupRow(row: Record<string, unknown>): GamingGroup {
       mentionRoleId: String(row.discord_mention_role_id || ''),
       useEveryoneMention: Boolean(row.discord_use_everyone),
     },
+    recommendationVotes: (row.recommendation_votes &&
+    typeof row.recommendation_votes === 'object' &&
+    !Array.isArray(row.recommendation_votes)
+      ? row.recommendation_votes
+      : {}) as GroupRecommendationVotesMap,
     createdAt: String(row.created_at || new Date().toISOString()),
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
   };
@@ -344,6 +351,7 @@ export async function dbUpsertGroup(group: GamingGroup): Promise<void> {
       discord_mention_role_id: group.discordConfig.mentionRoleId || '',
       discord_use_everyone: Boolean(group.discordConfig.useEveryoneMention),
       discord_enabled: Boolean(group.discordConfig.enabled),
+      recommendation_votes: group.recommendationVotes || {},
       created_at: group.createdAt,
       updated_at: group.updatedAt || new Date().toISOString(),
     },
@@ -403,6 +411,24 @@ export async function dbRemoveMemberFromGroup(groupId: string, userId: string): 
   });
   if (error) {
     console.warn('Supabase dbRemoveMemberFromGroup warning:', error);
+  }
+}
+
+export async function dbCastGroupRecommendationVote(
+  groupId: string,
+  recKey: string,
+  userId: string,
+  vote: RecommendationVoteValue | null
+): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('cast_group_recommendation_vote', {
+    p_group_id: groupId,
+    p_rec_key: recKey,
+    p_user_id: userId,
+    p_vote: vote,
+  });
+  if (error) {
+    console.warn('Supabase dbCastGroupRecommendationVote warning:', error);
   }
 }
 

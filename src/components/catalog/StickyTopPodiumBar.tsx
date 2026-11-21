@@ -4,6 +4,7 @@ import { getSafeCoverUrl, handleImageFallback } from './sharedCatalogConstants';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { resolveGameOfficialUrl } from '@/lib/tasteProfileEngine';
 import { ArrowDownToLine, Award, Check, Sparkles, Trophy, X } from 'lucide-react';
 
 export interface StickyTopPodiumBarProps {
@@ -115,7 +116,22 @@ export const StickyTopPodiumBar: React.FC<StickyTopPodiumBarProps> = ({
             >
               {entry ? (
                 <div className="p-1.5 flex items-center gap-1.5 min-w-0">
-                  <div className="relative w-11 h-7 rounded overflow-hidden bg-background/45 border border-border shrink-0">
+                  <a
+                    href={resolveGameOfficialUrl({
+                      name: entry.name,
+                      steamAppId: entry.steamAppId,
+                      coverUrl: entry.coverUrl,
+                      tags: entry.tags,
+                      id: entry.gameId,
+                    })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    draggable={false}
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Ver página oficial de ${entry.name}`}
+                    aria-label={`Ver página oficial de ${entry.name}`}
+                    className="relative w-11 h-7 rounded overflow-hidden bg-background/45 border border-border shrink-0 block hover:border-primary/60 transition-colors cursor-pointer"
+                  >
                     <img
                       src={coverUrl}
                       alt=""
@@ -128,7 +144,7 @@ export const StickyTopPodiumBar: React.FC<StickyTopPodiumBarProps> = ({
                       onError={handleImageFallback}
                       className="relative z-10 h-full w-full object-contain"
                     />
-                  </div>
+                  </a>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1">

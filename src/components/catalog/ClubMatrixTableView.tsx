@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { resolveGameOfficialUrl } from '@/lib/tasteProfileEngine';
 import { Check, Filter, Info, Plus, RotateCcw, Search, Star } from 'lucide-react';
 
 const addClubGameSchema = z.object({
@@ -310,12 +311,26 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
                         {/* Compact Game info + Hover Info Button */}
                         <TableCell className="py-1.5 px-2.5">
                           <div className="flex items-center gap-2 min-w-0">
-                            <img
-                              src={getSafeCoverUrl(game.coverUrl)}
-                              alt={game.name}
-                              onError={handleImageFallback}
-                              className="w-7 h-7 object-cover rounded border border-border shrink-0"
-                            />
+                            <a
+                              href={resolveGameOfficialUrl({
+                                name: game.name,
+                                coverUrl: game.coverUrl,
+                                tags: game.tags,
+                                id: game.id,
+                              })}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`Ver página oficial de ${game.name}`}
+                              aria-label={`Ver página oficial de ${game.name}`}
+                              className="shrink-0 block hover:opacity-85 transition-opacity"
+                            >
+                              <img
+                                src={getSafeCoverUrl(game.coverUrl)}
+                                alt={game.name}
+                                onError={handleImageFallback}
+                                className="w-7 h-7 object-cover rounded border border-border block"
+                              />
+                            </a>
                             <span className="text-xs font-semibold text-foreground truncate max-w-[175px]">
                               {game.name}
                             </span>

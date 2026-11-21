@@ -92,9 +92,13 @@ CREATE TABLE IF NOT EXISTS groups (
   discord_mention_role_id TEXT NOT NULL DEFAULT '',
   discord_use_everyone BOOLEAN NOT NULL DEFAULT FALSE,
   discord_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  recommendation_votes JSONB NOT NULL DEFAULT '{}'::JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE groups
+  ADD COLUMN IF NOT EXISTS recommendation_votes JSONB NOT NULL DEFAULT '{}'::JSONB;
 
 -- ------------------------------------------------------------------------------
 -- 5. GAMING SESSIONS (Strictly Scoped to a Group)
@@ -371,6 +375,57 @@ AS $$
   WHERE id = p_group_id;
 $$;
 
+CREATE OR REPLACE FUNCTION public.cast_group_recommendation_vote(
+  p_group_id TEXT,
+  p_rec_key TEXT,
+  p_user_id TEXT,
+  p_vote TEXT
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_votes JSONB;
+  v_rec_votes JSONB;
+BEGIN
+  IF p_vote IS NOT NULL AND p_vote NOT IN ('up', 'down') THEN
+    RAISE EXCEPTION 'Invalid recommendation vote value: %', p_vote;
+  END IF;
+
+  SELECT COALESCE(recommendation_votes, '{}'::JSONB)
+  INTO v_votes
+  FROM public.groups
+  WHERE id = p_group_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  v_rec_votes := COALESCE(v_votes -> p_rec_key, '{}'::JSONB);
+
+  IF p_vote IS NULL THEN
+    v_rec_votes := v_rec_votes - p_user_id;
+    IF v_rec_votes = '{}'::JSONB THEN
+      v_votes := v_votes - p_rec_key;
+    ELSE
+      v_votes := jsonb_set(v_votes, ARRAY[p_rec_key], v_rec_votes, true);
+    END IF;
+  ELSE
+    v_rec_votes := jsonb_set(v_rec_votes, ARRAY[p_user_id], to_jsonb(p_vote), true);
+    v_votes := jsonb_set(v_votes, ARRAY[p_rec_key], v_rec_votes, true);
+  END IF;
+
+  UPDATE public.groups
+  SET
+    recommendation_votes = v_votes,
+    updated_at = NOW()
+  WHERE id = p_group_id;
+END;
+$$;
+
 -- ------------------------------------------------------------------------------
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ------------------------------------------------------------------------------
@@ -504,3 +559,174 @@ VALUES
   ('project-zomboid', 'Project Zomboid', 'Simulador definitivo de supervivencia zombie para grupos grandes: armar base, saquear y sobrevivir.', 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/108600/header.jpg', 1, 16, 'Survival Sandbox', ARRAY['Supervivencia', 'Zombies', 'Grupo Grande'], 90, NULL),
   ('valorant', 'Valorant', 'Shooter táctico 5v5 con agentes de habilidades únicas y puntería milimétrica.', 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80', 1, 5, 'Shooter Táctico', ARRAY['FPS', '5v5', 'Habilidades'], 40, NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- ------------------------------------------------------------------------------
+-- 10. LEAGUE OF LEGENDS INTEGRATION (Accounts, Match-v5 Cache & Participants)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.lol_accounts (
+  user_id TEXT PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  puuid TEXT NOT NULL,
+  game_name TEXT NOT NULL,
+  tag_line TEXT NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'la2',
+  regional_cluster TEXT NOT NULL DEFAULT 'americas',
+  summoner_level INTEGER NOT NULL DEFAULT 0,
+  profile_icon_id INTEGER NOT NULL DEFAULT 0,
+  ranked_solo JSONB DEFAULT NULL,
+  ranked_flex JSONB DEFAULT NULL,
+  ddragon_version TEXT DEFAULT NULL,
+  last_synced_at TIMESTAMPTZ DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lol_accounts_puuid ON public.lol_accounts (puuid);
+
+CREATE TABLE IF NOT EXISTS public.lol_matches (
+  match_id TEXT PRIMARY KEY,
+  platform_id TEXT NOT NULL,
+  regional_cluster TEXT NOT NULL DEFAULT 'americas',
+  queue_id INTEGER NOT NULL DEFAULT 0,
+  game_mode TEXT NOT NULL DEFAULT '',
+  game_type TEXT NOT NULL DEFAULT '',
+  game_version TEXT NOT NULL DEFAULT '',
+  map_id INTEGER NOT NULL DEFAULT 11,
+  game_creation BIGINT NOT NULL DEFAULT 0,
+  game_start_timestamp BIGINT NOT NULL DEFAULT 0,
+  game_end_timestamp BIGINT DEFAULT NULL,
+  game_duration INTEGER NOT NULL DEFAULT 0,
+  end_of_game_result TEXT DEFAULT NULL,
+  participant_puuids TEXT[] NOT NULL DEFAULT '{}',
+  teams JSONB NOT NULL DEFAULT '[]'::JSONB,
+  raw_match JSONB NOT NULL,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lol_matches_game_creation ON public.lol_matches (game_creation DESC);
+CREATE INDEX IF NOT EXISTS idx_lol_matches_queue_id ON public.lol_matches (queue_id);
+CREATE INDEX IF NOT EXISTS idx_lol_matches_participant_puuids_gin ON public.lol_matches USING GIN (participant_puuids);
+
+CREATE TABLE IF NOT EXISTS public.lol_match_participants (
+  match_id TEXT NOT NULL REFERENCES public.lol_matches(match_id) ON DELETE CASCADE,
+  puuid TEXT NOT NULL,
+  participant_id INTEGER NOT NULL DEFAULT 0,
+  team_id INTEGER NOT NULL DEFAULT 100,
+  riot_id_game_name TEXT NOT NULL DEFAULT '',
+  riot_id_tag_line TEXT NOT NULL DEFAULT '',
+  summoner_name TEXT NOT NULL DEFAULT '',
+  champion_id INTEGER NOT NULL DEFAULT 0,
+  champion_name TEXT NOT NULL DEFAULT '',
+  champ_level INTEGER NOT NULL DEFAULT 1,
+  team_position TEXT NOT NULL DEFAULT '',
+  individual_position TEXT NOT NULL DEFAULT '',
+  win BOOLEAN NOT NULL DEFAULT FALSE,
+  game_ended_in_surrender BOOLEAN NOT NULL DEFAULT FALSE,
+  game_ended_in_early_surrender BOOLEAN NOT NULL DEFAULT FALSE,
+  team_early_surrendered BOOLEAN NOT NULL DEFAULT FALSE,
+  outcome TEXT NOT NULL CHECK (outcome IN ('win', 'loss', 'ff', 'remake')),
+  enemy_surrendered BOOLEAN NOT NULL DEFAULT FALSE,
+  kills INTEGER NOT NULL DEFAULT 0,
+  deaths INTEGER NOT NULL DEFAULT 0,
+  assists INTEGER NOT NULL DEFAULT 0,
+  kda NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  cs INTEGER NOT NULL DEFAULT 0,
+  cs_per_min NUMERIC(5, 2) NOT NULL DEFAULT 0,
+  gold_earned INTEGER NOT NULL DEFAULT 0,
+  damage_to_champions INTEGER NOT NULL DEFAULT 0,
+  damage_taken INTEGER NOT NULL DEFAULT 0,
+  damage_to_objectives INTEGER NOT NULL DEFAULT 0,
+  damage_to_turrets INTEGER NOT NULL DEFAULT 0,
+  vision_score INTEGER NOT NULL DEFAULT 0,
+  kill_participation NUMERIC(5, 4) NOT NULL DEFAULT 0,
+  summoner1_id INTEGER NOT NULL DEFAULT 0,
+  summoner2_id INTEGER NOT NULL DEFAULT 0,
+  primary_rune_id INTEGER DEFAULT NULL,
+  primary_style_id INTEGER DEFAULT NULL,
+  sub_style_id INTEGER DEFAULT NULL,
+  items INTEGER[] NOT NULL DEFAULT '{}',
+  performance_score NUMERIC(5, 2) NOT NULL DEFAULT 0,
+  performance_grade TEXT NOT NULL DEFAULT 'C',
+  performance_breakdown JSONB NOT NULL DEFAULT '{}'::JSONB,
+  match_rank INTEGER NOT NULL DEFAULT 5,
+  is_mvp BOOLEAN NOT NULL DEFAULT FALSE,
+  is_ace BOOLEAN NOT NULL DEFAULT FALSE,
+  highlights TEXT[] NOT NULL DEFAULT '{}',
+  raw_participant JSONB NOT NULL,
+  PRIMARY KEY (match_id, puuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lol_participants_puuid ON public.lol_match_participants (puuid);
+CREATE INDEX IF NOT EXISTS idx_lol_participants_match_id ON public.lol_match_participants (match_id);
+CREATE INDEX IF NOT EXISTS idx_lol_participants_perf ON public.lol_match_participants (puuid, performance_score DESC);
+
+ALTER TABLE public.lol_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lol_matches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lol_match_participants ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'lol_accounts' AND policyname = 'Public Read Lol Accounts') THEN
+    CREATE POLICY "Public Read Lol Accounts" ON public.lol_accounts FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'lol_accounts' AND policyname = 'Public Insert Lol Accounts') THEN
+    CREATE POLICY "Public Insert Lol Accounts" ON public.lol_accounts FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'lol_accounts' AND policyname = 'Public Update Lol Accounts') THEN
+    CREATE POLICY "Public Update Lol Accounts" ON public.lol_accounts FOR UPDATE USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'lol_accounts' AND policyname = 'Public Delete Lol Accounts') THEN
+    CREATE POLICY "Public Delete Lol Accounts" ON public.lol_accounts FOR DELETE USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'lol_matches' AND policyname = 'Public Read Lol Matches') THEN
+    CREATE POLICY "Public Read Lol Matches" ON public.lol_matches FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'lol_match_participants' AND policyname = 'Public Read Lol Match Participants') THEN
+    CREATE POLICY "Public Read Lol Match Participants" ON public.lol_match_participants FOR SELECT USING (true);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'lol_accounts'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.lol_accounts;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'lol_matches'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.lol_matches;
+    END IF;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 11. LEAGUE OF LEGENDS INTERNAL SERVER SECRETS (service_role only)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.lol_internal_secrets (
+  key_name TEXT PRIMARY KEY,
+  key_value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.lol_internal_secrets ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'lol_internal_secrets'
+      AND policyname = 'Deny Public Access Lol Internal Secrets'
+  ) THEN
+    CREATE POLICY "Deny Public Access Lol Internal Secrets"
+      ON public.lol_internal_secrets
+      FOR ALL
+      TO anon, authenticated
+      USING (false)
+      WITH CHECK (false);
+  END IF;
+END $$;

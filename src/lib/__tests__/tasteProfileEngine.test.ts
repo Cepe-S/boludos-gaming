@@ -3,17 +3,24 @@ import {
   GLOBAL_GAMES_KNOWLEDGE_BASE,
   MAX_AUTO_SELECTED_STEAM_GAMES,
   TASTE_DIMENSIONS,
+  applyRecommendationFeedback,
   buildPlayerTasteProfile,
   buildPlayerTasteVector,
   buildUnifiedGameSelectorList,
   computeSuggestedRatingFromHours,
   enrichAndSortSteamLibrary,
+  estimateReleaseYearFromSteamAppId,
+  evaluateAnyGameForGroup,
   extractTopDimensions,
   generateGroupGameRecommendations,
+  getRecommendationCanonicalKey,
   inferGameMetadataAndVector,
   isConsiderableSteamGame,
   isNonGameSteamApp,
+  normalizeGameName,
+  resolveGameOfficialUrl,
   scoreGameForPlayer,
+  searchMultiPlatformGamesForAffinity,
 } from '../tasteProfileEngine';
 import { Game, PlayerProfile, TasteDimensionKey, UserGamePreference } from '../../types/domain';
 
@@ -1554,6 +1561,396 @@ describe('Taste Profile Engine & Group Recommendations', () => {
       expect(valorantAfterIdx).toBeLessThan(firstUnselectedIdx);
       // Within the selected group, CS2 (higher likelihoodScore) remains ahead of Valorant
       expect(cs2AfterIdx).toBeLessThan(valorantAfterIdx);
+    });
+  });
+
+  // ==========================================================================
+  // 10. DISCOVERY 2022-2026 NOVELTY, OLD-GAME DECAY, REGEX FIXES & FEEDBACK HOOK
+  // ==========================================================================
+  describe('Discovery 2022-2026 Novelty, Old-Game Decay, Word-Boundary Fixes & Feedback Hook', () => {
+    it('ensures GLOBAL_GAMES_KNOWLEDGE_BASE has releaseYear on all entries and zero duplicate normalized names', () => {
+      const seen = new Set<string>();
+      for (const entry of GLOBAL_GAMES_KNOWLEDGE_BASE) {
+        expect(entry.releaseYear).toBeDefined();
+        const norm = normalizeGameName(entry.name);
+        expect(seen.has(norm)).toBe(false);
+        seen.add(norm);
+      }
+      expect(GLOBAL_GAMES_KNOWLEDGE_BASE.length).toBeGreaterThanOrEqual(110);
+    });
+
+    it('does NOT false-match Physics / Pixel Graphics / Sports / Control / Steampunk or assign pvp_competitive from Multiplayer alone', () => {
+      const coopPuzzle = inferGameMetadataAndVector({
+        name: 'Co-op Steampunk Control Puzzle',
+        rawTags: ['Physics', 'Pixel Graphics', 'Co-op', 'Multiplayer', 'Steampunk'],
+        rawGenres: ['Indie', 'Sports'],
+      });
+
+      expect(coopPuzzle.vector.tactical_shooter).toBe(0);
+      expect(coopPuzzle.vector.rts_strategy).toBe(0);
+      expect(coopPuzzle.vector.rpg_narrative).toBe(0);
+      expect(coopPuzzle.vector.realistic_military).toBe(0);
+      expect(coopPuzzle.vector.pvp_competitive).toBe(0);
+      expect(coopPuzzle.vector.pve_cooperative).toBeGreaterThan(0.7);
+    });
+
+    it('applies 2022-2026 novelty boost (isNewRelease: true) and outranks an otherwise identical 2018 non-evergreen game', () => {
+      const p1 = createMockPlayer('u-nov-1', 'Nov1');
+      p1.categoryPreferences = { 'Co-op Acción': 'like' };
+      const p2 = createMockPlayer('u-nov-2', 'Nov2');
+      p2.categoryPreferences = { 'Co-op Acción': 'like' };
+
+      const sharedWeights = {
+        coop_pve_action: 1.0,
+        pve_cooperative: 1.0,
+        squad_coordination: 0.9,
+      };
+
+      const recs = generateGroupGameRecommendations({
+        targetPlayers: [p1, p2],
+        catalogGames: [],
+        preferences: [],
+        maxResultsPerCategory: 100,
+        externalDiscoveryGames: [
+          {
+            id: 'ext-old-2018',
+            name: 'Identical Co-op 2018',
+            description: 'Older title',
+            category: 'Co-op Acción',
+            coverUrl: '',
+            tags: ['Co-op'],
+            genres: ['Action'],
+            minPlayers: 1,
+            maxPlayers: 4,
+            isMultiplayer: true,
+            releaseYear: 2018,
+            weights: sharedWeights,
+          },
+          {
+            id: 'ext-new-2025',
+            name: 'Identical Co-op 2025',
+            description: 'New title',
+            category: 'Co-op Acción',
+            coverUrl: '',
+            tags: ['Co-op'],
+            genres: ['Action'],
+            minPlayers: 1,
+            maxPlayers: 4,
+            isMultiplayer: true,
+            releaseYear: 2025,
+            isNewRelease: true,
+            weights: sharedWeights,
+          },
+        ],
+      });
+
+      const newRec = recs.discovery.find((r) => r.name === 'Identical Co-op 2025');
+      const oldRec = recs.discovery.find((r) => r.name === 'Identical Co-op 2018');
+
+      expect(newRec).toBeDefined();
+      expect(oldRec).toBeDefined();
+      expect(newRec?.isNewRelease).toBe(true);
+      expect(oldRec?.isNewRelease).toBe(false);
+      expect(newRec!.groupConsensusScore!).toBeGreaterThan(oldRec!.groupConsensusScore!);
+    });
+
+    it('excludes pre-2015 non-evergreen games in discovery and ignores Steam ownership floors so old 800h games do not hijack discovery', () => {
+      const p1 = createMockPlayer('u-old-1', 'OldOwner');
+      p1.categoryPreferences = { 'Co-op Acción': 'like' };
+      p1.steamProfile = {
+        steamId64: '76561198000000901',
+        profileUrl: '',
+        personaName: 'OldOwner',
+        avatarUrl: '',
+        lastSyncedAt: new Date().toISOString(),
+        totalHours: 800,
+        considerableGamesCount: 1,
+        ownedGames: [
+          {
+            appId: 550,
+            name: 'Left 4 Dead 2',
+            playtimeHours: 800,
+            playtimeRecentHours: 0,
+            headerImageUrl: '',
+            genres: ['Action'],
+            tags: ['Co-op', 'Zombies'],
+            isMultiplayer: true,
+            minPlayers: 1,
+            maxPlayers: 8,
+            suggestedRating: 5,
+          },
+        ],
+      };
+
+      const p2 = createMockPlayer('u-old-2', 'Friend2');
+      p2.categoryPreferences = { 'Party Casual': 'like' };
+
+      const recs = generateGroupGameRecommendations({
+        targetPlayers: [p1, p2],
+        catalogGames: [],
+        preferences: [],
+        maxResultsPerCategory: 30,
+      });
+
+      // Left 4 Dead 2 (2009, non-evergreen) should be excluded from discovery
+      expect(recs.discovery.some((r) => r.name === 'Left 4 Dead 2')).toBe(false);
+      // Team Fortress 2 (2007, non-evergreen) should also be excluded
+      expect(recs.discovery.some((r) => r.name === 'Team Fortress 2')).toBe(false);
+    });
+
+    it('excludes excludeNames BEFORE slicing and enforces MMR-lite category diversity', () => {
+      const p1 = createMockPlayer('u-div-1', 'Div1');
+      p1.categoryPreferences = { 'Shooter Táctico': 'like', 'Co-op Acción': 'like' };
+      const p2 = createMockPlayer('u-div-2', 'Div2');
+      p2.categoryPreferences = { 'Shooter Táctico': 'like', 'Party Casual': 'like' };
+
+      const initialRecs = generateGroupGameRecommendations({
+        targetPlayers: [p1, p2],
+        catalogGames: [],
+        preferences: [],
+        maxResultsPerCategory: 12,
+      });
+
+      expect(initialRecs.discovery).toHaveLength(12);
+
+      // Verify no more than 2 games of the same category back-to-back
+      for (let i = 2; i < initialRecs.discovery.length; i++) {
+        const c0 = initialRecs.discovery[i - 2].category;
+        const c1 = initialRecs.discovery[i - 1].category;
+        const c2 = initialRecs.discovery[i].category;
+        expect(c0 === c1 && c1 === c2).toBe(false);
+      }
+
+      // Excluding top 3 names BEFORE slice still returns full 12 results without excluded items
+      const toExclude = new Set(
+        initialRecs.discovery.slice(0, 3).map((r) => normalizeGameName(r.name))
+      );
+      const afterExclude = generateGroupGameRecommendations({
+        targetPlayers: [p1, p2],
+        catalogGames: [],
+        preferences: [],
+        maxResultsPerCategory: 12,
+        excludeNames: toExclude,
+      });
+
+      expect(afterExclude.discovery).toHaveLength(12);
+      for (const rec of afterExclude.discovery) {
+        expect(toExclude.has(normalizeGameName(rec.name))).toBe(false);
+      }
+    });
+
+    it('generates stable canonical keys and passes recommendations through applyRecommendationFeedback unchanged', () => {
+      expect(
+        getRecommendationCanonicalKey({ name: 'Counter-Strike 2', steamAppId: 730, igdbId: 1372 })
+      ).toBe('steam:730');
+      expect(getRecommendationCanonicalKey({ name: 'Some IGDB Title', igdbId: 999 })).toBe(
+        'igdb:999'
+      );
+      expect(getRecommendationCanonicalKey({ name: "Liar's Bar!" })).toBe('name:liarsbar');
+
+      const p1 = createMockPlayer('u-fb-1', 'Fb1');
+      p1.categoryPreferences = { 'Co-op Horror': 'like' };
+      const recs = generateGroupGameRecommendations({
+        targetPlayers: [p1],
+        catalogGames: [],
+        preferences: [],
+        maxResultsPerCategory: 5,
+      }).discovery;
+
+      const withFeedback = applyRecommendationFeedback(recs, {
+        'steam:3241660': { 'u-fb-1': 'up' },
+      });
+      expect(withFeedback).toBe(recs);
+    });
+
+    it('always populates numeric releaseYear on recommendations using KB, name year, or SteamAppId heuristic', () => {
+      expect(estimateReleaseYearFromSteamAppId(undefined, 'Football Manager 2024')).toBe(2024);
+      expect(estimateReleaseYearFromSteamAppId(3164500, 'Schedule I')).toBe(2025);
+      expect(estimateReleaseYearFromSteamAppId(550, 'Unknown Classic')).toBe(2012);
+      expect(estimateReleaseYearFromSteamAppId(undefined, 'Unknown Non-Steam')).toBe(2024);
+
+      const p1 = createMockPlayer('u-yr-1', 'Yr1');
+      p1.categoryPreferences = { 'Co-op Acción': 'like' };
+      const customCatalogGame: Game = {
+        id: 'cat-unlisted-2023',
+        name: 'Custom Squad 2023',
+        category: 'Co-op Acción',
+        tags: ['Co-op'],
+        minPlayers: 1,
+        maxPlayers: 4,
+        coverUrl: '',
+        averageDurationMins: 45,
+        addedBy: 'u-yr-1',
+      };
+
+      const res = generateGroupGameRecommendations({
+        targetPlayers: [p1],
+        catalogGames: [...mockCatalog, customCatalogGame],
+        preferences: [],
+        maxResultsPerCategory: 15,
+      });
+
+      for (const rec of res.all) {
+        expect(typeof rec.releaseYear).toBe('number');
+        expect(Number.isFinite(rec.releaseYear)).toBe(true);
+      }
+      const customRec = res.readyToPlay.find((r) => r.catalogGameId === 'cat-unlisted-2023');
+      expect(customRec?.releaseYear).toBe(2023);
+    });
+
+    it('resolves official game URLs across explicit URL, non-Steam map, Steam sources, KB lookup, and Steam search fallback', () => {
+      // a) Explicit officialUrl takes top priority
+      expect(
+        resolveGameOfficialUrl({
+          name: 'Counter-Strike 2',
+          steamAppId: 730,
+          officialUrl: '  https://www.counter-strike.net/  ',
+        })
+      ).toBe('https://www.counter-strike.net/');
+
+      // b) Official non-Steam URLs by normalized name
+      expect(resolveGameOfficialUrl({ name: 'Valorant' })).toBe('https://playvalorant.com/');
+      expect(resolveGameOfficialUrl({ name: 'League of Legends' })).toBe(
+        'https://www.leagueoflegends.com/'
+      );
+      expect(resolveGameOfficialUrl({ name: 'Escape from Tarkov' })).toBe(
+        'https://www.escapefromtarkov.com/'
+      );
+      expect(resolveGameOfficialUrl({ name: 'Call of Duty: Warzone' })).toBe(
+        'https://www.callofduty.com/warzone'
+      );
+
+      // c) Steam AppID resolution across direct field, coverUrl, tags, id, and KB lookup
+      expect(resolveGameOfficialUrl({ name: 'Custom App', steamAppId: 12345 })).toBe(
+        'https://store.steampowered.com/app/12345/'
+      );
+      expect(
+        resolveGameOfficialUrl({
+          name: 'From Cover',
+          coverUrl: 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/553850/header.jpg',
+        })
+      ).toBe('https://store.steampowered.com/app/553850/');
+      expect(
+        resolveGameOfficialUrl({
+          name: 'From Tag',
+          tags: ['Co-op', 'steam:1966720'],
+        })
+      ).toBe('https://store.steampowered.com/app/1966720/');
+      expect(
+        resolveGameOfficialUrl({
+          name: 'From ID',
+          id: 'rec-discovery-steam-3164500',
+        })
+      ).toBe('https://store.steampowered.com/app/3164500/');
+      expect(resolveGameOfficialUrl({ name: 'Deep Rock Galactic' })).toBe(
+        'https://store.steampowered.com/app/548430/'
+      );
+
+      // d) Fallback Steam Store search
+      expect(resolveGameOfficialUrl({ name: 'Obscure Custom Game' })).toBe(
+        'https://store.steampowered.com/search/?term=Obscure%20Custom%20Game'
+      );
+    });
+
+    it('evaluates any candidate game and searches across multi-platform sources (Valorant, LoL, Minecraft, Helldivers 2, liveSearchResults)', () => {
+      const p1 = createMockPlayer('u-mp-1', 'MpOne');
+      p1.categoryPreferences = { 'Shooter Táctico': 'like', 'Co-op Acción': 'like' };
+      const p2 = createMockPlayer('u-mp-2', 'MpTwo');
+      p2.categoryPreferences = { MOBA: 'like', 'Survival Sandbox': 'like' };
+
+      // 1. evaluateAnyGameForGroup matches catalog game as ready_to_play
+      const hdRec = evaluateAnyGameForGroup({
+        candidate: {
+          name: 'Helldivers 2',
+          steamAppId: 553850,
+          category: 'Co-op Acción',
+          tags: ['Co-op', 'Sci-Fi'],
+        },
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+      });
+      expect(hdRec.recommendationType).toBe('ready_to_play');
+      expect(hdRec.catalogGameId).toBe('cat-helldivers2');
+      expect(hdRec.recKey).toBe('steam:553850');
+      expect(hdRec.releaseYear).toBe(2024);
+      expect(hdRec.isNewRelease).toBe(true);
+      expect(hdRec.playerBreakdowns).toHaveLength(2);
+
+      // 2. evaluateAnyGameForGroup scores non-catalog Riot title as discovery
+      const valRec = evaluateAnyGameForGroup({
+        candidate: {
+          name: 'Valorant',
+          platform: 'Riot Games',
+        },
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+      });
+      expect(valRec.recommendationType).toBe('discovery');
+      expect(valRec.catalogGameId).toBeUndefined();
+      expect(valRec.recKey).toBe('name:valorant');
+      expect(valRec.releaseYear).toBe(2020);
+
+      // 3. searchMultiPlatformGamesForAffinity finds cross-platform hits & liveSearchResults
+      const valResults = searchMultiPlatformGamesForAffinity({
+        query: 'valorant',
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+      });
+      expect(valResults.some((r) => r.name === 'Valorant')).toBe(true);
+
+      const lolResults = searchMultiPlatformGamesForAffinity({
+        query: 'league of legends',
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+      });
+      expect(lolResults[0]?.name).toBe('League of Legends');
+
+      const mcResults = searchMultiPlatformGamesForAffinity({
+        query: 'minecraft',
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+      });
+      expect(mcResults[0]?.name).toBe('Minecraft');
+
+      const hdResults = searchMultiPlatformGamesForAffinity({
+        query: 'helldivers',
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+      });
+      expect(hdResults[0]?.name).toBe('Helldivers 2');
+      expect(hdResults[0]?.catalogGameId).toBe('cat-helldivers2');
+
+      const customLiveResults = searchMultiPlatformGamesForAffinity({
+        query: 'nebula raiders',
+        targetPlayers: [p1, p2],
+        preferences: [],
+        catalogGames: mockCatalog,
+        liveSearchResults: [
+          {
+            igdbId: 888777,
+            name: 'Nebula Raiders 2025',
+            category: 'Co-op Acción',
+            tags: ['Co-op', 'Sci-Fi'],
+            genres: ['Action'],
+            isMultiplayer: true,
+            minPlayers: 1,
+            maxPlayers: 4,
+            releaseYear: 2025,
+            platform: 'IGDB',
+          },
+        ],
+      });
+      expect(customLiveResults).toHaveLength(1);
+      expect(customLiveResults[0].name).toBe('Nebula Raiders 2025');
+      expect(customLiveResults[0].igdbId).toBe(888777);
+      expect(customLiveResults[0].recKey).toBe('igdb:888777');
+      expect(customLiveResults[0].isNewRelease).toBe(true);
     });
   });
 });

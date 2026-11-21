@@ -23,11 +23,12 @@ import {
   Plus,
   Scale,
   Sparkles,
+  Swords,
   Trophy,
   Users,
 } from 'lucide-react';
 
-export type AppTab = 'sessions' | 'groups' | 'games' | 'tribunal' | 'discord';
+export type AppTab = 'sessions' | 'recommendations' | 'lol' | 'groups' | 'games' | 'tribunal' | 'discord';
 
 export interface AppSidebarContentProps {
   activeTab: AppTab;
@@ -119,6 +120,16 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
       icon: <Gamepad2 className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
       badge: openSessionsCount,
       badgeVariant: openSessionsCount > 0 ? 'default' : 'secondary',
+    },
+    {
+      id: 'recommendations',
+      label: 'Recomendaciones',
+      icon: <Sparkles className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
+    },
+    {
+      id: 'lol',
+      label: 'League of Legends',
+      icon: <Swords className="w-5 h-5 shrink-0" strokeWidth={1.75} />,
     },
     {
       id: 'games',

@@ -54,6 +54,8 @@ interface EdgeGamePayload {
   minPlayers?: number;
   maxPlayers?: number;
   rating?: number;
+  releaseYear?: number;
+  isNewRelease?: boolean;
   source?: 'igdb' | 'steam';
 }
 
@@ -305,6 +307,9 @@ export async function fetchExternalDiscoveryGames(
             ? `steam-${item.appId}`
             : `ext-disc-${idx}-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
           steamAppId: item.appId,
+          igdbId: item.igdbId,
+          releaseYear: item.releaseYear,
+          isNewRelease: item.isNewRelease,
           name: item.name,
           description:
             item.summary ||

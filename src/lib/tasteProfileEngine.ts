@@ -3,6 +3,7 @@ import {
   Game,
   GameRating,
   GroupGameRecommendation,
+  GroupRecommendationVotesMap,
   PlayerAffinityBreakdown,
   PlayerProfile,
   PlayerTasteProfile,
@@ -100,6 +101,10 @@ const CATEGORY_TO_DIMENSIONS_MAP: Record<string, TasteDimensionKey[]> = {
 export interface KnowledgeGameEntry {
   id: string;
   steamAppId?: number;
+  igdbId?: number;
+  releaseYear?: number;
+  isNewRelease?: boolean;
+  isEvergreen?: boolean;
   name: string;
   description: string;
   category: string;
@@ -123,6 +128,9 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-cs2',
     steamAppId: 730,
+    releaseYear: 2023,
+    isNewRelease: true,
+    isEvergreen: true,
     name: 'Counter-Strike 2',
     description: 'Shooter táctico 5v5 por rondas de alta exigencia mecánica y lectura de juego.',
     category: 'Shooter Táctico',
@@ -146,6 +154,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-dota2',
     steamAppId: 570,
+    releaseYear: 2013,
+    isEvergreen: true,
     name: 'Dota 2',
     description: 'MOBA por excelencia con inmensa profundidad estratégica, roles dinámicos y partidas tensas.',
     category: 'MOBA',
@@ -169,6 +179,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-pubg',
     steamAppId: 578080,
+    releaseYear: 2017,
+    isEvergreen: true,
     name: 'PUBG: BATTLEGROUNDS',
     description: 'El pionero del Battle Royale táctico realista a gran escala.',
     category: 'Shooter Táctico',
@@ -192,6 +204,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-rust',
     steamAppId: 252490,
+    releaseYear: 2018,
+    isEvergreen: true,
     name: 'Rust',
     description: 'Supervivencia sandbox implacable con PvP despiadado, bases gigantes y raids masivos.',
     category: 'Survival Sandbox',
@@ -215,6 +229,9 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-helldivers2',
     steamAppId: 553850,
+    releaseYear: 2024,
+    isNewRelease: true,
+    isEvergreen: true,
     name: 'Helldivers 2',
     description: 'Repartir democracia galáctica en escuadra de a 4 contra hordas de bichos y autómatas.',
     category: 'Co-op Acción',
@@ -238,6 +255,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-lethal-company',
     steamAppId: 1966720,
+    releaseYear: 2023,
+    isNewRelease: true,
     name: 'Lethal Company',
     description: 'Terror cooperativo caótico, comedia involuntaria y recolección de chatarra espacial con chat de proximidad.',
     category: 'Co-op Horror',
@@ -261,6 +280,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-aoe2de',
     steamAppId: 813780,
+    releaseYear: 2019,
     name: 'Age of Empires II: DE',
     description: 'El clásico atemporal de estrategia en tiempo real con macrogestión, imperios y asedios.',
     category: 'RTS',
@@ -282,6 +302,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-bg3',
     steamAppId: 1086940,
+    releaseYear: 2023,
+    isNewRelease: true,
     name: "Baldur's Gate 3",
     description: 'Obra maestra de rol por turnos, libertad infinita y campaña cooperativa inolvidable.',
     category: 'RPG / Aventura',
@@ -305,6 +327,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-project-zomboid',
     steamAppId: 108600,
+    releaseYear: 2013,
     name: 'Project Zomboid',
     description: 'Simulador sandbox hardcore de apocalipsis zombie en Kentucky con supervivencia meticulosa.',
     category: 'Survival Sandbox',
@@ -329,6 +352,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-l4d2',
     steamAppId: 550,
+    releaseYear: 2009,
     name: 'Left 4 Dead 2',
     description: 'Acción PvE cooperativa legendaria contra oleadas de infectados y mutantes en escuadra de a 4.',
     category: 'Co-op Acción',
@@ -352,6 +376,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-apex',
     steamAppId: 1172470,
+    releaseYear: 2019,
+    isEvergreen: true,
     name: 'Apex Legends',
     description: 'Battle Royale frenético con héroes, habilidades únicas y desplazamiento fluido a alta velocidad.',
     category: 'Shooter Táctico',
@@ -375,6 +401,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-r6-siege',
     steamAppId: 359550,
+    releaseYear: 2015,
     name: 'Tom Clancy\'s Rainbow Six Siege',
     description: 'Shooter táctico en interiores con destrucción de paredes, drones y operadores especializados.',
     category: 'Shooter Táctico',
@@ -398,6 +425,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-drg',
     steamAppId: 548430,
+    releaseYear: 2020,
     name: 'Deep Rock Galactic',
     description: 'Enanos espaciales mineros en cuevas generadas proceduralmente, cervezas y hordas de alienígenas.',
     category: 'Co-op Acción',
@@ -420,6 +448,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-valheim',
     steamAppId: 892970,
+    releaseYear: 2021,
     name: 'Valheim',
     description: 'Supervivencia y exploración vikinga en un purgatorio procedural con construcción y jefes épicos.',
     category: 'Survival Sandbox',
@@ -443,6 +472,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-terraria',
     steamAppId: 105600,
+    releaseYear: 2011,
     name: 'Terraria',
     description: 'Aventura 2D legendaria con crafteo, minería, cientos de armas y decenas de jefes colosales.',
     category: 'Survival Sandbox',
@@ -466,6 +496,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-stardew',
     steamAppId: 413150,
+    releaseYear: 2016,
     name: 'Stardew Valley',
     description: 'La granja relajante por excelencia: pesca, cultivos, minería y vida campestre con amigos.',
     category: 'Party Casual',
@@ -487,6 +518,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-amongus',
     steamAppId: 945360,
+    releaseYear: 2018,
     name: 'Among Us',
     description: 'Deducción social, mentiras, sabotajes y discusiones acaloradas en la nave espacial.',
     category: 'Party Casual',
@@ -507,6 +539,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-phasmophobia',
     steamAppId: 739630,
+    releaseYear: 2020,
     name: 'Phasmophobia',
     description: 'Investigación paranormal cooperativa en casas oscuras hablando por radio con fantasmas.',
     category: 'Co-op Horror',
@@ -529,6 +562,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-sot',
     steamAppId: 1172620,
+    releaseYear: 2018,
     name: 'Sea of Thieves',
     description: 'Vida pirata en mundo abierto: tripular galeones, disparar cañones y buscar tesoros.',
     category: 'Co-op Acción',
@@ -551,6 +585,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-dbd',
     steamAppId: 381210,
+    releaseYear: 2016,
     name: 'Dead by Daylight',
     description: 'Terror asimétrico 4v1 donde cuatro supervivientes intentan escapar de un asesino implacable.',
     category: 'Co-op Horror',
@@ -573,6 +608,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-payday2',
     steamAppId: 218620,
+    releaseYear: 2013,
     name: 'Payday 2',
     description: 'Atraco a bancos y joyería en escuadra de a 4 con sigilo o tiroteos frenéticos contra la policía.',
     category: 'Co-op Acción',
@@ -594,6 +630,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-hunt',
     steamAppId: 594650,
+    releaseYear: 2019,
     name: 'Hunt: Showdown 1896',
     description: 'PvPvE táctico en pantanos decimonónicos con monstruos grotescos y tiroteos de alta tensión.',
     category: 'Shooter Táctico',
@@ -617,6 +654,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-warframe',
     steamAppId: 230410,
+    releaseYear: 2013,
+    isEvergreen: true,
     name: 'Warframe',
     description: 'Ninjas espaciales hiperveloces con combate fluido, parkour y cientos de armas para grindear.',
     category: 'Co-op Acción',
@@ -638,6 +677,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-destiny2',
     steamAppId: 1085660,
+    releaseYear: 2017,
     name: 'Destiny 2',
     description: 'Shooter MMO espacial con raids de coordinación extrema, asaltos y progresión de equipamiento exótico.',
     category: 'Co-op Acción',
@@ -660,6 +700,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-tf2',
     steamAppId: 440,
+    releaseYear: 2007,
     name: 'Team Fortress 2',
     description: 'El clásico pionero de los hero shooters: 9 clases icónicas, gorros y partidas desquiciadas.',
     category: 'Shooter Táctico',
@@ -682,6 +723,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-gmod',
     steamAppId: 4000,
+    releaseYear: 2006,
     name: "Garry's Mod",
     description: 'Caja de arena definitiva del motor Source: Trouble in Terrorist Town, Prop Hunt y físicas locas.',
     category: 'Party Casual',
@@ -701,6 +743,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-chained-together',
     steamAppId: 2567870,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'Chained Together',
     description: 'Escapar del infierno encadenados de a cuatro con saltos de plataformas y traición inevitable.',
     category: 'Co-op Acción',
@@ -722,10 +766,12 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-peak',
     steamAppId: 3527290,
+    releaseYear: 2025,
+    isNewRelease: true,
     name: 'Peak',
     description: 'Cooperación física intensa donde cada error arrastra al equipo entero al vacío.',
     category: 'Co-op Acción',
-    coverUrl: steamHeaderUrl(2567870),
+    coverUrl: steamHeaderUrl(3527290),
     tags: ['Co-op', 'Física', 'Aventura', 'Risas'],
     genres: ['Action', 'Casual'],
     minPlayers: 1,
@@ -742,6 +788,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-repo',
     steamAppId: 3241660,
+    releaseYear: 2025,
+    isNewRelease: true,
     name: 'R.E.P.O.',
     description: 'Extracción táctica cooperativa en instalaciones abandonadas con peligros biológicos extremos.',
     category: 'Co-op Horror',
@@ -763,6 +811,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-content-warning',
     steamAppId: 2881650,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'Content Warning',
     description: 'Bajar al Viejo Mundo a filmar monstruos terroríficos para volverse viral en SpookTube.',
     category: 'Co-op Horror',
@@ -785,6 +835,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-factorio',
     steamAppId: 427520,
+    releaseYear: 2020,
     name: 'Factorio',
     description: 'Automatización industrial masiva, logística de cintas transportadoras y trenes contra alienígenas.',
     category: 'RTS',
@@ -807,6 +858,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-satisfactory',
     steamAppId: 526870,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'Satisfactory',
     description: 'Construcción de fábricas colosales en primera persona en un planeta alienígena paradisíaco.',
     category: 'Survival Sandbox',
@@ -829,6 +882,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-vrising',
     steamAppId: 1604030,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'V Rising',
     description: 'Supervivencia vampírica ARPG: construir castillos góticos y cazar jefes evitando la luz solar.',
     category: 'Survival Sandbox',
@@ -852,6 +907,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-enshrouded',
     steamAppId: 1203620,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'Enshrouded',
     description: 'Supervivencia y rol en mundo voxel con construcción libre, niebla letal y exploración de ruinas.',
     category: 'Survival Sandbox',
@@ -873,6 +930,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-mhw',
     steamAppId: 582010,
+    releaseYear: 2018,
     name: 'Monster Hunter: World',
     description: 'Cazar bestias gigantes en ecosistemas vivos con 14 tipos de armas complejas en equipo de 4.',
     category: 'Co-op Acción',
@@ -895,6 +953,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-mh-wilds',
     steamAppId: 2246340,
+    releaseYear: 2025,
+    isNewRelease: true,
     name: 'Monster Hunter Wilds',
     description: 'La nueva generación de caza de monstruos en biomas climáticos dinámicos y manadas masivas.',
     category: 'Co-op Acción',
@@ -918,6 +978,9 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-marvel-rivals',
     steamAppId: 2767030,
+    releaseYear: 2024,
+    isNewRelease: true,
+    isEvergreen: true,
     name: 'Marvel Rivals',
     description: 'Hero shooter 6v6 en tercera persona con superhéroes de Marvel, sinergias de equipo y entornos destruibles.',
     category: 'Shooter Táctico',
@@ -940,6 +1003,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-ror2',
     steamAppId: 632360,
+    releaseYear: 2020,
     name: 'Risk of Rain 2',
     description: 'Roguelike 3D frenético con oleadas crecientes, acumulación absurda de objetos y escape planetario.',
     category: 'Co-op Acción',
@@ -962,6 +1026,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-dst',
     steamAppId: 322330,
+    releaseYear: 2016,
     name: "Don't Starve Together",
     description: 'Supervivencia cooperativa en un mundo gótico surrealista con hambre, cordura y criaturas extrañas.',
     category: 'Survival Sandbox',
@@ -984,6 +1049,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-killing-floor-2',
     steamAppId: 232090,
+    releaseYear: 2016,
     name: 'Killing Floor 2',
     description: 'FPS de supervivencia cooperativo contra hordas de clones mutantes con desmembramiento visceral.',
     category: 'Co-op Acción',
@@ -1006,6 +1072,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-tabletop',
     steamAppId: 286160,
+    releaseYear: 2015,
     name: 'Tabletop Simulator',
     description: 'Simulador universal de juegos de mesa, cartas y rol con física completa y miles de mods.',
     category: 'Party Casual',
@@ -1026,6 +1093,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-pummel',
     steamAppId: 880940,
+    releaseYear: 2018,
     name: 'Pummel Party',
     description: 'Party game de 4 a 8 jugadores con tablero, minijuegos ridículos y armas absurdas para arruinar amistades.',
     category: 'Party Casual',
@@ -1046,6 +1114,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-golf',
     steamAppId: 431240,
+    releaseYear: 2020,
     name: 'Golf With Your Friends',
     description: 'Minigolf multijugador rápido y caótico para hasta 12 jugadores simultáneos con colisiones y trampas.',
     category: 'Party Casual',
@@ -1067,6 +1136,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-gangbeasts',
     steamAppId: 285900,
+    releaseYear: 2017,
     name: 'Gang Beasts',
     description: 'Peleas torpes y desternillantes entre muñecos de gelatina en escenarios peligrosos con físicas absurdas.',
     category: 'Party Casual',
@@ -1087,6 +1157,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-hll',
     steamAppId: 686810,
+    releaseYear: 2021,
     name: 'Hell Let Loose',
     description: 'Simulador bélico masivo 50v50 de la Segunda Guerra Mundial con cadenas de mando y artillería.',
     category: 'Shooter Táctico',
@@ -1109,6 +1180,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-squad',
     steamAppId: 393380,
+    releaseYear: 2020,
     name: 'Squad',
     description: 'Shooter táctico moderno de armas combinadas enfocado en comunicación de radio y fortificación.',
     category: 'Shooter Táctico',
@@ -1130,6 +1202,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-ron',
     steamAppId: 1144200,
+    releaseYear: 2023,
+    isNewRelease: true,
     name: 'Ready or Not',
     description: 'Operaciones SWAT tácticas realistas de limpieza de habitaciones, desarme y rescate de rehenes.',
     category: 'Shooter Táctico',
@@ -1152,6 +1226,9 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-poe2',
     steamAppId: 2694490,
+    releaseYear: 2024,
+    isNewRelease: true,
+    isEvergreen: true,
     name: 'Path of Exile 2',
     description: 'ARPG hardcore de fantasía oscura con árbol de habilidades colosal, gemas de habilidades y combate fluido.',
     category: 'RPG / Aventura',
@@ -1174,6 +1251,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-remnant2',
     steamAppId: 1282100,
+    releaseYear: 2023,
+    isNewRelease: true,
     name: 'Remnant II',
     description: 'Souls con armas de fuego cooperativo en mundos dimensionales grotescos con arquetipos dinámicos.',
     category: 'Co-op Acción',
@@ -1196,6 +1275,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-raft',
     steamAppId: 648800,
+    releaseYear: 2022,
+    isNewRelease: true,
     name: 'Raft',
     description: 'Supervivencia oceánica en balsa con anzuelo, tiburones y exploración de islas tropicales.',
     category: 'Survival Sandbox',
@@ -1217,6 +1298,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-the-forest',
     steamAppId: 242760,
+    releaseYear: 2018,
     name: 'The Forest',
     description: 'Supervivencia y terror en una península aislada contra caníbales y mutantes subterráneos.',
     category: 'Co-op Horror',
@@ -1239,6 +1321,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-soft',
     steamAppId: 1326470,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'Sons Of The Forest',
     description: 'Secuela con IA avanzada de compañeros, gráficos de última generación, cuevas letales y crafteo.',
     category: 'Co-op Horror',
@@ -1261,6 +1345,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-halo-infinite',
     steamAppId: 1240440,
+    releaseYear: 2021,
     name: 'Halo Infinite',
     description: 'Arena shooter clásico con gancho de agarre, control de armas de mapa y partidas competitivas.',
     category: 'Shooter Táctico',
@@ -1283,6 +1368,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-brawlhalla',
     steamAppId: 291550,
+    releaseYear: 2017,
     name: 'Brawlhalla',
     description: 'Plataformas de lucha frenética para hasta 8 jugadores con combates caóticos y armas arrojadizas.',
     category: 'Party Casual',
@@ -1307,6 +1393,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   // --------------------------------------------------------------------------
   {
     id: 'kb-valorant',
+    releaseYear: 2020,
+    isEvergreen: true,
     name: 'Valorant',
     description: 'Shooter táctico 5v5 con agentes, habilidades sobrenaturales y precisión de disparo quirúrgica.',
     category: 'Shooter Táctico',
@@ -1330,6 +1418,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-lol',
+    releaseYear: 2009,
+    isEvergreen: true,
     name: 'League of Legends',
     description: 'El MOBA más jugado del mundo: partidas 5v5, control de visión, objetivos y coordinación de equipo.',
     category: 'MOBA',
@@ -1353,6 +1443,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-tft',
+    releaseYear: 2019,
     name: 'Teamfight Tactics',
     description: 'Auto battler estratégico de 8 jugadores con gestión de economía, sinergias de campeones e items.',
     category: 'RTS',
@@ -1374,6 +1465,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-minecraft',
+    releaseYear: 2011,
+    isEvergreen: true,
     name: 'Minecraft',
     description: 'El juego sandbox de bloques infinito: supervivencia, crafteo, redstone, arquitectura y diversión.',
     category: 'Survival Sandbox',
@@ -1395,6 +1488,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-fortnite',
+    releaseYear: 2017,
+    isEvergreen: true,
     name: 'Fortnite',
     description: 'Battle Royale masivo con construcción rápida o modo Cero Construcción, eventos y juego en escuadra.',
     category: 'Shooter Táctico',
@@ -1416,6 +1511,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-rocket-league',
+    releaseYear: 2015,
+    isEvergreen: true,
     name: 'Rocket League',
     description: 'Fútbol con autos propulsados por cohetes, piruetas aéreas y física competitiva pura.',
     category: 'Deportes / Autos',
@@ -1438,6 +1535,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-fall-guys',
+    releaseYear: 2020,
     name: 'Fall Guys',
     description: 'Carreras de obstáculos multitudinarias y eliminatorias caóticas llenas de tropiezos y risas.',
     category: 'Party Casual',
@@ -1458,6 +1556,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-warzone',
+    releaseYear: 2020,
     name: 'Call of Duty: Warzone',
     description: 'Battle Royale bélico hiperrealista con contratos, Gulag, armamentos personalizados y tiroteos veloces.',
     category: 'Shooter Táctico',
@@ -1480,6 +1579,9 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-ow2',
+    releaseYear: 2022,
+    isNewRelease: true,
+    isEvergreen: true,
     name: 'Overwatch 2',
     description: 'Hero shooter 5v5 con tanques, soportes y DPS coordinando definitivas para capturar objetivos.',
     category: 'Shooter Táctico',
@@ -1503,6 +1605,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-wow',
+    releaseYear: 2004,
     name: 'World of Warcraft',
     description: 'El MMORPG legendario de Azeroth con mazmorras míticas, bandas de 20 jugadores y guerras de facciones.',
     category: 'RPG / Aventura',
@@ -1526,6 +1629,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-diablo4',
+    releaseYear: 2023,
+    isNewRelease: true,
     name: 'Diablo IV',
     description: 'ARPG siniestro en Santuario: masacres de demonios, mazmorras de pesadilla y farmeo de items legendarios.',
     category: 'RPG / Aventura',
@@ -1548,6 +1653,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-sc2',
+    releaseYear: 2010,
     name: 'StarCraft II',
     description: 'El pináculo del RTS competitivo: Terran, Zerg y Protoss en microgestión y macrogestión quirúrgica.',
     category: 'RTS',
@@ -1569,6 +1675,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-tarkov',
+    releaseYear: 2017,
     name: 'Escape from Tarkov',
     description: 'Extraction shooter hardcore hiperrealista con balística balística real, heridas y pérdida de loot al morir.',
     category: 'Shooter Táctico',
@@ -1592,6 +1699,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-fc25',
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'EA Sports FC 25',
     description: 'Simulador futbolístico de referencia con Clubes Pro para jugar 11 contra 11 con todos tus amigos.',
     category: 'Deportes / Autos',
@@ -1613,6 +1722,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-gtav',
     steamAppId: 271590,
+    releaseYear: 2015,
     name: 'Grand Theft Auto V',
     description: 'Acción en mundo abierto con GTA Online para golpes cooperativos, carreras y caos en Los Santos.',
     category: 'RPG / Aventura',
@@ -1633,6 +1743,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-genshin-impact',
+    releaseYear: 2020,
     name: 'Genshin Impact',
     description: 'Action RPG de mundo abierto con combate elemental y exploración cooperativa en Teyvat.',
     category: 'RPG / Aventura',
@@ -1653,6 +1764,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
   {
     id: 'kb-roblox',
+    releaseYear: 2006,
     name: 'Roblox',
     description: 'Plataforma multijugador con miles de experiencias creadas por la comunidad para jugar con amigos.',
     category: 'Party Casual',
@@ -1673,11 +1785,733 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   },
 
   // --------------------------------------------------------------------------
+  // RECENT MULTIPLAYER & CO-OP HITS (2022-2026) - 30 Games
+  // --------------------------------------------------------------------------
+  {
+    id: 'kb-schedule-1',
+    steamAppId: 3164500,
+    releaseYear: 2025,
+    isNewRelease: true,
+    name: 'Schedule I',
+    description: 'Simulador cooperativo caótico de imperio callejero, logística, producción y escapes policiales.',
+    category: 'Survival Sandbox',
+    coverUrl: steamHeaderUrl(3164500),
+    tags: ['Co-op', 'Simulador', 'Sandbox', 'Comedia'],
+    genres: ['Action', 'Indie', 'Simulation', 'Strategy'],
+    minPlayers: 1,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      survival_craft: 0.75,
+      party_social: 0.85,
+      sandbox_freedom: 0.95,
+      pve_cooperative: 0.9,
+      social_deduction_chaos: 0.8,
+      progression_loot: 0.9,
+      stylized_colorful: 0.75,
+    },
+  },
+  {
+    id: 'kb-liars-bar',
+    steamAppId: 3097560,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: "Liar's Bar",
+    description: 'Mesa de póker y dados de engaño psicológico con ruleta rusa y tensión entre amigos.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(3097560),
+    tags: ['Deducción Social', 'Cartas', 'Party', 'Psicológico'],
+    genres: ['Casual', 'Indie', 'Simulation', 'Strategy'],
+    minPlayers: 2,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      party_social: 1.0,
+      social_deduction_chaos: 1.0,
+      short_session: 0.95,
+      horror_tension: 0.7,
+      dark_gritty: 0.75,
+      pvp_competitive: 0.8,
+    },
+  },
+  {
+    id: 'kb-lockdown-protocol',
+    steamAppId: 2780980,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Lockdown Protocol',
+    description: 'Deducción social en primera persona en una estación espacial con tareas, sabotajes y chat de proximidad.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(2780980),
+    tags: ['Deducción Social', 'Primera Persona', 'Sci-Fi', 'Party'],
+    genres: ['Action', 'Casual', 'Indie'],
+    minPlayers: 3,
+    maxPlayers: 8,
+    isMultiplayer: true,
+    weights: {
+      party_social: 0.95,
+      social_deduction_chaos: 1.0,
+      short_session: 0.9,
+      asymmetric_roles: 0.9,
+      scifi_futuristic: 0.85,
+      pvp_competitive: 0.75,
+    },
+  },
+  {
+    id: 'kb-dale-dawson',
+    steamAppId: 2920570,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Dale & Dawson Stationery Supplies',
+    description: 'Deducción social hilarante de oficina: especialistas fingiendo trabajar contra vagos saboteadores.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(2920570),
+    tags: ['Deducción Social', 'Comedia', 'Party', 'Chat Proximidad'],
+    genres: ['Casual', 'Indie'],
+    minPlayers: 4,
+    maxPlayers: 10,
+    isMultiplayer: true,
+    weights: {
+      party_social: 1.0,
+      social_deduction_chaos: 1.0,
+      chill_relaxed: 0.8,
+      short_session: 0.9,
+      asymmetric_roles: 0.85,
+    },
+  },
+  {
+    id: 'kb-murky-divers',
+    steamAppId: 2963880,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Murky Divers',
+    description: 'Expediciones submarinas cooperativas para eliminar evidencias en laboratorios abisales con monstruos.',
+    category: 'Co-op Horror',
+    coverUrl: steamHeaderUrl(2963880),
+    tags: ['Terror', 'Co-op', 'Submarinos', 'Chat Proximidad'],
+    genres: ['Action', 'Indie'],
+    minPlayers: 1,
+    maxPlayers: 8,
+    isMultiplayer: true,
+    weights: {
+      coop_horror: 1.0,
+      horror_tension: 0.9,
+      pve_cooperative: 0.95,
+      squad_coordination: 0.9,
+      social_deduction_chaos: 0.8,
+      dark_gritty: 0.85,
+      short_session: 0.75,
+    },
+  },
+  {
+    id: 'kb-fast-food-simulator',
+    steamAppId: 2941620,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Fast Food Simulator',
+    description: 'Gestión frenética cooperativa de hamburguesería: freidoras, pedidos de drive-thru y caos en cocina.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(2941620),
+    tags: ['Co-op', 'Simulador', 'Cocina', 'Caos'],
+    genres: ['Casual', 'Indie', 'Simulation'],
+    minPlayers: 1,
+    maxPlayers: 6,
+    isMultiplayer: true,
+    weights: {
+      party_social: 0.9,
+      pve_cooperative: 0.95,
+      squad_coordination: 0.9,
+      short_session: 0.85,
+      chill_relaxed: 0.65,
+      stylized_colorful: 0.75,
+    },
+  },
+  {
+    id: 'kb-supermarket-together',
+    steamAppId: 2709570,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Supermarket Together',
+    description: 'Administrar un supermercado en equipo gratis para hasta 16 jugadores: reponer, cobrar y atrapar ladrones.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(2709570),
+    tags: ['Co-op', 'Gestión', 'Free to Play', 'Party'],
+    genres: ['Casual', 'Free to Play', 'Indie', 'Simulation'],
+    minPlayers: 1,
+    maxPlayers: 16,
+    isMultiplayer: true,
+    weights: {
+      party_social: 0.9,
+      chill_relaxed: 0.8,
+      pve_cooperative: 0.95,
+      sandbox_freedom: 0.75,
+      short_session: 0.8,
+      stylized_colorful: 0.7,
+    },
+  },
+  {
+    id: 'kb-abiotic-factor',
+    steamAppId: 427410,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Abiotic Factor',
+    description: 'Supervivencia científica cooperativa estilo Half-Life en un complejo subterráneo lleno de anomalías.',
+    category: 'Survival Sandbox',
+    coverUrl: steamHeaderUrl(427410),
+    tags: ['Supervivencia', 'Crafteo', 'Sci-Fi', 'Co-op'],
+    genres: ['Action', 'Adventure', 'Indie', 'RPG', 'Simulation'],
+    minPlayers: 1,
+    maxPlayers: 6,
+    isMultiplayer: true,
+    weights: {
+      survival_craft: 1.0,
+      pve_cooperative: 1.0,
+      squad_coordination: 0.85,
+      scifi_futuristic: 0.9,
+      sandbox_freedom: 0.9,
+      open_world_exploration: 0.85,
+      progression_loot: 0.9,
+    },
+  },
+  {
+    id: 'kb-webfishing',
+    steamAppId: 3146520,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Webfishing',
+    description: 'Pesca social relajante, guitarra junto a la fogata y charla chill en salas de hasta 12 amigos.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(3146520),
+    tags: ['Relajante', 'Pesca', 'Social', 'Cozy'],
+    genres: ['Casual', 'Indie'],
+    minPlayers: 1,
+    maxPlayers: 12,
+    isMultiplayer: true,
+    weights: {
+      chill_relaxed: 1.0,
+      party_social: 0.9,
+      short_session: 0.8,
+      stylized_colorful: 0.9,
+      sandbox_freedom: 0.7,
+    },
+  },
+  {
+    id: 'kb-deadlock',
+    steamAppId: 1422450,
+    releaseYear: 2025,
+    isNewRelease: true,
+    isEvergreen: true,
+    name: 'Deadlock',
+    description: 'MOBA shooter 6v6 en tercera persona de Valve con líneas, tirolinas, ítems y combates tácticos.',
+    category: 'MOBA',
+    coverUrl: steamHeaderUrl(1422450),
+    tags: ['MOBA', 'Hero Shooter', 'Tercera Persona', 'Competitivo'],
+    genres: ['Action', 'Strategy'],
+    minPlayers: 1,
+    maxPlayers: 12,
+    isMultiplayer: true,
+    weights: {
+      moba: 1.0,
+      arena_hero_shooter: 0.9,
+      intensity_high: 0.9,
+      tactical_depth: 0.95,
+      mechanical_skill: 0.95,
+      pvp_competitive: 1.0,
+      squad_coordination: 0.95,
+      asymmetric_roles: 0.95,
+    },
+  },
+  {
+    id: 'kb-delta-force',
+    steamAppId: 2507950,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Delta Force',
+    description: 'Shooter táctico moderno gratuito con extracción en escuadra y batallas masivas con vehículos.',
+    category: 'Shooter Táctico',
+    coverUrl: steamHeaderUrl(2507950),
+    tags: ['FPS', 'Extracción', 'Militar', 'Competitivo'],
+    genres: ['Action', 'Free to Play'],
+    minPlayers: 1,
+    maxPlayers: 64,
+    isMultiplayer: true,
+    weights: {
+      tactical_shooter: 1.0,
+      intensity_high: 0.9,
+      tactical_depth: 0.85,
+      mechanical_skill: 0.85,
+      pvp_competitive: 0.95,
+      squad_coordination: 0.95,
+      realistic_military: 1.0,
+      progression_loot: 0.8,
+    },
+  },
+  {
+    id: 'kb-fragpunk',
+    steamAppId: 2943650,
+    releaseYear: 2025,
+    isNewRelease: true,
+    name: 'FragPunk',
+    description: 'Hero shooter táctico 5v5 donde cartas modificadoras rompen las reglas de cada ronda.',
+    category: 'Shooter Táctico',
+    coverUrl: steamHeaderUrl(2943650),
+    tags: ['FPS', 'Hero Shooter', 'Cartas', 'Competitivo'],
+    genres: ['Action', 'Free to Play'],
+    minPlayers: 1,
+    maxPlayers: 10,
+    isMultiplayer: true,
+    weights: {
+      tactical_shooter: 0.95,
+      arena_hero_shooter: 0.9,
+      roguelike_deckbuilder: 0.55,
+      intensity_high: 0.9,
+      mechanical_skill: 0.9,
+      pvp_competitive: 1.0,
+      squad_coordination: 0.9,
+      stylized_colorful: 0.95,
+    },
+  },
+  {
+    id: 'kb-once-human',
+    steamAppId: 2139460,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Once Human',
+    description: 'Supervivencia sobrenatural en mundo abierto postapocalíptico con bases móviles y jefes cósmicos.',
+    category: 'Survival Sandbox',
+    coverUrl: steamHeaderUrl(2139460),
+    tags: ['Supervivencia', 'Mundo Abierto', 'Sci-Fi', 'Co-op'],
+    genres: ['Action', 'Adventure', 'Free to Play', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      survival_craft: 0.95,
+      coop_pve_action: 0.8,
+      pve_cooperative: 0.9,
+      sandbox_freedom: 0.85,
+      open_world_exploration: 0.95,
+      dark_gritty: 0.8,
+      progression_loot: 0.9,
+    },
+  },
+  {
+    id: 'kb-palworld',
+    steamAppId: 1623730,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Palworld',
+    description: 'Supervivencia y automatización de bases con criaturas armadas en mundo abierto multijugador.',
+    category: 'Survival Sandbox',
+    coverUrl: steamHeaderUrl(1623730),
+    tags: ['Supervivencia', 'Colección', 'Mundo Abierto', 'Crafteo'],
+    genres: ['Action', 'Adventure', 'Indie', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 32,
+    isMultiplayer: true,
+    weights: {
+      survival_craft: 1.0,
+      pve_cooperative: 0.9,
+      sandbox_freedom: 0.95,
+      open_world_exploration: 0.95,
+      progression_loot: 0.95,
+      stylized_colorful: 0.9,
+    },
+  },
+  {
+    id: 'kb-buckshot-roulette',
+    steamAppId: 2835570,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Buckshot Roulette',
+    description: 'Ruleta rusa con escopeta calibre 12 e ítems tácticos en partidas multijugador de pura tensión.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(2835570),
+    tags: ['Terror', 'Mesa', 'Party', 'Estrategia'],
+    genres: ['Action', 'Indie', 'Strategy'],
+    minPlayers: 1,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      party_social: 0.85,
+      horror_tension: 0.9,
+      social_deduction_chaos: 0.85,
+      short_session: 0.95,
+      dark_gritty: 0.95,
+      pvp_competitive: 0.8,
+    },
+  },
+  {
+    id: 'kb-party-animals',
+    steamAppId: 1260320,
+    releaseYear: 2023,
+    isNewRelease: true,
+    name: 'Party Animals',
+    description: 'Brawler de físicas torpes con cachorros, gatitos y patos tirándose de mapas absurdos.',
+    category: 'Party Casual',
+    coverUrl: steamHeaderUrl(1260320),
+    tags: ['Party', 'Física', 'Comedia', 'Multijugador'],
+    genres: ['Action', 'Casual', 'Indie'],
+    minPlayers: 1,
+    maxPlayers: 8,
+    isMultiplayer: true,
+    weights: {
+      party_social: 1.0,
+      social_deduction_chaos: 0.95,
+      short_session: 0.95,
+      stylized_colorful: 1.0,
+      pvp_competitive: 0.75,
+    },
+  },
+  {
+    id: 'kb-the-finals',
+    steamAppId: 2073850,
+    releaseYear: 2023,
+    isNewRelease: true,
+    name: 'The Finals',
+    description: 'Shooter competitivo por tríos en arenas totalmente destruibles con robo de cajas y gadgets.',
+    category: 'Shooter Táctico',
+    coverUrl: steamHeaderUrl(2073850),
+    tags: ['FPS', 'Destrucción', 'Competitivo', 'Escuadras'],
+    genres: ['Action', 'Free to Play'],
+    minPlayers: 1,
+    maxPlayers: 9,
+    isMultiplayer: true,
+    weights: {
+      arena_hero_shooter: 0.95,
+      tactical_shooter: 0.8,
+      intensity_high: 0.95,
+      mechanical_skill: 0.9,
+      pvp_competitive: 1.0,
+      squad_coordination: 0.95,
+      asymmetric_roles: 0.85,
+      stylized_colorful: 0.8,
+    },
+  },
+  {
+    id: 'kb-ravenswatch',
+    steamAppId: 2071280,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Ravenswatch',
+    description: 'Action roguelike cooperativo de fantasía oscura con héroes de cuentos y sinergias de habilidades.',
+    category: 'Co-op Acción',
+    coverUrl: steamHeaderUrl(2071280),
+    tags: ['Roguelike', 'Co-op', 'Fantasía Oscura', 'ARPG'],
+    genres: ['Action', 'Adventure', 'Indie', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      roguelike_deckbuilder: 0.95,
+      coop_pve_action: 0.95,
+      pve_cooperative: 1.0,
+      intensity_high: 0.85,
+      fantasy_medieval: 0.9,
+      dark_gritty: 0.85,
+      asymmetric_roles: 0.85,
+    },
+  },
+  {
+    id: 'kb-windblown',
+    steamAppId: 1911610,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Windblown',
+    description: 'Roguelike ultrarrápido de los creadores de Dead Cells para correr y encadenar combos de a 3.',
+    category: 'Co-op Acción',
+    coverUrl: steamHeaderUrl(1911610),
+    tags: ['Roguelike', 'Acción Rápida', 'Co-op', 'Indie'],
+    genres: ['Action', 'Adventure', 'Indie'],
+    minPlayers: 1,
+    maxPlayers: 3,
+    isMultiplayer: true,
+    weights: {
+      roguelike_deckbuilder: 0.95,
+      coop_pve_action: 0.95,
+      intensity_high: 0.95,
+      mechanical_skill: 0.9,
+      pve_cooperative: 0.95,
+      stylized_colorful: 0.95,
+      short_session: 0.8,
+    },
+  },
+  {
+    id: 'kb-elden-ring-nightreign',
+    steamAppId: 2622380,
+    releaseYear: 2025,
+    isNewRelease: true,
+    name: 'Elden Ring Nightreign',
+    description: 'Supervivencia cooperativa de 3 jugadores en rondas aceleradas contra jefes de Elden Ring.',
+    category: 'Co-op Acción',
+    coverUrl: steamHeaderUrl(2622380),
+    tags: ['Souls-like', 'Co-op', 'Roguelike', 'Fantasía Oscura'],
+    genres: ['Action', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 3,
+    isMultiplayer: true,
+    weights: {
+      coop_pve_action: 1.0,
+      roguelike_deckbuilder: 0.7,
+      intensity_high: 0.95,
+      mechanical_skill: 0.95,
+      pve_cooperative: 1.0,
+      squad_coordination: 0.9,
+      dark_gritty: 0.95,
+      fantasy_medieval: 1.0,
+    },
+  },
+  {
+    id: 'kb-split-fiction',
+    steamAppId: 2001120,
+    releaseYear: 2025,
+    isNewRelease: true,
+    name: 'Split Fiction',
+    description: 'Aventura cooperativa obligatoria para 2 jugadores saltando entre mundos de ciencia ficción y fantasía.',
+    category: 'RPG / Aventura',
+    coverUrl: steamHeaderUrl(2001120),
+    tags: ['Co-op', 'Aventura', 'Historia', 'Sci-Fi'],
+    genres: ['Action', 'Adventure'],
+    minPlayers: 2,
+    maxPlayers: 2,
+    isMultiplayer: true,
+    weights: {
+      rpg_narrative: 0.9,
+      coop_pve_action: 0.85,
+      pve_cooperative: 1.0,
+      squad_coordination: 0.95,
+      scifi_futuristic: 0.85,
+      fantasy_medieval: 0.8,
+      stylized_colorful: 0.85,
+    },
+  },
+  {
+    id: 'kb-bodycam',
+    steamAppId: 2406770,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Bodycam',
+    description: 'Shooter táctico fotorrealista con perspectiva de cámara corporal y tiroteos letales.',
+    category: 'Shooter Táctico',
+    coverUrl: steamHeaderUrl(2406770),
+    tags: ['FPS Realista', 'Táctico', 'Competitivo', 'Militar'],
+    genres: ['Action', 'Indie'],
+    minPlayers: 1,
+    maxPlayers: 10,
+    isMultiplayer: true,
+    weights: {
+      tactical_shooter: 1.0,
+      intensity_high: 0.95,
+      mechanical_skill: 0.9,
+      pvp_competitive: 0.95,
+      realistic_military: 1.0,
+      dark_gritty: 0.9,
+      short_session: 0.75,
+    },
+  },
+  {
+    id: 'kb-gray-zone-warfare',
+    steamAppId: 2479810,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Gray Zone Warfare',
+    description: 'Extracción milsim táctica en mundo abierto selvático con escuadras de 4 operadores y balística real.',
+    category: 'Shooter Táctico',
+    coverUrl: steamHeaderUrl(2479810),
+    tags: ['Milsim', 'Extracción', 'FPS', 'Táctico'],
+    genres: ['Action', 'Adventure', 'Simulation'],
+    minPlayers: 1,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      tactical_shooter: 1.0,
+      tactical_depth: 0.95,
+      realistic_military: 1.0,
+      squad_coordination: 0.95,
+      pve_cooperative: 0.75,
+      pvp_competitive: 0.8,
+      open_world_exploration: 0.85,
+    },
+  },
+  {
+    id: 'kb-dark-and-darker',
+    steamAppId: 2016590,
+    releaseYear: 2023,
+    isNewRelease: true,
+    name: 'Dark and Darker',
+    description: 'Extraction dungeon crawler hardcore de fantasía oscura en primera persona con tríos y botín.',
+    category: 'Co-op Acción',
+    coverUrl: steamHeaderUrl(2016590),
+    tags: ['Extracción', 'Dungeon Crawler', 'Fantasía Oscura', 'Hardcore'],
+    genres: ['Action', 'Adventure', 'Free to Play', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 3,
+    isMultiplayer: true,
+    weights: {
+      coop_pve_action: 0.85,
+      rpg_narrative: 0.7,
+      intensity_high: 0.95,
+      pvp_competitive: 0.9,
+      squad_coordination: 0.9,
+      asymmetric_roles: 0.9,
+      dark_gritty: 1.0,
+      fantasy_medieval: 1.0,
+      progression_loot: 0.95,
+    },
+  },
+  {
+    id: 'kb-supervive',
+    steamAppId: 1283700,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Supervive',
+    description: 'Fusión explosiva de MOBA, hero shooter y Battle Royale aéreo en escuadras de hasta 4.',
+    category: 'MOBA',
+    coverUrl: steamHeaderUrl(1283700),
+    tags: ['MOBA', 'Battle Royale', 'Hero Shooter', 'Competitivo'],
+    genres: ['Action', 'Free to Play', 'Strategy'],
+    minPlayers: 1,
+    maxPlayers: 4,
+    isMultiplayer: true,
+    weights: {
+      moba: 0.95,
+      battle_royale: 0.9,
+      arena_hero_shooter: 0.85,
+      intensity_high: 0.95,
+      mechanical_skill: 0.9,
+      pvp_competitive: 1.0,
+      squad_coordination: 0.95,
+      stylized_colorful: 0.9,
+    },
+  },
+  {
+    id: 'kb-rematch',
+    steamAppId: 2138720,
+    releaseYear: 2025,
+    isNewRelease: true,
+    name: 'Rematch',
+    description: 'Fútbol arcade competitivo en tercera persona 5v5 de los creadores de Sifu, sin faltas ni pausas.',
+    category: 'Deportes / Autos',
+    coverUrl: steamHeaderUrl(2138720),
+    tags: ['Fútbol', 'Deportes', 'Competitivo', 'Arcade'],
+    genres: ['Action', 'Sports'],
+    minPlayers: 1,
+    maxPlayers: 10,
+    isMultiplayer: true,
+    weights: {
+      sports_racing: 1.0,
+      intensity_high: 0.85,
+      mechanical_skill: 0.95,
+      short_session: 0.95,
+      pvp_competitive: 1.0,
+      squad_coordination: 0.95,
+      stylized_colorful: 0.85,
+    },
+  },
+  {
+    id: 'kb-backrooms-escape-together',
+    steamAppId: 2141730,
+    releaseYear: 2023,
+    isNewRelease: true,
+    name: 'Backrooms: Escape Together',
+    description: 'Terror cooperativo inmersivo recorriendo niveles liminales con chat de proximidad y puzzles.',
+    category: 'Co-op Horror',
+    coverUrl: steamHeaderUrl(2141730),
+    tags: ['Terror', 'Co-op', 'Backrooms', 'Chat Proximidad'],
+    genres: ['Action', 'Adventure', 'Indie'],
+    minPlayers: 1,
+    maxPlayers: 6,
+    isMultiplayer: true,
+    weights: {
+      coop_horror: 1.0,
+      horror_tension: 0.95,
+      pve_cooperative: 0.95,
+      squad_coordination: 0.85,
+      dark_gritty: 0.85,
+    },
+  },
+  {
+    id: 'kb-space-marine-2',
+    steamAppId: 2183900,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Warhammer 40,000: Space Marine 2',
+    description: 'Acción brutal en escuadra de 3 Marines Espaciales masacrando enjambres Tiránidos.',
+    category: 'Co-op Acción',
+    coverUrl: steamHeaderUrl(2183900),
+    tags: ['Co-op', 'Warhammer 40K', 'Tercera Persona', 'Acción'],
+    genres: ['Action', 'Adventure', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 3,
+    isMultiplayer: true,
+    weights: {
+      coop_pve_action: 1.0,
+      intensity_high: 0.95,
+      pve_cooperative: 0.95,
+      squad_coordination: 0.85,
+      scifi_futuristic: 0.95,
+      dark_gritty: 0.95,
+      progression_loot: 0.8,
+    },
+  },
+  {
+    id: 'kb-core-keeper',
+    steamAppId: 1621690,
+    releaseYear: 2024,
+    isNewRelease: true,
+    name: 'Core Keeper',
+    description: 'Aventura sandbox minera cooperativa para hasta 8 jugadores con reliquias, bases y jefes gigantes.',
+    category: 'Survival Sandbox',
+    coverUrl: steamHeaderUrl(1621690),
+    tags: ['Sandbox', 'Supervivencia', 'Minería', 'Co-op'],
+    genres: ['Adventure', 'Indie', 'RPG'],
+    minPlayers: 1,
+    maxPlayers: 8,
+    isMultiplayer: true,
+    weights: {
+      survival_craft: 0.95,
+      chill_relaxed: 0.75,
+      pve_cooperative: 0.95,
+      sandbox_freedom: 0.9,
+      stylized_colorful: 0.9,
+      open_world_exploration: 0.9,
+      progression_loot: 0.9,
+    },
+  },
+  {
+    id: 'kb-splitgate-2',
+    steamAppId: 2918300,
+    releaseYear: 2025,
+    isNewRelease: true,
+    name: 'Splitgate 2',
+    description: 'Arena shooter 4v4 con portales instantáneos, facciones con habilidades y gunplay preciso.',
+    category: 'Shooter Táctico',
+    coverUrl: steamHeaderUrl(2918300),
+    tags: ['Arena Shooter', 'FPS', 'Portales', 'Competitivo'],
+    genres: ['Action', 'Free to Play'],
+    minPlayers: 1,
+    maxPlayers: 8,
+    isMultiplayer: true,
+    weights: {
+      arena_hero_shooter: 1.0,
+      tactical_shooter: 0.8,
+      intensity_high: 0.9,
+      mechanical_skill: 0.95,
+      pvp_competitive: 1.0,
+      squad_coordination: 0.9,
+      scifi_futuristic: 0.95,
+      short_session: 0.85,
+    },
+  },
+
+  // --------------------------------------------------------------------------
   // ICONIC SINGLEPLAYER PC GAMES (ADN Profiling & Singleplayer Top 3) - 17 Games
   // --------------------------------------------------------------------------
   {
     id: 'kb-elden-ring',
     steamAppId: 1245620,
+    releaseYear: 2022,
+    isNewRelease: true,
     name: 'Elden Ring',
     description: 'Campaña colosal de rol de acción en las Tierras Intermedias con combate souls y exploración sublime.',
     category: 'RPG / Aventura',
@@ -1701,6 +2535,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-witcher-3',
     steamAppId: 292030,
+    releaseYear: 2015,
     name: 'The Witcher 3: Wild Hunt',
     description: 'Geralt de Rivia buscando a Ciri en una obra cumbre de narrativa adulta, monstruos y decisiones morales.',
     category: 'RPG / Aventura',
@@ -1722,6 +2557,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-rdr2',
     steamAppId: 1174180,
+    releaseYear: 2019,
     name: 'Red Dead Redemption 2',
     description: 'El viaje trágico de Arthur Morgan en un Lejano Oeste hiperdetallado, vivo y cinematográfico.',
     category: 'RPG / Aventura',
@@ -1743,6 +2579,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-cyberpunk',
     steamAppId: 1091500,
+    releaseYear: 2020,
     name: 'Cyberpunk 2077',
     description: 'Night City: implantes cibernéticos, tiroteos viscerales y conspiraciones corporativas en el futuro distópico.',
     category: 'RPG / Aventura',
@@ -1766,6 +2603,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-hollow-knight',
     steamAppId: 367520,
+    releaseYear: 2017,
     name: 'Hollow Knight',
     description: 'Metroidvania sublime en el reino subterráneo de Hallownest con combate preciso, jefes duros y arte dibujado.',
     category: 'RPG / Aventura',
@@ -1787,6 +2625,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-hades',
     steamAppId: 1145360,
+    releaseYear: 2020,
     name: 'Hades',
     description: 'Zagreus intentando escapar del Inframundo griego con bendiciones olímpicas, narrativa reactiva y combate ágil.',
     category: 'RPG / Aventura',
@@ -1809,6 +2648,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-sekiro',
     steamAppId: 814380,
+    releaseYear: 2019,
     name: 'Sekiro: Shadows Die Twice',
     description: 'Duelos samurái con parrys perfectos, sigilo ninja y prótesis de shinobi en el Japón feudal.',
     category: 'RPG / Aventura',
@@ -1829,6 +2669,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-balatro',
     steamAppId: 2379780,
+    releaseYear: 2024,
+    isNewRelease: true,
     name: 'Balatro',
     description: 'El roguelike de póker hipnótico donde cartas de comodines alteran las reglas y generan sinergias dementes.',
     category: 'RPG / Aventura',
@@ -1849,6 +2691,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-slay-the-spire',
     steamAppId: 646570,
+    releaseYear: 2019,
     name: 'Slay the Spire',
     description: 'El padre del deckbuilder roguelike moderno: armar tu baraja carta a carta para derrotar a los jefes de la torre.',
     category: 'RPG / Aventura',
@@ -1869,6 +2712,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-god-of-war',
     steamAppId: 1593500,
+    releaseYear: 2018,
     name: 'God of War',
     description: 'Kratos y Atreus en las tierras nórdicas con el hacha Leviatán y plano secuencia cinematográfico continuo.',
     category: 'RPG / Aventura',
@@ -1889,6 +2733,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-skyrim',
     steamAppId: 489830,
+    releaseYear: 2011,
     name: 'The Elder Scrolls V: Skyrim',
     description: 'El Sangre de Dragón en Tamriel: libertad sandbox absoluta, magia, dragones y miles de mods.',
     category: 'RPG / Aventura',
@@ -1910,6 +2755,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-rimworld',
     steamAppId: 294100,
+    releaseYear: 2018,
     name: 'RimWorld',
     description: 'Generador de historias de colonias espaciales gestionado por una IA cuentacuentos despiadada.',
     category: 'Survival Sandbox',
@@ -1931,6 +2777,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-subnautica',
     steamAppId: 264710,
+    releaseYear: 2018,
     name: 'Subnautica',
     description: 'Supervivencia y exploración en las profundidades oceánicas de un planeta alienígena con leviatanes.',
     category: 'Survival Sandbox',
@@ -1952,6 +2799,7 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-doom-eternal',
     steamAppId: 782330,
+    releaseYear: 2020,
     name: 'DOOM Eternal',
     description: 'El Doom Slayer despedazando demonios al ritmo de metal con combate de ajedrez violento a máxima velocidad.',
     category: 'Shooter Táctico',
@@ -1972,6 +2820,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-re4',
     steamAppId: 2050650,
+    releaseYear: 2023,
+    isNewRelease: true,
     name: 'Resident Evil 4',
     description: 'Remake legendario de Leon S. Kennedy rescatando a Ashley en un pueblo español infestado por Los Iluminados.',
     category: 'Co-op Horror',
@@ -1992,6 +2842,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-p5r',
     steamAppId: 1687950,
+    releaseYear: 2022,
+    isNewRelease: true,
     name: 'Persona 5 Royal',
     description: 'JRPG con estilo deslumbrante: vida escolar en Tokio de día y ladrones de corazones en el Metaverso de noche.',
     category: 'RPG / Aventura',
@@ -2011,6 +2863,8 @@ export const GLOBAL_GAMES_KNOWLEDGE_BASE: KnowledgeGameEntry[] = [
   {
     id: 'kb-clair-obscur',
     steamAppId: 1903340,
+    releaseYear: 2025,
+    isNewRelease: true,
     name: 'Clair Obscur: Expedition 33',
     description: 'JRPG por turnos reactivo de inspiración Belle Époque con esquivas y parrys en tiempo real.',
     category: 'RPG / Aventura',
@@ -2036,6 +2890,151 @@ export function normalizeGameName(name: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/g, '');
+}
+
+// Precomputed O(1) lookup indices for GLOBAL_GAMES_KNOWLEDGE_BASE
+export const KB_BY_STEAM_APP_ID = new Map<number, KnowledgeGameEntry>();
+export const KB_BY_NORM_NAME = new Map<string, KnowledgeGameEntry>();
+
+for (const entry of GLOBAL_GAMES_KNOWLEDGE_BASE) {
+  if (entry.steamAppId !== undefined && !KB_BY_STEAM_APP_ID.has(entry.steamAppId)) {
+    KB_BY_STEAM_APP_ID.set(entry.steamAppId, entry);
+  }
+  const norm = normalizeGameName(entry.name);
+  if (norm && !KB_BY_NORM_NAME.has(norm)) {
+    KB_BY_NORM_NAME.set(norm, entry);
+  }
+}
+
+export function estimateReleaseYearFromSteamAppId(
+  steamAppId?: number,
+  name?: string
+): number {
+  if (name) {
+    const match = /\b(199\d|20[0-2]\d)\b/.exec(name);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed >= 1990 && parsed <= 2029) {
+        return parsed;
+      }
+    }
+  }
+
+  if (typeof steamAppId === 'number' && Number.isFinite(steamAppId) && steamAppId > 0) {
+    if (steamAppId >= 2800000) return 2025;
+    if (steamAppId >= 2200000) return 2024;
+    if (steamAppId >= 1800000) return 2023;
+    if (steamAppId >= 1450000) return 2022;
+    if (steamAppId >= 1150000) return 2021;
+    if (steamAppId >= 950000) return 2020;
+    if (steamAppId >= 750000) return 2019;
+    if (steamAppId >= 550000) return 2018;
+    if (steamAppId >= 380000) return 2016;
+    if (steamAppId >= 250000) return 2014;
+    return 2012;
+  }
+
+  return 2024;
+}
+
+export function getRecommendationCanonicalKey(item: {
+  name: string;
+  steamAppId?: number;
+  igdbId?: number;
+}): string {
+  if (item.steamAppId) return `steam:${item.steamAppId}`;
+  if (item.igdbId) return `igdb:${item.igdbId}`;
+  return `name:${normalizeGameName(item.name)}`;
+}
+
+export const OFFICIAL_EXTERNAL_GAME_URLS: Readonly<Record<string, string>> = {
+  valorant: 'https://playvalorant.com/',
+  leagueoflegends: 'https://www.leagueoflegends.com/',
+  teamfighttactics: 'https://teamfighttactics.leagueoflegends.com/',
+  minecraft: 'https://www.minecraft.net/',
+  fortnite: 'https://www.fortnite.com/',
+  rocketleague: 'https://www.rocketleague.com/',
+  fallguys: 'https://www.fallguys.com/',
+  callofdutywarzone: 'https://www.callofduty.com/warzone',
+  warzone: 'https://www.callofduty.com/warzone',
+  worldofwarcraft: 'https://worldofwarcraft.blizzard.com/',
+  starcraft2: 'https://starcraft2.blizzard.com/',
+  starcraftii: 'https://starcraft2.blizzard.com/',
+  escapefromtarkov: 'https://www.escapefromtarkov.com/',
+  genshinimpact: 'https://genshin.hoyoverse.com/',
+  roblox: 'https://www.roblox.com/',
+};
+
+export interface ResolveGameOfficialUrlInput {
+  name: string;
+  steamAppId?: number;
+  coverUrl?: string;
+  tags?: string[];
+  id?: string;
+  officialUrl?: string;
+}
+
+export function resolveGameOfficialUrl(input: ResolveGameOfficialUrlInput): string {
+  const explicitUrl = input.officialUrl?.trim();
+  if (explicitUrl && /^https?:\/\//i.test(explicitUrl)) {
+    return explicitUrl;
+  }
+
+  const normName = normalizeGameName(input.name || '');
+  if (normName && OFFICIAL_EXTERNAL_GAME_URLS[normName]) {
+    return OFFICIAL_EXTERNAL_GAME_URLS[normName];
+  }
+
+  let resolvedSteamAppId: number | undefined =
+    typeof input.steamAppId === 'number' && Number.isFinite(input.steamAppId) && input.steamAppId > 0
+      ? Math.floor(input.steamAppId)
+      : undefined;
+
+  if (!resolvedSteamAppId && input.coverUrl) {
+    const coverMatch = /\/steam\/apps\/(\d+)\//i.exec(input.coverUrl);
+    if (coverMatch) {
+      const parsed = Number(coverMatch[1]);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        resolvedSteamAppId = parsed;
+      }
+    }
+  }
+
+  if (!resolvedSteamAppId && Array.isArray(input.tags)) {
+    for (const tag of input.tags) {
+      const tagMatch = /^steam:(\d+)$/i.exec(tag.trim());
+      if (tagMatch) {
+        const parsed = Number(tagMatch[1]);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          resolvedSteamAppId = parsed;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!resolvedSteamAppId && input.id) {
+    const idMatch = /(?:^|-)steam-(\d+)$/i.exec(input.id.trim());
+    if (idMatch) {
+      const parsed = Number(idMatch[1]);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        resolvedSteamAppId = parsed;
+      }
+    }
+  }
+
+  if (!resolvedSteamAppId && normName) {
+    const kbSteamId = KB_BY_NORM_NAME.get(normName)?.steamAppId;
+    if (typeof kbSteamId === 'number' && Number.isFinite(kbSteamId) && kbSteamId > 0) {
+      resolvedSteamAppId = kbSteamId;
+    }
+  }
+
+  if (resolvedSteamAppId) {
+    return `https://store.steampowered.com/app/${resolvedSteamAppId}/`;
+  }
+
+  return `https://store.steampowered.com/search/?term=${encodeURIComponent((input.name || '').trim())}`;
 }
 
 // ============================================================================
@@ -2403,6 +3402,35 @@ export interface InferredGameMetadata {
   vector: Record<TasteDimensionKey, number>;
   description?: string;
   coverUrl?: string;
+  releaseYear?: number;
+  isEvergreen?: boolean;
+}
+
+const WORD_BOUNDARY_TOKENS = new Set([
+  'cs',
+  'rts',
+  'rol',
+  'war',
+  'team',
+  'mmo',
+  'rpg',
+  'fps',
+  'pvp',
+  'pve',
+  'aim',
+  '4x',
+  'ww2',
+]);
+const TOKEN_REGEX_CACHE = new Map<string, RegExp>();
+
+function getWordBoundaryRegex(token: string): RegExp {
+  let re = TOKEN_REGEX_CACHE.get(token);
+  if (!re) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    re = new RegExp(`\\b${escaped}\\b`, 'i');
+    TOKEN_REGEX_CACHE.set(token, re);
+  }
+  return re;
 }
 
 export function inferGameMetadataAndVector(params: {
@@ -2416,11 +3444,10 @@ export function inferGameMetadataAndVector(params: {
 }): InferredGameMetadata {
   const normName = normalizeGameName(params.name);
 
-  // 1. Check GLOBAL_GAMES_KNOWLEDGE_BASE by steamAppId or normalized name
-  const kbEntry = GLOBAL_GAMES_KNOWLEDGE_BASE.find(kb => {
-    if (params.steamAppId && kb.steamAppId === params.steamAppId) return true;
-    return normalizeGameName(kb.name) === normName;
-  });
+  // 1. Check GLOBAL_GAMES_KNOWLEDGE_BASE in O(1) via precomputed indices
+  const kbEntry =
+    (params.steamAppId !== undefined ? KB_BY_STEAM_APP_ID.get(params.steamAppId) : undefined) ??
+    KB_BY_NORM_NAME.get(normName);
 
   if (kbEntry) {
     const fullVector = createZeroVector();
@@ -2439,6 +3466,8 @@ export function inferGameMetadataAndVector(params: {
       vector: fullVector,
       description: kbEntry.description,
       coverUrl: kbEntry.coverUrl,
+      releaseYear: kbEntry.releaseYear,
+      isEvergreen: kbEntry.isEvergreen,
     };
   }
 
@@ -2450,10 +3479,18 @@ export function inferGameMetadataAndVector(params: {
 
   const vector = createZeroVector();
 
-  // Helper to test presence in tags, genres, or name
+  // Helper to test presence in tags, genres, or name with word-boundary protection for short/ambiguous tokens
   const has = (terms: string[]): boolean =>
     terms.some(term => {
       const t = term.toLowerCase();
+      if (WORD_BOUNDARY_TOKENS.has(t)) {
+        const re = getWordBoundaryRegex(t);
+        return (
+          tagsLower.some(tag => re.test(tag)) ||
+          genresLower.some(genre => re.test(genre)) ||
+          re.test(nameLower)
+        );
+      }
       return (
         tagsLower.some(tag => tag.includes(t)) ||
         genresLower.some(genre => genre.includes(t)) ||
@@ -2545,8 +3582,20 @@ export function inferGameMetadataAndVector(params: {
     vector.long_campaign = Math.max(vector.long_campaign, 0.8);
   }
 
-  // Social dynamics
-  if (has(['pvp', 'multiplayer', 'competitive', 'ranked', 'versus'])) {
+  // Social dynamics (do NOT infer competitive PvP just from 'multiplayer')
+  if (
+    has([
+      'pvp',
+      'competitive',
+      'competitivo',
+      'esports',
+      'ranked',
+      'versus',
+      'battle royale',
+      'moba',
+      'arena',
+    ])
+  ) {
     vector.pvp_competitive = Math.max(vector.pvp_competitive, 0.85);
   }
   if (has(['co-op', 'cooperative', 'pve', 'teamwork', 'escudería'])) {
@@ -2616,14 +3665,14 @@ export function inferGameMetadataAndVector(params: {
 
 function inferCategoryFromTags(tags: string[], genres: string[], name: string): string {
   const allText = [...tags, ...genres, name].join(' ').toLowerCase();
-  if (allText.includes('shooter') || allText.includes('fps') || allText.includes('tactical')) return 'Shooter Táctico';
-  if (allText.includes('moba') || allText.includes('dota') || allText.includes('league')) return 'MOBA';
+  if (allText.includes('shooter') || getWordBoundaryRegex('fps').test(allText) || allText.includes('tactical')) return 'Shooter Táctico';
+  if (getWordBoundaryRegex('moba').test(allText) || allText.includes('dota') || allText.includes('league')) return 'MOBA';
   if (allText.includes('horror') || allText.includes('terror') || allText.includes('phasmo')) return 'Co-op Horror';
   if (allText.includes('survival') || allText.includes('sandbox') || allText.includes('crafting')) return 'Survival Sandbox';
-  if (allText.includes('rts') || allText.includes('strategy') || allText.includes('estrategia')) return 'RTS';
+  if (getWordBoundaryRegex('rts').test(allText) || allText.includes('strategy') || allText.includes('estrategia')) return 'RTS';
   if (allText.includes('party') || allText.includes('minigame') || allText.includes('deduction')) return 'Party Casual';
   if (allText.includes('sports') || allText.includes('racing') || allText.includes('soccer')) return 'Deportes / Autos';
-  if (allText.includes('rpg') || allText.includes('adventure') || allText.includes('story')) return 'RPG / Aventura';
+  if (getWordBoundaryRegex('rpg').test(allText) || allText.includes('adventure') || allText.includes('story')) return 'RPG / Aventura';
   return 'Co-op Acción';
 }
 
@@ -3060,11 +4109,16 @@ export function buildPlayerTasteProfile(
 // 8. SCORE GAME FOR PLAYER (Cosine Similarity & Direct Preference Calibration)
 // ============================================================================
 
+export interface ScoreGameOptions {
+  ignoreOwnershipFloors?: boolean;
+}
+
 export function scoreGameForPlayer(
   game: Game | KnowledgeGameEntry | SteamOwnedGame,
   player: PlayerProfile,
   playerVector: Record<TasteDimensionKey, number> | PlayerTasteVector,
-  allPreferences: UserGamePreference[]
+  allPreferences: UserGamePreference[],
+  options?: ScoreGameOptions
 ): PlayerAffinityBreakdown {
   const normGameName = normalizeGameName(game.name);
 
@@ -3090,7 +4144,7 @@ export function scoreGameForPlayer(
       ? (game as { category: string }).category
       : undefined;
 
-  // Infer game metadata and 32D vector
+  // Infer game metadata and 32D vector (prefer explicit KnowledgeGameEntry weights if provided)
   const gameMeta = inferGameMetadataAndVector({
     name: game.name,
     steamAppId: rawAppId,
@@ -3099,17 +4153,23 @@ export function scoreGameForPlayer(
     category: rawCategory,
   });
 
+  const explicitWeights =
+    'weights' in game && game.weights && Object.keys(game.weights).length > 0
+      ? game.weights
+      : undefined;
+
   // Normalize game vector to Unit L2
   let gameSumSq = 0;
   for (const dim of TASTE_DIMENSIONS) {
-    const val = gameMeta.vector[dim.key] || 0;
+    const val = (explicitWeights ? explicitWeights[dim.key] : gameMeta.vector[dim.key]) || 0;
     gameSumSq += val * val;
   }
   const gameNorm = Math.sqrt(gameSumSq);
   const normalizedGameVector: Record<TasteDimensionKey, number> = createZeroVector();
   if (gameNorm > 0.000001) {
     for (const dim of TASTE_DIMENSIONS) {
-      normalizedGameVector[dim.key] = (gameMeta.vector[dim.key] || 0) / gameNorm;
+      const val = (explicitWeights ? explicitWeights[dim.key] : gameMeta.vector[dim.key]) || 0;
+      normalizedGameVector[dim.key] = val / gameNorm;
     }
   } else {
     const uniform = 1 / Math.sqrt(TASTE_DIMENSIONS.length);
@@ -3178,32 +4238,44 @@ export function scoreGameForPlayer(
     podiumEntry
   );
 
+  const ignoreOwnershipFloors = Boolean(options?.ignoreOwnershipFloors);
+
   // Apply explicit preference bonuses/penalties
-  if (podiumEntry) {
+  if (podiumEntry && !ignoreOwnershipFloors) {
     if (podiumEntry.rank === 1) baseScore = Math.max(baseScore + 25, 96);
     else if (podiumEntry.rank === 2) baseScore = Math.max(baseScore + 20, 92);
     else if (podiumEntry.rank === 3) baseScore = Math.max(baseScore + 15, 88);
   }
 
   if (userPref) {
-    if (userPref.rating === 5) baseScore = Math.max(baseScore + 16, 95);
-    else if (userPref.rating === 4) baseScore = Math.max(baseScore + 10, 85);
-    else if (userPref.rating === 3) baseScore += 2;
-    else if (userPref.rating === 2) baseScore -= 12;
+    if (!ignoreOwnershipFloors) {
+      if (userPref.rating === 5) baseScore = Math.max(baseScore + 16, 95);
+      else if (userPref.rating === 4) baseScore = Math.max(baseScore + 10, 85);
+      else if (userPref.rating === 3) baseScore += 2;
+    }
+    if (userPref.rating === 2) baseScore -= 12;
     else if (userPref.rating === 1) baseScore = Math.min(baseScore - 30, 25);
   }
 
   if (activeSteamMatch) {
     const rating = activeSteamMatch.userRating ?? activeSteamMatch.suggestedRating;
-    if (rating === 5) baseScore = Math.max(baseScore + 12, 92);
-    else if (rating === 4) baseScore = Math.max(baseScore + 8, 82);
-    else if (rating === 1) baseScore = Math.min(baseScore - 20, 30);
+    if (!ignoreOwnershipFloors) {
+      if (rating === 5) baseScore = Math.max(baseScore + 12, 92);
+      else if (rating === 4) baseScore = Math.max(baseScore + 8, 82);
+    } else {
+      const recentHrs =
+        activeSteamMatch.manualRecentHoursOverride ?? activeSteamMatch.playtimeRecentHours ?? 0;
+      if (recentHrs > 0) baseScore += 3;
+    }
+    if (rating === 1) baseScore = Math.min(baseScore - 20, 30);
   }
 
   if (extMatch) {
-    if (extMatch.rating === 5) baseScore = Math.max(baseScore + 12, 92);
-    else if (extMatch.rating === 4) baseScore = Math.max(baseScore + 8, 82);
-    else if (extMatch.rating === 1) baseScore = Math.min(baseScore - 20, 30);
+    if (!ignoreOwnershipFloors) {
+      if (extMatch.rating === 5) baseScore = Math.max(baseScore + 12, 92);
+      else if (extMatch.rating === 4) baseScore = Math.max(baseScore + 8, 82);
+    }
+    if (extMatch.rating === 1) baseScore = Math.min(baseScore - 20, 30);
   }
 
   const catPref = player.categoryPreferences?.[gameMeta.category];
@@ -3271,7 +4343,7 @@ export function scoreGameForPlayer(
 }
 
 // ============================================================================
-// 9. GROUP RECOMMENDATIONS ENGINE (Strict Equal-Weight Arithmetic Mean)
+// 9. GROUP RECOMMENDATIONS ENGINE (Consensus, Recency 2022-2026 & Diversity)
 // ============================================================================
 
 export interface GenerateGroupRecommendationsParams {
@@ -3280,12 +4352,83 @@ export interface GenerateGroupRecommendationsParams {
   preferences: UserGamePreference[];
   externalDiscoveryGames?: KnowledgeGameEntry[];
   maxResultsPerCategory?: number;
+  excludeNames?: Set<string>;
 }
 
 export interface GroupRecommendationsResult {
   readyToPlay: GroupGameRecommendation[];
   discovery: GroupGameRecommendation[];
   all: GroupGameRecommendation[];
+}
+
+interface ScoredCandidateWrapper {
+  rec: GroupGameRecommendation;
+  consensusFloat: number;
+  approvalCount: number;
+  releaseYear: number;
+}
+
+function applyCategoryDiversityMmrLite(
+  sortedItems: ScoredCandidateWrapper[],
+  maxResults: number
+): GroupGameRecommendation[] {
+  const targetCount = Math.min(maxResults, sortedItems.length);
+  if (targetCount === 0) return [];
+
+  const maxPerCategory = Math.max(2, Math.floor(targetCount * 0.35));
+  const remaining = [...sortedItems];
+  const selected: GroupGameRecommendation[] = [];
+  const catCounts = new Map<string, number>();
+
+  while (selected.length < targetCount && remaining.length > 0) {
+    const n = selected.length;
+    const prev1 = n >= 1 ? selected[n - 1].category : undefined;
+    const prev2 = n >= 2 ? selected[n - 2].category : undefined;
+    const blockedConsecutive = prev1 && prev2 && prev1 === prev2 ? prev1 : undefined;
+
+    // Pass 1: respect both consecutive (max 2 in a row) and category share (<= 35%)
+    let chosenIdx = remaining.findIndex(({ rec }) => {
+      if (blockedConsecutive && rec.category === blockedConsecutive) return false;
+      return (catCounts.get(rec.category) ?? 0) < maxPerCategory;
+    });
+
+    // Pass 2: relax 35% cap, keep avoiding 3 in a row
+    if (chosenIdx === -1) {
+      chosenIdx = remaining.findIndex(
+        ({ rec }) => !blockedConsecutive || rec.category !== blockedConsecutive
+      );
+    }
+
+    // Pass 3: fallback to highest-ranked remaining item
+    if (chosenIdx === -1) {
+      chosenIdx = 0;
+    }
+
+    const [picked] = remaining.splice(chosenIdx, 1);
+    selected.push(picked.rec);
+    catCounts.set(picked.rec.category, (catCounts.get(picked.rec.category) ?? 0) + 1);
+  }
+
+  return selected;
+}
+
+// TODO(recommendation-votes-feedback):
+// En una etapa futura, utilizar el mapa de votos grupales (`votes[recKey][userId] = 'up' | 'down'`)
+// para retroalimentar el ranking de recomendaciones en tiempo real mediante:
+// (1) Ajuste Rocchio sobre el vector de gustos 32D de cada jugador:
+//     v'_i = normalize(v_i + 0.15 * sum_{up} vec(game) - 0.10 * sum_{down} vec(game))
+// (2) Thompson Sampling / Prior Bayesiano Beta-Binomial por juego:
+//     Beta(alpha = 1 + upCount, beta = 1 + downCount) para balancear explotación y exploración
+//     en los slots de descubrimiento del grupo.
+// (3) Filtrado colaborativo item-item entre squads (co-ocurrencia de votos positivos entre grupos
+//     con vectores de ADN similares).
+// (4) Decaimiento temporal exponencial con vida media de 30 días sobre los votos históricos
+//     para que los gustos recientes pesen más que los de sesiones viejas.
+export function applyRecommendationFeedback(
+  recs: GroupGameRecommendation[],
+  _votes?: GroupRecommendationVotesMap
+): GroupGameRecommendation[] {
+  return recs;
 }
 
 export function generateGroupGameRecommendations(
@@ -3296,7 +4439,8 @@ export function generateGroupGameRecommendations(
     catalogGames,
     preferences,
     externalDiscoveryGames = [],
-    maxResultsPerCategory = 8,
+    maxResultsPerCategory = 30,
+    excludeNames,
   } = params;
 
   if (!targetPlayers || targetPlayers.length === 0) {
@@ -3305,28 +4449,43 @@ export function generateGroupGameRecommendations(
 
   const squadSize = targetPlayers.length;
 
-  // 1. Build Unit L2 normalized taste vector for each target player
+  // 1. Build Unit L2 normalized taste vector and signal confidence for each target player
   const playerVectors: Record<string, PlayerTasteVector> = {};
+  const playerSignals: Record<string, boolean> = {};
+  const playerWeights: Record<string, number> = {};
+
   for (const player of targetPlayers) {
     playerVectors[player.id] = buildPlayerTasteVector(player, preferences, catalogGames);
+    const userPrefs = preferences.filter(p => p.userId === player.id);
+    const hasSignal = playerHasTasteSignal(player, userPrefs);
+    playerSignals[player.id] = hasSignal;
+    playerWeights[player.id] = hasSignal ? 1.0 : 0.35;
   }
 
   // Filter helper: check if game supports the group size
-  const supportsSquad = (minP: number, maxP: number): boolean => {
+  const supportsSquad = (
+    _minP: number,
+    maxP: number,
+    mode: 'ready_to_play' | 'discovery'
+  ): boolean => {
     if (squadSize <= 1) return maxP >= 1;
-    const minThreshold = Math.max(3, Math.min(squadSize, 3));
-    return maxP >= squadSize || maxP >= minThreshold;
+    if (squadSize <= 2) return maxP >= 2;
+    const minThreshold = mode === 'discovery' ? Math.min(squadSize, 4) : Math.min(squadSize, 3);
+    return maxP >= minThreshold;
   };
 
   // 2. Candidate Pool A: Ready To Play (from catalogGames)
   const readyCandidates = catalogGames.filter(
-    g => supportsSquad(g.minPlayers, g.maxPlayers) && !isNonGameSteamApp({ name: g.name, tags: g.tags })
+    g =>
+      supportsSquad(g.minPlayers, g.maxPlayers, 'ready_to_play') &&
+      !isNonGameSteamApp({ name: g.name, tags: g.tags })
   );
 
   // 3. Candidate Pool B: Discovery (IGDB live pool + players' Steam MP libraries + Knowledge Base fallback)
   const catalogNames = new Set(catalogGames.map(g => normalizeGameName(g.name)));
   const seenDiscoveryNames = new Set<string>();
   const mergedDiscoveryPool: KnowledgeGameEntry[] = [];
+  const minPlayersForDiscovery = squadSize <= 2 ? 2 : 3;
 
   const appendDiscovery = (entry: KnowledgeGameEntry) => {
     if (
@@ -3340,9 +4499,11 @@ export function generateGroupGameRecommendations(
       return;
     }
     const norm = normalizeGameName(entry.name);
-    if (!norm || catalogNames.has(norm) || seenDiscoveryNames.has(norm)) return;
-    if (!entry.isMultiplayer || entry.maxPlayers < 3) return;
-    if (!supportsSquad(entry.minPlayers, entry.maxPlayers)) return;
+    if (!norm || catalogNames.has(norm) || excludeNames?.has(norm) || seenDiscoveryNames.has(norm)) {
+      return;
+    }
+    if (!entry.isMultiplayer || entry.maxPlayers < minPlayersForDiscovery) return;
+    if (!supportsSquad(entry.minPlayers, entry.maxPlayers, 'discovery')) return;
     seenDiscoveryNames.add(norm);
     mergedDiscoveryPool.push(entry);
   };
@@ -3356,7 +4517,7 @@ export function generateGroupGameRecommendations(
   for (const player of targetPlayers) {
     for (const sg of player.steamProfile?.ownedGames || []) {
       if (isNonGameSteamApp(sg)) continue;
-      if (sg.burnedOut || !sg.isMultiplayer || sg.maxPlayers < 3) continue;
+      if (sg.burnedOut || !sg.isMultiplayer || sg.maxPlayers < minPlayersForDiscovery) continue;
       const meta = inferGameMetadataAndVector({
         name: sg.name,
         steamAppId: sg.appId,
@@ -3368,6 +4529,10 @@ export function generateGroupGameRecommendations(
       appendDiscovery({
         id: `steam-${sg.appId}`,
         steamAppId: sg.appId,
+        igdbId: sg.igdbId,
+        releaseYear: meta.releaseYear,
+        isEvergreen: meta.isEvergreen,
+        isNewRelease: Boolean(meta.releaseYear && meta.releaseYear >= 2022),
         name: sg.name,
         description:
           meta.description ||
@@ -3384,7 +4549,7 @@ export function generateGroupGameRecommendations(
     }
   }
 
-  // 3c. Curated knowledge base fallback (>= 3 players)
+  // 3c. Curated knowledge base fallback
   for (const kb of GLOBAL_GAMES_KNOWLEDGE_BASE) {
     appendDiscovery(kb);
   }
@@ -3395,21 +4560,112 @@ export function generateGroupGameRecommendations(
   const evaluateCandidate = (
     game: Game | KnowledgeGameEntry,
     type: 'ready_to_play' | 'discovery'
-  ): GroupGameRecommendation => {
+  ): ScoredCandidateWrapper | null => {
+    const isDiscovery = type === 'discovery';
     const breakdowns: PlayerAffinityBreakdown[] = targetPlayers.map(p =>
-      scoreGameForPlayer(game, p, playerVectors[p.id], preferences)
+      scoreGameForPlayer(game, p, playerVectors[p.id], preferences, {
+        ignoreOwnershipFloors: isDiscovery,
+      })
     );
 
-    // STRICT EQUAL-WEIGHT ARITHMETIC MEAN across all target players
+    // Equal-weight arithmetic mean preserved for compatibility & display
     const totalAffinity = breakdowns.reduce((acc, b) => acc + b.affinityScore, 0);
     const groupArithmeticScore = Math.round(totalAffinity / targetPlayers.length);
 
-    // Shared dimensions calculation
-    const candidateSteamAppId =
+    const ownedByCount = breakdowns.filter(b => b.ownsOrPlays).length;
+    const approvalCount = breakdowns.filter(b => b.affinityScore >= 65).length;
+
+    // Confidence-weighted mean across players
+    let weightedSum = 0;
+    let weightTotal = 0;
+    for (const b of breakdowns) {
+      const w = playerWeights[b.userId] ?? 1.0;
+      weightedSum += b.affinityScore * w;
+      weightTotal += w;
+    }
+    const meanScore = weightTotal > 0 ? weightedSum / weightTotal : groupArithmeticScore;
+
+    // Least-misery floor (lowest non-cold player if any have signal, else lowest overall)
+    const signaledBreakdowns = breakdowns.filter(b => playerSignals[b.userId]);
+    const minPool = signaledBreakdowns.length > 0 ? signaledBreakdowns : breakdowns;
+    const minScore = Math.min(...minPool.map(b => b.affinityScore));
+
+    // Power mean (p = 0.5)
+    const sqrtAvg =
+      breakdowns.reduce((acc, b) => acc + Math.sqrt(Math.max(0, b.affinityScore)), 0) /
+      breakdowns.length;
+    const powerMean = Math.pow(sqrtAvg, 2);
+
+    let consensusScore = 0.55 * meanScore + 0.25 * minScore + 0.20 * powerMean;
+
+    // Soft veto if any player is burned out or has strong dislike (< 28)
+    if (breakdowns.some(b => b.burnedOut || b.affinityScore < 28)) {
+      consensusScore -= 12;
+    }
+
+    // Resolve Steam AppID, IGDB ID, releaseYear, and evergreen flag
+    const rawSteamAppId =
       'steamAppId' in game && typeof (game as { steamAppId?: number }).steamAppId === 'number'
         ? (game as { steamAppId: number }).steamAppId
+        : !isDiscovery && Array.isArray(game.tags)
+        ? extractSteamAppIdFromCatalogTags(game.tags)
         : undefined;
 
+    const kbLookup =
+      (rawSteamAppId !== undefined ? KB_BY_STEAM_APP_ID.get(rawSteamAppId) : undefined) ??
+      KB_BY_NORM_NAME.get(normalizeGameName(game.name));
+
+    const steamAppId = rawSteamAppId ?? kbLookup?.steamAppId;
+    const igdbId =
+      'igdbId' in game && typeof (game as { igdbId?: number }).igdbId === 'number'
+        ? (game as { igdbId: number }).igdbId
+        : kbLookup?.igdbId;
+
+    const explicitOrKbYear =
+      ('releaseYear' in game && typeof (game as { releaseYear?: number }).releaseYear === 'number'
+        ? (game as { releaseYear: number }).releaseYear
+        : undefined) ?? kbLookup?.releaseYear;
+
+    const releaseYear =
+      explicitOrKbYear ?? estimateReleaseYearFromSteamAppId(steamAppId, game.name);
+
+    const isEvergreen = Boolean(
+      ('isEvergreen' in game && (game as { isEvergreen?: boolean }).isEvergreen) ||
+        kbLookup?.isEvergreen
+    );
+
+    const hasReliableYear = explicitOrKbYear !== undefined || (steamAppId !== undefined && steamAppId > 0);
+
+    // Exclude old (< 2015) non-evergreen games from discovery unless consensus is exceptionally high
+    if (isDiscovery && hasReliableYear && releaseYear < 2015 && !isEvergreen && consensusScore < 84) {
+      return null;
+    }
+
+    // 2022-2026 novelty boost & pre-2020 exponential decay (continuous float)
+    if (hasReliableYear && releaseYear >= 2022 && consensusScore >= 40) {
+      const noveltyBoostByYear: Record<number, number> = {
+        2026: 12,
+        2025: 10,
+        2024: 8,
+        2023: 6,
+        2022: 4,
+      };
+      const boost = releaseYear >= 2026 ? 12 : (noveltyBoostByYear[releaseYear] ?? 4);
+      consensusScore += boost;
+    } else if (hasReliableYear && releaseYear < 2020 && !isEvergreen) {
+      const decayFactor = 0.72 + 0.28 * Math.exp(-Math.max(0, 2026 - releaseYear - 5) / 6);
+      consensusScore *= decayFactor;
+    }
+
+    // Mildly prefer true discoveries not already owned by everyone in the squad
+    if (isDiscovery && ownedByCount === targetPlayers.length && targetPlayers.length >= 2) {
+      consensusScore -= 3;
+    }
+
+    const finalConsensusFloat = Math.max(0, Math.min(100, consensusScore));
+    const groupConsensusScore = Math.round(finalConsensusFloat);
+
+    // Shared dimensions calculation
     const candidateGenres =
       'genres' in game && Array.isArray((game as { genres?: string[] }).genres)
         ? (game as { genres: string[] }).genres
@@ -3417,7 +4673,7 @@ export function generateGroupGameRecommendations(
 
     const gameMeta = inferGameMetadataAndVector({
       name: game.name,
-      steamAppId: candidateSteamAppId,
+      steamAppId,
       category: game.category,
       rawGenres: candidateGenres,
       rawTags: game.tags,
@@ -3442,42 +4698,79 @@ export function generateGroupGameRecommendations(
 
     // Clear Spanish explanation
     const highAffinityCount = breakdowns.filter(b => b.affinityScore >= 70).length;
+    const displayScore = isDiscovery ? groupConsensusScore : groupArithmeticScore;
     let explanation = '';
     if (sharedDimensions.length > 0) {
-      explanation = `Afinidad grupal del ${groupArithmeticScore}%. Destaca por ${sharedDimensions.join(
+      explanation = `Afinidad grupal del ${displayScore}%. Destaca por ${sharedDimensions.join(
         ' y '
       )} con ${highAffinityCount} de ${targetPlayers.length} jugadores en sintonía alta.`;
     } else {
-      explanation = `Afinidad grupal del ${groupArithmeticScore}% promediada equitativamente para toda la escuadra.`;
+      explanation = `Afinidad grupal del ${displayScore}% promediada para toda la escuadra.`;
     }
 
-    return {
-      id: `rec-${type}-${game.id}`,
+    const recKey = getRecommendationCanonicalKey({
       name: game.name,
-      coverUrl: game.coverUrl,
-      category: game.category,
-      description: game.description || '',
-      tags: game.tags || [],
-      minPlayers: game.minPlayers,
-      maxPlayers: game.maxPlayers,
-      groupArithmeticScore,
-      recommendationType: type,
-      catalogGameId: type === 'ready_to_play' ? game.id : undefined,
-      sharedDimensions,
-      explanation,
-      playerBreakdowns: breakdowns,
+      steamAppId,
+      igdbId,
+    });
+
+    return {
+      rec: {
+        id: `rec-${type}-${game.id}`,
+        recKey,
+        steamAppId,
+        igdbId,
+        releaseYear,
+        isNewRelease: Boolean(releaseYear && releaseYear >= 2022),
+        name: game.name,
+        coverUrl: game.coverUrl,
+        category: game.category,
+        description: game.description || '',
+        tags: game.tags || [],
+        minPlayers: game.minPlayers,
+        maxPlayers: game.maxPlayers,
+        groupArithmeticScore,
+        groupConsensusScore,
+        approvalCount,
+        ownedByCount,
+        recommendationType: type,
+        catalogGameId: type === 'ready_to_play' ? game.id : undefined,
+        sharedDimensions,
+        explanation,
+        playerBreakdowns: breakdowns,
+      },
+      consensusFloat: finalConsensusFloat,
+      approvalCount,
+      releaseYear: releaseYear ?? 0,
     };
   };
 
   const readyToPlay = readyCandidates
     .map(g => evaluateCandidate(g, 'ready_to_play'))
-    .sort((a, b) => b.groupArithmeticScore - a.groupArithmeticScore)
-    .slice(0, maxResultsPerCategory);
+    .filter((item): item is ScoredCandidateWrapper => item !== null)
+    .sort((a, b) => {
+      if (b.rec.groupArithmeticScore !== a.rec.groupArithmeticScore) {
+        return b.rec.groupArithmeticScore - a.rec.groupArithmeticScore;
+      }
+      return b.consensusFloat - a.consensusFloat;
+    })
+    .slice(0, maxResultsPerCategory)
+    .map(item => item.rec);
 
-  const discovery = discoveryCandidates
+  const sortedDiscovery = discoveryCandidates
     .map(g => evaluateCandidate(g, 'discovery'))
-    .sort((a, b) => b.groupArithmeticScore - a.groupArithmeticScore)
-    .slice(0, maxResultsPerCategory);
+    .filter((item): item is ScoredCandidateWrapper => item !== null)
+    .sort((a, b) => {
+      if (b.consensusFloat !== a.consensusFloat) {
+        return b.consensusFloat - a.consensusFloat;
+      }
+      if (b.approvalCount !== a.approvalCount) {
+        return b.approvalCount - a.approvalCount;
+      }
+      return b.releaseYear - a.releaseYear;
+    });
+
+  const discovery = applyCategoryDiversityMmrLite(sortedDiscovery, maxResultsPerCategory);
 
   return {
     readyToPlay,
@@ -3494,6 +4787,8 @@ export interface UnifiedSearchCandidate {
   igdbId?: number;
   appId?: number;
   steamAppId?: number;
+  releaseYear?: number;
+  isNewRelease?: boolean;
   name: string;
   description?: string;
   summary?: string;
@@ -3509,6 +4804,468 @@ export interface UnifiedSearchCandidate {
   rating?: number;
   source?: 'igdb' | 'steam' | 'curated';
   platform?: ExternalGamePlatform | string;
+}
+
+export interface EvaluateAnyGameForGroupParams {
+  candidate: UnifiedSearchCandidate;
+  targetPlayers: PlayerProfile[];
+  preferences: UserGamePreference[];
+  catalogGames: Game[];
+}
+
+export function evaluateAnyGameForGroup(
+  params: EvaluateAnyGameForGroupParams
+): GroupGameRecommendation {
+  const { candidate, targetPlayers, preferences, catalogGames } = params;
+
+  const normName = normalizeGameName(candidate.name || '');
+  const candidateAppId = candidate.steamAppId ?? candidate.appId;
+
+  const catalogGame = catalogGames.find((g) => {
+    if (normName && normalizeGameName(g.name) === normName) return true;
+    if (candidateAppId !== undefined && candidateAppId > 0) {
+      return extractSteamAppIdFromCatalogTags(g.tags) === candidateAppId;
+    }
+    return false;
+  });
+
+  const kbLookup =
+    (candidateAppId !== undefined ? KB_BY_STEAM_APP_ID.get(candidateAppId) : undefined) ??
+    KB_BY_NORM_NAME.get(normName);
+
+  const steamAppId =
+    candidateAppId ??
+    (catalogGame ? extractSteamAppIdFromCatalogTags(catalogGame.tags) : undefined) ??
+    kbLookup?.steamAppId;
+
+  const igdbId = candidate.igdbId ?? kbLookup?.igdbId;
+
+  const gameMeta = inferGameMetadataAndVector({
+    name: catalogGame?.name || candidate.name,
+    steamAppId,
+    rawGenres: candidate.genres,
+    rawTags: candidate.tags && candidate.tags.length > 0 ? candidate.tags : catalogGame?.tags,
+    category: catalogGame?.category || candidate.category,
+    minPlayers: catalogGame?.minPlayers ?? candidate.minPlayers,
+    maxPlayers: catalogGame?.maxPlayers ?? candidate.maxPlayers,
+  });
+
+  const mergedTags = mergeUniqueStrings(
+    catalogGame?.tags || [],
+    candidate.tags && candidate.tags.length > 0 ? candidate.tags : gameMeta.tags
+  );
+
+  const explicitOrKbYear = candidate.releaseYear ?? kbLookup?.releaseYear;
+  const releaseYear =
+    explicitOrKbYear ?? estimateReleaseYearFromSteamAppId(steamAppId, candidate.name);
+  const isNewRelease = releaseYear >= 2022;
+  const isEvergreen = Boolean(kbLookup?.isEvergreen);
+
+  const recType: 'ready_to_play' | 'discovery' = catalogGame ? 'ready_to_play' : 'discovery';
+  const isDiscovery = !catalogGame;
+
+  const evalTarget: Game | KnowledgeGameEntry = catalogGame
+    ? catalogGame
+    : {
+        id: igdbId
+          ? `igdb-${igdbId}`
+          : steamAppId
+          ? `steam-${steamAppId}`
+          : `search-${normName || 'custom'}`,
+        steamAppId,
+        igdbId,
+        releaseYear,
+        isNewRelease,
+        isEvergreen,
+        name: candidate.name,
+        description: candidate.description || candidate.summary || gameMeta.description || '',
+        category: candidate.category || gameMeta.category,
+        coverUrl:
+          candidate.headerImageUrl ||
+          candidate.coverUrl ||
+          gameMeta.coverUrl ||
+          (steamAppId ? steamHeaderUrl(steamAppId) : ''),
+        tags: mergedTags,
+        genres: candidate.genres && candidate.genres.length > 0 ? candidate.genres : gameMeta.genres,
+        minPlayers: candidate.minPlayers ?? gameMeta.minPlayers,
+        maxPlayers: candidate.maxPlayers ?? gameMeta.maxPlayers,
+        isMultiplayer: candidate.isMultiplayer ?? gameMeta.isMultiplayer,
+        weights: gameMeta.vector,
+      };
+
+  const recKey = getRecommendationCanonicalKey({
+    name: evalTarget.name,
+    steamAppId,
+    igdbId,
+  });
+
+  if (!targetPlayers || targetPlayers.length === 0) {
+    return {
+      id: `rec-${recType}-${evalTarget.id}`,
+      recKey,
+      steamAppId,
+      igdbId,
+      releaseYear,
+      isNewRelease,
+      name: evalTarget.name,
+      coverUrl: evalTarget.coverUrl,
+      category: evalTarget.category,
+      description: evalTarget.description || '',
+      tags: evalTarget.tags || [],
+      minPlayers: evalTarget.minPlayers,
+      maxPlayers: evalTarget.maxPlayers,
+      groupArithmeticScore: 0,
+      groupConsensusScore: 0,
+      approvalCount: 0,
+      ownedByCount: 0,
+      recommendationType: recType,
+      catalogGameId: catalogGame?.id,
+      sharedDimensions: [],
+      explanation: 'Sin jugadores objetivo para evaluar afinidad grupal.',
+      playerBreakdowns: [],
+    };
+  }
+
+  const playerVectors: Record<string, PlayerTasteVector> = {};
+  const playerSignals: Record<string, boolean> = {};
+  const playerWeights: Record<string, number> = {};
+
+  for (const player of targetPlayers) {
+    playerVectors[player.id] = buildPlayerTasteVector(player, preferences, catalogGames);
+    const userPrefs = preferences.filter((p) => p.userId === player.id);
+    const hasSignal = playerHasTasteSignal(player, userPrefs);
+    playerSignals[player.id] = hasSignal;
+    playerWeights[player.id] = hasSignal ? 1.0 : 0.35;
+  }
+
+  const breakdowns: PlayerAffinityBreakdown[] = targetPlayers.map((p) =>
+    scoreGameForPlayer(evalTarget, p, playerVectors[p.id], preferences, {
+      ignoreOwnershipFloors: isDiscovery,
+    })
+  );
+
+  const totalAffinity = breakdowns.reduce((acc, b) => acc + b.affinityScore, 0);
+  const groupArithmeticScore = Math.round(totalAffinity / targetPlayers.length);
+  const ownedByCount = breakdowns.filter((b) => b.ownsOrPlays).length;
+  const approvalCount = breakdowns.filter((b) => b.affinityScore >= 65).length;
+
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (const b of breakdowns) {
+    const w = playerWeights[b.userId] ?? 1.0;
+    weightedSum += b.affinityScore * w;
+    weightTotal += w;
+  }
+  const meanScore = weightTotal > 0 ? weightedSum / weightTotal : groupArithmeticScore;
+
+  const signaledBreakdowns = breakdowns.filter((b) => playerSignals[b.userId]);
+  const minPool = signaledBreakdowns.length > 0 ? signaledBreakdowns : breakdowns;
+  const minScore = Math.min(...minPool.map((b) => b.affinityScore));
+
+  const sqrtAvg =
+    breakdowns.reduce((acc, b) => acc + Math.sqrt(Math.max(0, b.affinityScore)), 0) /
+    breakdowns.length;
+  const powerMean = Math.pow(sqrtAvg, 2);
+
+  let consensusScore = 0.55 * meanScore + 0.25 * minScore + 0.20 * powerMean;
+
+  if (breakdowns.some((b) => b.burnedOut || b.affinityScore < 28)) {
+    consensusScore -= 12;
+  }
+
+  const hasReliableYear =
+    explicitOrKbYear !== undefined || (steamAppId !== undefined && steamAppId > 0);
+  if (hasReliableYear && releaseYear >= 2022 && consensusScore >= 40) {
+    const noveltyBoostByYear: Record<number, number> = {
+      2026: 12,
+      2025: 10,
+      2024: 8,
+      2023: 6,
+      2022: 4,
+    };
+    const boost = releaseYear >= 2026 ? 12 : (noveltyBoostByYear[releaseYear] ?? 4);
+    consensusScore += boost;
+  } else if (hasReliableYear && releaseYear < 2020 && !isEvergreen) {
+    const decayFactor = 0.72 + 0.28 * Math.exp(-Math.max(0, 2026 - releaseYear - 5) / 6);
+    consensusScore *= decayFactor;
+  }
+
+  const groupConsensusScore = Math.round(Math.max(0, Math.min(100, consensusScore)));
+
+  const sharedDimScores = TASTE_DIMENSIONS.map((dim) => {
+    const gWeight = gameMeta.vector[dim.key] || 0;
+    const groupAvgP =
+      targetPlayers.reduce((acc, p) => acc + (playerVectors[p.id][dim.key] || 0), 0) /
+      targetPlayers.length;
+    return {
+      key: dim.key,
+      label: dim.label,
+      score: gWeight * groupAvgP,
+    };
+  })
+    .filter((d) => d.score > 0.01)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  const sharedDimensions = sharedDimScores.map((d) => d.label);
+  const highAffinityCount = breakdowns.filter((b) => b.affinityScore >= 70).length;
+  const displayScore = isDiscovery ? groupConsensusScore : groupArithmeticScore;
+  const explanation =
+    sharedDimensions.length > 0
+      ? `Afinidad grupal del ${displayScore}%. Destaca por ${sharedDimensions.join(
+          ' y '
+        )} con ${highAffinityCount} de ${targetPlayers.length} jugadores en sintonía alta.`
+      : `Afinidad grupal del ${displayScore}% promediada para toda la escuadra.`;
+
+  return {
+    id: `rec-${recType}-${evalTarget.id}`,
+    recKey,
+    steamAppId,
+    igdbId,
+    releaseYear,
+    isNewRelease,
+    name: evalTarget.name,
+    coverUrl: evalTarget.coverUrl,
+    category: evalTarget.category,
+    description: evalTarget.description || '',
+    tags: evalTarget.tags || [],
+    minPlayers: evalTarget.minPlayers,
+    maxPlayers: evalTarget.maxPlayers,
+    groupArithmeticScore,
+    groupConsensusScore,
+    approvalCount,
+    ownedByCount,
+    recommendationType: recType,
+    catalogGameId: catalogGame?.id,
+    sharedDimensions,
+    explanation,
+    playerBreakdowns: breakdowns,
+  };
+}
+
+export interface SearchMultiPlatformGamesParams {
+  query: string;
+  targetPlayers: PlayerProfile[];
+  preferences: UserGamePreference[];
+  catalogGames: Game[];
+  discoveryGames?: KnowledgeGameEntry[];
+  liveSearchResults?: UnifiedSearchCandidate[];
+  limit?: number;
+}
+
+export function searchMultiPlatformGamesForAffinity(
+  params: SearchMultiPlatformGamesParams
+): GroupGameRecommendation[] {
+  const {
+    query,
+    targetPlayers,
+    preferences,
+    catalogGames,
+    discoveryGames = [],
+    liveSearchResults = [],
+    limit = 18,
+  } = params;
+
+  const trimmedQuery = query.trim().toLowerCase();
+  if (!trimmedQuery) return [];
+  const normQuery = normalizeGameName(trimmedQuery);
+
+  const candidateMap = new Map<string, UnifiedSearchCandidate>();
+
+  const upsertCandidate = (incoming: UnifiedSearchCandidate) => {
+    if (!incoming.name) return;
+    const appId = incoming.steamAppId ?? incoming.appId;
+    if (
+      isNonGameSteamApp({
+        appId,
+        steamAppId: incoming.steamAppId,
+        name: incoming.name,
+        tags: incoming.tags,
+        genres: incoming.genres,
+        tagVotes: incoming.tagVotes,
+      })
+    ) {
+      return;
+    }
+
+    const norm = normalizeGameName(incoming.name);
+    if (!norm) return;
+
+    const existing = candidateMap.get(norm);
+    if (existing) {
+      existing.igdbId = existing.igdbId ?? incoming.igdbId;
+      existing.steamAppId = existing.steamAppId ?? appId;
+      existing.appId = existing.appId ?? appId;
+      existing.releaseYear = existing.releaseYear ?? incoming.releaseYear;
+      existing.isNewRelease = existing.isNewRelease ?? incoming.isNewRelease;
+      existing.coverUrl = existing.coverUrl || incoming.coverUrl || incoming.headerImageUrl;
+      existing.headerImageUrl =
+        existing.headerImageUrl || incoming.headerImageUrl || incoming.coverUrl;
+      existing.description = existing.description || incoming.description || incoming.summary;
+      existing.summary = existing.summary || incoming.summary;
+      existing.category = existing.category || incoming.category;
+      existing.platform = existing.platform || incoming.platform;
+      existing.tags = mergeUniqueStrings(existing.tags || [], incoming.tags || []);
+      existing.genres = mergeUniqueStrings(existing.genres || [], incoming.genres || []);
+      if (incoming.minPlayers !== undefined) {
+        existing.minPlayers =
+          existing.minPlayers !== undefined
+            ? Math.min(existing.minPlayers, incoming.minPlayers)
+            : incoming.minPlayers;
+      }
+      if (incoming.maxPlayers !== undefined) {
+        existing.maxPlayers =
+          existing.maxPlayers !== undefined
+            ? Math.max(existing.maxPlayers, incoming.maxPlayers)
+            : incoming.maxPlayers;
+      }
+      existing.isMultiplayer = existing.isMultiplayer ?? incoming.isMultiplayer;
+    } else {
+      candidateMap.set(norm, {
+        ...incoming,
+        steamAppId: appId,
+        tags: incoming.tags ? [...incoming.tags] : [],
+        genres: incoming.genres ? [...incoming.genres] : [],
+      });
+    }
+  };
+
+  // 1. Club / group catalog games
+  for (const cg of catalogGames) {
+    const appId = extractSteamAppIdFromCatalogTags(cg.tags);
+    upsertCandidate({
+      steamAppId: appId,
+      name: cg.name,
+      description: cg.description,
+      coverUrl: cg.coverUrl,
+      category: cg.category,
+      tags: cg.tags,
+      minPlayers: cg.minPlayers,
+      maxPlayers: cg.maxPlayers,
+      isMultiplayer: cg.maxPlayers >= 2,
+      platform: appId ? 'Steam / Catálogo' : 'Catálogo',
+    });
+  }
+
+  // 2. Players' Steam libraries & external multi-platform games (Riot, Epic, Battle.net, Xbox Game Pass, EA)
+  for (const player of targetPlayers) {
+    for (const sg of player.steamProfile?.ownedGames || []) {
+      upsertCandidate({
+        appId: sg.appId,
+        steamAppId: sg.appId,
+        igdbId: sg.igdbId,
+        name: sg.name,
+        headerImageUrl: sg.headerImageUrl,
+        genres: sg.genres,
+        tags: sg.tags,
+        tagVotes: sg.tagVotes,
+        isMultiplayer: sg.isMultiplayer,
+        minPlayers: sg.minPlayers,
+        maxPlayers: sg.maxPlayers,
+        platform: 'Steam',
+      });
+    }
+
+    for (const ext of player.tasteProfile?.externalGames || []) {
+      upsertCandidate({
+        steamAppId: ext.steamAppId,
+        igdbId: ext.igdbId,
+        name: ext.name,
+        coverUrl: ext.coverUrl,
+        category: ext.category,
+        tags: ext.tags,
+        tagVotes: ext.tagVotes,
+        isMultiplayer: ext.isMultiplayer,
+        minPlayers: ext.minPlayers,
+        maxPlayers: ext.maxPlayers,
+        platform: ext.platform,
+      });
+    }
+  }
+
+  // 3. Curated Global Games Knowledge Base (Steam, Riot, Epic, Battle.net, Xbox Game Pass, etc.)
+  for (const kb of GLOBAL_GAMES_KNOWLEDGE_BASE) {
+    upsertCandidate({
+      steamAppId: kb.steamAppId,
+      igdbId: kb.igdbId,
+      releaseYear: kb.releaseYear,
+      isNewRelease: kb.isNewRelease,
+      name: kb.name,
+      description: kb.description,
+      coverUrl: kb.coverUrl,
+      category: kb.category,
+      genres: kb.genres,
+      tags: kb.tags,
+      isMultiplayer: kb.isMultiplayer,
+      minPlayers: kb.minPlayers,
+      maxPlayers: kb.maxPlayers,
+      platform: kb.platform || (kb.steamAppId ? 'Steam' : 'Multi-plataforma'),
+    });
+  }
+
+  // 4. Discovery games feed (IGDB / SteamSpy)
+  for (const dg of discoveryGames) {
+    upsertCandidate({
+      steamAppId: dg.steamAppId,
+      igdbId: dg.igdbId,
+      releaseYear: dg.releaseYear,
+      isNewRelease: dg.isNewRelease,
+      name: dg.name,
+      description: dg.description,
+      coverUrl: dg.coverUrl,
+      category: dg.category,
+      genres: dg.genres,
+      tags: dg.tags,
+      isMultiplayer: dg.isMultiplayer,
+      minPlayers: dg.minPlayers,
+      maxPlayers: dg.maxPlayers,
+      platform: dg.platform || (dg.igdbId ? 'IGDB' : 'Steam'),
+    });
+  }
+
+  // 5. Live search results (IGDB v4 / Steam Store)
+  for (const live of liveSearchResults) {
+    upsertCandidate(live);
+  }
+
+  const matched = Array.from(candidateMap.values()).filter((c) => {
+    const nameLower = c.name.toLowerCase();
+    if (nameLower.includes(trimmedQuery)) return true;
+    if (normQuery && normalizeGameName(c.name).includes(normQuery)) return true;
+    if ((c.category || '').toLowerCase().includes(trimmedQuery)) return true;
+    if ((c.platform || '').toLowerCase().includes(trimmedQuery)) return true;
+    if ((c.tags || []).some((t) => t.toLowerCase().includes(trimmedQuery))) return true;
+    if ((c.genres || []).some((g) => g.toLowerCase().includes(trimmedQuery))) return true;
+    return false;
+  });
+
+  const getMatchTier = (name: string): number => {
+    const lower = name.toLowerCase();
+    const norm = normalizeGameName(name);
+    if (lower === trimmedQuery || (normQuery && norm === normQuery)) return 3;
+    if (lower.startsWith(trimmedQuery) || (normQuery && norm.startsWith(normQuery))) return 2;
+    if (lower.includes(trimmedQuery) || (normQuery && norm.includes(normQuery))) return 1;
+    return 0;
+  };
+
+  return matched
+    .map((candidate) =>
+      evaluateAnyGameForGroup({
+        candidate,
+        targetPlayers,
+        preferences,
+        catalogGames,
+      })
+    )
+    .sort((a, b) => {
+      const tierDiff = getMatchTier(b.name) - getMatchTier(a.name);
+      if (tierDiff !== 0) return tierDiff;
+      const scoreA = a.groupConsensusScore ?? a.groupArithmeticScore;
+      const scoreB = b.groupConsensusScore ?? b.groupArithmeticScore;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return b.groupArithmeticScore - a.groupArithmeticScore;
+    })
+    .slice(0, limit);
 }
 
 export interface BuildUnifiedSelectorInput {

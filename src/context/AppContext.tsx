@@ -28,6 +28,7 @@ import {
   PlayerTasteProfile,
   PrecisionMinutes,
   PushNotificationAlert,
+  RecommendationVoteValue,
   SanctionRecord,
   SessionCalloutRecord,
   SessionParticipant,
@@ -83,6 +84,7 @@ import { isDiscordOAuthProviderEnabled, isSupabaseConfigured, supabase } from '.
 import {
   dbAddGameToGroup,
   dbAddMemberToGroup,
+  dbCastGroupRecommendationVote,
   dbCreateSession,
   dbDeleteGroup,
   dbDeleteParticipant,
@@ -1126,6 +1128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           mentionRoleId: params.discordConfig?.mentionRoleId?.trim() || '',
           useEveryoneMention: params.discordConfig?.useEveryoneMention ?? false,
         },
+        recommendationVotes: {},
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -1356,6 +1359,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dbRemoveGameFromGroup(groupId, gameId).catch(console.warn);
     },
     [syncChannel]
+  );
+
+  const voteGroupRecommendation = useCallback(
+    (
+      groupId: string,
+      recKey: string,
+      vote: RecommendationVoteValue | null,
+      _gameName?: string
+    ) => {
+      if (!currentUserId || !groupId || !recKey) return;
+
+      // TODO(recommendation-votes-feedback): En una etapa futura, usar cada voto ('up' | 'down')
+      // como señal de feedback en tiempo real para ajustar el vector de gustos 32D del jugador
+      // y el ranking grupal (por ahora solo se persiste y se muestra consenso/mayoría en la UI).
+      setGroups((prev) => {
+        const nextGroups = prev.map((g) => {
+          if (g.id !== groupId) return g;
+          const currentVotes = g.recommendationVotes || {};
+          const nextRecVotes: Record<string, RecommendationVoteValue> = {
+            ...(currentVotes[recKey] || {}),
+          };
+          if (vote === null) {
+            delete nextRecVotes[currentUserId];
+          } else {
+            nextRecVotes[currentUserId] = vote;
+          }
+          const nextMap = { ...currentVotes };
+          if (Object.keys(nextRecVotes).length === 0) {
+            delete nextMap[recKey];
+          } else {
+            nextMap[recKey] = nextRecVotes;
+          }
+          return {
+            ...g,
+            recommendationVotes: nextMap,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        syncChannel?.postMessage({ type: 'SYNC_GROUPS', payload: nextGroups });
+        return nextGroups;
+      });
+
+      dbCastGroupRecommendationVote(groupId, recKey, currentUserId, vote).catch(console.warn);
+    },
+    [currentUserId, syncChannel]
   );
 
   const testGroupDiscordWebhook = useCallback(
@@ -2042,6 +2090,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             mentionRoleId: discordConfig.mentionRoleId,
             useEveryoneMention: discordConfig.useEveryoneMention,
           },
+          recommendationVotes: {},
           createdAt: new Date().toISOString(),
         };
         targetGroup = autoCreatedGroup;
@@ -4556,6 +4605,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addAndLinkGameToGroup,
       testGroupDiscordWebhook,
       getGroupInviteLink,
+      voteGroupRecommendation,
 
       updateWeeklySchedule,
       setDailyOverride,
@@ -4643,6 +4693,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addAndLinkGameToGroup,
       testGroupDiscordWebhook,
       getGroupInviteLink,
+      voteGroupRecommendation,
       updateWeeklySchedule,
       setDailyOverride,
       toggleTodayNotPlaying,

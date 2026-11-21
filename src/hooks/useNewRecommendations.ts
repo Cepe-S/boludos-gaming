@@ -1,36 +1,45 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Game, GroupGameRecommendation, PlayerProfile } from '@/types/domain';
 import {
   GLOBAL_GAMES_KNOWLEDGE_BASE,
   KnowledgeGameEntry,
+  applyRecommendationFeedback,
   generateGroupGameRecommendations,
   normalizeGameName,
 } from '@/lib/tasteProfileEngine';
 import { fetchExternalDiscoveryGames } from '@/lib/steamService';
 
+const DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 let cachedDiscoveryGames: KnowledgeGameEntry[] = [];
+let cachedDiscoveryFetchedAt = 0;
 
 export interface UseNewRecommendationsOptions {
   targetPlayers: PlayerProfile[];
   catalogGames: Game[];
   enabled?: boolean;
   maxResults?: number;
+  includeReadyToPlay?: boolean;
 }
 
 export function useNewRecommendations({
   targetPlayers,
   catalogGames,
   enabled = true,
-  maxResults = 9,
+  maxResults = 30,
+  includeReadyToPlay = true,
 }: UseNewRecommendationsOptions) {
-  const { games, preferences, discordConfig, addGame } = useApp();
+  const { games, preferences, discordConfig, activeGroup, addGame } = useApp();
   const [liveDiscoveryGames, setLiveDiscoveryGames] = useState<KnowledgeGameEntry[]>(
     () => cachedDiscoveryGames
   );
 
   useEffect(() => {
-    if (!enabled || liveDiscoveryGames.length > 0) return;
+    const isCacheFresh =
+      cachedDiscoveryGames.length > 0 &&
+      Date.now() - cachedDiscoveryFetchedAt < DISCOVERY_CACHE_TTL_MS;
+    if (!enabled || (liveDiscoveryGames.length > 0 && isCacheFresh)) return;
+
     let cancelled = false;
     fetchExternalDiscoveryGames({
       igdbClientId: discordConfig.igdbClientId,
@@ -39,6 +48,7 @@ export function useNewRecommendations({
       .then((res) => {
         if (!cancelled && res.length > 0) {
           cachedDiscoveryGames = res;
+          cachedDiscoveryFetchedAt = Date.now();
           setLiveDiscoveryGames(res);
         }
       })
@@ -55,28 +65,80 @@ export function useNewRecommendations({
     discordConfig.igdbClientSecret,
   ]);
 
-  const newRecommendations = useMemo(() => {
-    if (!enabled || targetPlayers.length === 0) {
-      return [];
+  const targetPlayersKey = useMemo(
+    () =>
+      targetPlayers
+        .map((p) => {
+          const catKey = p.categoryPreferences
+            ? Object.entries(p.categoryPreferences)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => `${k}:${v}`)
+                .join(',')
+            : '';
+          const steamCount = p.steamProfile?.ownedGames?.length ?? 0;
+          const mpPodiumCount = p.tasteProfile?.topMultiplayerGames?.length ?? 0;
+          const spPodiumCount = p.tasteProfile?.topSingleplayerGames?.length ?? 0;
+          const extCount = p.tasteProfile?.externalGames?.length ?? 0;
+          return `${p.id}|${p.tasteProfile?.updatedAt ?? ''}|${p.steamProfile?.lastSyncedAt ?? ''}|${steamCount}|${mpPodiumCount}|${spPodiumCount}|${extCount}|${catKey}`;
+        })
+        .sort()
+        .join(';'),
+    [targetPlayers]
+  );
+
+  const latestTargetPlayersRef = useRef<PlayerProfile[]>(targetPlayers);
+  latestTargetPlayersRef.current = targetPlayers;
+  const stableTargetPlayers = useMemo(() => {
+    void targetPlayersKey;
+    return latestTargetPlayersRef.current;
+  }, [targetPlayersKey]);
+
+  const excludeNames = useMemo(
+    () => new Set(games.map((g) => normalizeGameName(g.name))),
+    [games]
+  );
+
+  const recommendationVotes = activeGroup?.recommendationVotes;
+
+  const recommendationResult = useMemo(() => {
+    if (!enabled || stableTargetPlayers.length === 0) {
+      return { readyToPlay: [] as GroupGameRecommendation[], discovery: [] as GroupGameRecommendation[] };
     }
 
     const result = generateGroupGameRecommendations({
-      targetPlayers,
+      targetPlayers: stableTargetPlayers,
       catalogGames,
       preferences,
       externalDiscoveryGames:
         liveDiscoveryGames.length > 0 ? liveDiscoveryGames : GLOBAL_GAMES_KNOWLEDGE_BASE,
       maxResultsPerCategory: maxResults,
+      excludeNames,
     });
 
-    const existingNames = new Set(games.map((g) => normalizeGameName(g.name)));
-
-    return result.discovery.filter((rec) => {
+    const filteredDiscovery = result.discovery.filter((rec) => {
       if (rec.recommendationType !== 'discovery' || rec.catalogGameId) return false;
-      if (existingNames.has(normalizeGameName(rec.name))) return false;
+      if (excludeNames.has(normalizeGameName(rec.name))) return false;
       return true;
     });
-  }, [enabled, targetPlayers, catalogGames, preferences, liveDiscoveryGames, maxResults, games]);
+
+    return {
+      readyToPlay: includeReadyToPlay ? result.readyToPlay : [],
+      discovery: applyRecommendationFeedback(filteredDiscovery, recommendationVotes),
+    };
+  }, [
+    enabled,
+    stableTargetPlayers,
+    catalogGames,
+    preferences,
+    liveDiscoveryGames,
+    maxResults,
+    excludeNames,
+    recommendationVotes,
+    includeReadyToPlay,
+  ]);
+
+  const newRecommendations = recommendationResult.discovery;
+  const readyToPlayRecommendations = recommendationResult.readyToPlay;
 
   const ensureCatalogGameFromRec = useCallback(
     (rec: GroupGameRecommendation): Game | null => {
@@ -103,6 +165,8 @@ export function useNewRecommendations({
 
   return {
     newRecommendations,
+    readyToPlayRecommendations,
+    liveDiscoveryGames,
     ensureCatalogGameFromRec,
   };
 }

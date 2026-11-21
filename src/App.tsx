@@ -6,6 +6,7 @@ import { SessionsView } from '@/components/SessionsView';
 import { GroupsView } from '@/components/GroupsView';
 import { GamesCatalogView } from '@/components/GamesCatalogView';
 import { LeaderboardSanctionsView } from '@/components/LeaderboardSanctionsView';
+import { LeagueOfLegendsView } from '@/components/LeagueOfLegendsView';
 import { DiscordIntegrationModal } from '@/components/DiscordIntegrationModal';
 import { GlobalChatDrawer } from '@/components/GlobalChatDrawer';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
@@ -77,10 +78,14 @@ export function App() {
             {activeTab === 'sessions' && (
               <SessionsView onNavigateToGroups={() => setActiveTab('groups')} />
             )}
+            {activeTab === 'recommendations' && (
+              <GamesCatalogView mode="recommendations-only" />
+            )}
             {activeTab === 'groups' && (
               <GroupsView onNavigateToSessions={() => setActiveTab('sessions')} />
             )}
             {activeTab === 'games' && <GamesCatalogView />}
+            {activeTab === 'lol' && <LeagueOfLegendsView />}
             {activeTab === 'tribunal' && <LeaderboardSanctionsView />}
             {activeTab === 'discord' && (
               <DiscordIntegrationModal

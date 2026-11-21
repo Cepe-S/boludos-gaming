@@ -1,6 +1,7 @@
 import React from 'react';
 import { Game, GameSynchronyResult } from '@/types/domain';
 import { getSafeCoverUrl, handleImageFallback } from '@/components/catalog/sharedCatalogConstants';
+import { resolveGameOfficialUrl } from '@/lib/tasteProfileEngine';
 import {
   SessionPlayerAvatarRow,
   buildPlayerAvatarsFromBreakdown,
@@ -8,7 +9,16 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { CheckCircle2, Clock, Dices, MousePointerClick, Star, ThumbsDown, Users } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock,
+  Dices,
+  ExternalLink,
+  MousePointerClick,
+  Star,
+  ThumbsDown,
+  Users,
+} from 'lucide-react';
 
 export interface SelectedSessionGameCardProps {
   game: Game;
@@ -22,6 +32,12 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
   isRouletteWinner = false,
 }) => {
   const resolvedCoverUrl = getSafeCoverUrl(game.coverUrl);
+  const officialUrl = resolveGameOfficialUrl({
+    name: game.name,
+    coverUrl: game.coverUrl,
+    tags: game.tags,
+    id: game.id,
+  });
   const avatars = syncResult ? buildPlayerAvatarsFromBreakdown(syncResult) : [];
 
   return (
@@ -59,30 +75,39 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
       </div>
 
       {/* Steam 460x215 Cover Header */}
-      <div className="relative w-full aspect-[460/215] max-h-[155px] overflow-hidden bg-background">
-        <img
-          src={resolvedCoverUrl}
-          alt=""
-          aria-hidden="true"
-          draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-md saturate-150"
-        />
-        <img
-          src={resolvedCoverUrl}
-          alt={game.name}
-          draggable={false}
-          onError={handleImageFallback}
-          className="relative z-10 h-full w-full object-contain select-none"
-        />
+      <div className="group/cover relative w-full aspect-[460/215] max-h-[155px] overflow-hidden bg-background">
+        <a
+          href={officialUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Ver página oficial de ${game.name}`}
+          aria-label={`Ver página oficial de ${game.name}`}
+          className="block h-full w-full cursor-pointer"
+        >
+          <img
+            src={resolvedCoverUrl}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-md saturate-150"
+          />
+          <img
+            src={resolvedCoverUrl}
+            alt={game.name}
+            draggable={false}
+            onError={handleImageFallback}
+            className="relative z-10 h-full w-full object-contain select-none"
+          />
+        </a>
 
-        <div className="absolute top-2 left-2 z-20">
+        <div className="pointer-events-none absolute top-2 left-2 z-20">
           <Badge variant="outline" className="text-[10px] bg-background/85 backdrop-blur-sm">
             {game.category}
           </Badge>
         </div>
 
         {syncResult && (
-          <div className="absolute top-2 right-2 z-20">
+          <div className="pointer-events-none absolute top-2 right-2 z-20">
             <span
               className={cn(
                 'px-2 py-0.5 rounded border text-xs font-mono font-bold shadow-sm',
@@ -97,6 +122,13 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
             </span>
           </div>
         )}
+
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-75 group-hover/cover:opacity-100 group-hover/cover:text-foreground group-hover/cover:border-primary/60 transition-all"
+        >
+          <ExternalLink className="w-3 h-3" strokeWidth={1.75} />
+        </span>
       </div>
 
       <CardContent className="p-3.5 space-y-2.5">

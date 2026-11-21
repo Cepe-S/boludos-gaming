@@ -39,6 +39,8 @@ export interface AppHeaderProps {
 
 const TAB_LABELS: Record<AppTab, string> = {
   sessions: 'Sesiones & Ruleta',
+  recommendations: 'Recomendaciones',
+  lol: 'League of Legends',
   games: 'Catálogo & ADN',
   tribunal: 'Tribunal del Humo',
   groups: 'Grupos & Discord',

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { GameRating, UnifiedSelectorGame } from '@/types/domain';
 import { RATING_INFO, getSafeCoverUrl } from './sharedCatalogConstants';
 import { cn } from '@/lib/utils';
-import { Check, Plus, Star, X } from 'lucide-react';
+import { resolveGameOfficialUrl } from '@/lib/tasteProfileEngine';
+import { Check, ExternalLink, Plus, Star, X } from 'lucide-react';
 
 export interface GameCompactTileProps {
   game: UnifiedSelectorGame;
@@ -79,21 +80,38 @@ export const GameCompactTile: React.FC<GameCompactTileProps> = ({
     >
       {/* Two-layer Steam 460x215 Cover Composition */}
       <div className="relative w-full aspect-[460/215] overflow-hidden rounded-t-[calc(var(--radius)-1px)] bg-background">
-        <img
-          src={resolvedCoverUrl}
-          alt=""
-          aria-hidden="true"
+        <a
+          href={resolveGameOfficialUrl({
+            name: game.name,
+            steamAppId: game.steamAppId,
+            coverUrl: game.coverUrl,
+            tags: game.tags,
+            id: game.key,
+          })}
+          target="_blank"
+          rel="noopener noreferrer"
           draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-md saturate-150"
-        />
-        <img
-          src={resolvedCoverUrl}
-          alt={game.name}
-          loading="lazy"
-          draggable={false}
-          onError={onFallbackImage}
-          className="relative z-10 h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03] select-none"
-        />
+          onClick={(e) => e.stopPropagation()}
+          title={`Ver página oficial de ${game.name}`}
+          aria-label={`Ver página oficial de ${game.name}`}
+          className="block h-full w-full cursor-pointer"
+        >
+          <img
+            src={resolvedCoverUrl}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-md saturate-150"
+          />
+          <img
+            src={resolvedCoverUrl}
+            alt={game.name}
+            loading="lazy"
+            draggable={false}
+            onError={onFallbackImage}
+            className="relative z-10 h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03] select-none"
+          />
+        </a>
 
         {/* Top-left: Selected Check / Plus + Podium Rank */}
         <div className="absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
@@ -153,9 +171,12 @@ export const GameCompactTile: React.FC<GameCompactTileProps> = ({
         )}
 
         {/* Bottom Overlay: Game Title */}
-        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/45 to-transparent px-2 py-1 pointer-events-none">
+        <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between gap-1.5 bg-gradient-to-t from-black/90 via-black/45 to-transparent px-2 py-1 pointer-events-none">
           <span className="text-[11px] font-semibold text-white truncate block">
             {game.name}
+          </span>
+          <span className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 rounded bg-background/80 border border-white/15 p-0.5 text-white/90">
+            <ExternalLink className="w-2.5 h-2.5" strokeWidth={1.75} />
           </span>
         </div>
       </div>

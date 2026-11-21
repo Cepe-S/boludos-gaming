@@ -37,10 +37,13 @@ function getMeshColors(themeId: ThemePaletteId): [string, string, string, string
 
 function destroyParticlesInstances() {
   if (typeof window === 'undefined') return;
-  if (Array.isArray(window.pJSDom)) {
-    while (window.pJSDom.length > 0) {
-      const instance = window.pJSDom.pop();
+  const instances = Array.isArray(window.pJSDom) ? [...window.pJSDom] : [];
+  window.pJSDom = [];
+  for (const instance of instances) {
+    try {
       instance?.pJS?.fn?.vendors?.destroypJS?.();
+    } catch {
+      // Ignore cleanup errors during StrictMode remounts
     }
   }
   // particles.js v2.0.0 sets `pJSDom = null` inside destroypJS(), which throws on `pJSDom.push(...)` on remount.
@@ -180,27 +183,49 @@ export const MeshBackground: React.FC = () => {
     if (!canvas) return;
 
     const initialTheme = getStoredTheme();
-    const gradient = new MeshGradient();
-    gradientRef.current = gradient;
+    let gradient: MeshGradient | null = null;
 
-    gradient.init(canvas, {
-      colors: getMeshColors(initialTheme),
-      animationSpeed: 0.6,
-      seed: 42,
-      darkenTop: true,
-    });
+    if (MeshGradient.isSupported()) {
+      try {
+        gradient = new MeshGradient();
+        gradientRef.current = gradient;
+        gradient.init(canvas, {
+          colors: getMeshColors(initialTheme),
+          animationSpeed: 0.6,
+          seed: 42,
+          darkenTop: true,
+        });
+      } catch {
+        gradient = null;
+        gradientRef.current = null;
+      }
+    }
 
-    mountParticles(initialTheme);
+    try {
+      mountParticles(initialTheme);
+    } catch {
+      // Ignore particles mount failure in restricted environments
+    }
 
     const handleThemeChange = (e: Event) => {
       const customEvent = e as CustomEvent<ThemePaletteId>;
       const nextTheme = customEvent.detail ?? getStoredTheme();
-      gradient.update({
-        colors: getMeshColors(nextTheme),
-        transition: true,
-        transitionDuration: 450,
-      });
-      mountParticles(nextTheme);
+      if (gradient) {
+        try {
+          gradient.update({
+            colors: getMeshColors(nextTheme),
+            transition: true,
+            transitionDuration: 450,
+          });
+        } catch {
+          // Ignore WebGL update failure
+        }
+      }
+      try {
+        mountParticles(nextTheme);
+      } catch {
+        // Ignore particles remount failure
+      }
     };
 
     window.addEventListener('boludos-theme-change', handleThemeChange);
@@ -208,7 +233,13 @@ export const MeshBackground: React.FC = () => {
     return () => {
       window.removeEventListener('boludos-theme-change', handleThemeChange);
       destroyParticlesInstances();
-      gradient.destroy();
+      if (gradient) {
+        try {
+          gradient.destroy();
+        } catch {
+          // Ignore WebGL destroy failure
+        }
+      }
       gradientRef.current = null;
     };
   }, []);

@@ -5,10 +5,11 @@ import {
   getSafeCoverUrl,
   handleImageFallback,
 } from '@/components/catalog/sharedCatalogConstants';
+import { resolveGameOfficialUrl } from '@/lib/tasteProfileEngine';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Info } from 'lucide-react';
+import { ExternalLink, Info } from 'lucide-react';
 
 export interface SessionTilePlayerAvatar {
   userId: string;
@@ -24,6 +25,10 @@ export interface SessionTilePlayerAvatar {
 export interface SessionGameTileProps {
   name: string;
   coverUrl?: string;
+  officialUrl?: string;
+  steamAppId?: number;
+  tags?: string[];
+  gameId?: string;
   score: number;
   rank?: number;
   isSelected?: boolean;
@@ -126,6 +131,10 @@ export const SessionPlayerAvatarRow: React.FC<{
 export const SessionGameTile: React.FC<SessionGameTileProps> = ({
   name,
   coverUrl,
+  officialUrl,
+  steamAppId,
+  tags,
+  gameId,
   score,
   rank,
   isSelected = false,
@@ -143,6 +152,15 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
   onSecondaryAction,
 }) => {
   const resolvedCoverUrl = getSafeCoverUrl(coverUrl);
+  const resolvedOfficialUrl =
+    officialUrl ||
+    resolveGameOfficialUrl({
+      name,
+      steamAppId,
+      coverUrl,
+      tags,
+      id: gameId,
+    });
 
   return (
     <div
@@ -157,24 +175,33 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
     >
       {/* Recycled Two-Layer Steam 460x215 Cover Composition */}
       <div className="relative w-full aspect-[460/215] overflow-hidden bg-background">
-        <img
-          src={resolvedCoverUrl}
-          alt=""
-          aria-hidden="true"
-          draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-md saturate-150"
-        />
-        <img
-          src={resolvedCoverUrl}
-          alt={name}
-          loading="lazy"
-          draggable={false}
-          onError={handleImageFallback}
-          className="relative z-10 h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03] select-none"
-        />
+        <a
+          href={resolvedOfficialUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Ver página oficial de ${name}`}
+          aria-label={`Ver página oficial de ${name}`}
+          className="block h-full w-full cursor-pointer"
+        >
+          <img
+            src={resolvedCoverUrl}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-md saturate-150"
+          />
+          <img
+            src={resolvedCoverUrl}
+            alt={name}
+            loading="lazy"
+            draggable={false}
+            onError={handleImageFallback}
+            className="relative z-10 h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03] select-none"
+          />
+        </a>
 
         {/* Top-left: Score & Rank/Status */}
-        <div className="absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
+        <div className="pointer-events-none absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
           {rank !== undefined && (
             <span className="px-1.5 py-0.5 rounded bg-background/85 backdrop-blur-sm border border-border text-[10px] font-mono font-bold text-foreground">
               #{rank}
@@ -196,11 +223,12 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
         </div>
 
         {/* Top-right: Info Hover Button */}
-        <div className="absolute top-1.5 right-1.5 z-20">
+        <div className="absolute top-1.5 right-1.5 z-30">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
+                onClick={(e) => e.stopPropagation()}
                 aria-label={`Detalles de ${name}`}
                 className="w-6 h-6 rounded-full bg-background/85 backdrop-blur-sm border border-border text-muted-foreground hover:text-foreground hover:border-primary/60 flex items-center justify-center transition-colors cursor-pointer"
               >
@@ -212,6 +240,14 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
             </TooltipContent>
           </Tooltip>
         </div>
+
+        {/* Bottom-right: Subtle ExternalLink badge */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-1.5 right-1.5 z-20 inline-flex items-center justify-center w-5 h-5 rounded bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          <ExternalLink className="w-3 h-3" strokeWidth={1.75} />
+        </span>
       </div>
 
       {/* Compact Body: Title + Action + Player Avatar Circles */}

@@ -18,6 +18,7 @@ import {
   GLOBAL_GAMES_KNOWLEDGE_BASE,
   KnowledgeGameEntry,
   normalizeGameName,
+  resolveGameOfficialUrl,
 } from '@/lib/tasteProfileEngine';
 import {
   SearchedSteamGame,
@@ -64,6 +65,7 @@ import {
   Clock,
   Copy,
   Crown,
+  ExternalLink,
   FolderKanban,
   Gamepad2,
   Hash,
@@ -1567,6 +1569,21 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
+                                  <a
+                                    href={resolveGameOfficialUrl({
+                                      name: game.name,
+                                      coverUrl: game.coverUrl,
+                                      tags: game.tags,
+                                      id: game.id,
+                                    })}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={`Ver página oficial de ${game.name}`}
+                                    aria-label={`Ver página oficial de ${game.name}`}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-background/60 text-muted-foreground hover:text-foreground hover:border-primary/60 transition-colors shrink-0"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                  </a>
                                   <Button
                                     size="xs"
                                     variant={inMyLibrary ? 'outline' : 'secondary'}
@@ -1722,17 +1739,31 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                                   className="p-2.5 rounded-lg bg-background/45 border border-border flex items-center justify-between gap-3 hover:border-primary/40 transition-colors"
                                 >
                                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    {candidate.coverUrl ? (
-                                      <img
-                                        src={candidate.coverUrl}
-                                        alt={candidate.name}
-                                        className="w-16 h-10 rounded object-cover shrink-0 border border-border/60"
-                                      />
-                                    ) : (
-                                      <div className="w-16 h-10 rounded bg-secondary/50 border border-border/60 flex items-center justify-center shrink-0 text-muted-foreground">
-                                        <Gamepad2 className="w-4 h-4" strokeWidth={1.75} />
-                                      </div>
-                                    )}
+                                    <a
+                                      href={resolveGameOfficialUrl({
+                                        name: candidate.name,
+                                        coverUrl: candidate.coverUrl,
+                                        tags: candidate.tags,
+                                        id: candidate.catalogGameId,
+                                      })}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={`Ver página oficial de ${candidate.name}`}
+                                      aria-label={`Ver página oficial de ${candidate.name}`}
+                                      className="shrink-0 block hover:opacity-90 transition-opacity"
+                                    >
+                                      {candidate.coverUrl ? (
+                                        <img
+                                          src={candidate.coverUrl}
+                                          alt={candidate.name}
+                                          className="w-16 h-10 rounded object-cover border border-border/60 block"
+                                        />
+                                      ) : (
+                                        <div className="w-16 h-10 rounded bg-secondary/50 border border-border/60 flex items-center justify-center text-muted-foreground">
+                                          <Gamepad2 className="w-4 h-4" strokeWidth={1.75} />
+                                        </div>
+                                      )}
+                                    </a>
 
                                     <div className="min-w-0 flex-1">
                                       <div className="flex items-center gap-2 flex-wrap">

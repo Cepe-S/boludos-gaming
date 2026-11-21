@@ -17,6 +17,7 @@ import {
   PlayerTasteProfile,
   PrecisionMinutes,
   PushNotificationAlert,
+  RecommendationVoteValue,
   SanctionRecord,
   UnifiedSelectorGame,
   UserGamePreference,
@@ -136,6 +137,12 @@ export interface AppContextValue {
   addAndLinkGameToGroup: (groupId: string, game: Omit<Game, 'id' | 'addedBy'>) => Game;
   testGroupDiscordWebhook: (groupId: string) => Promise<{ ok: boolean; error?: string }>;
   getGroupInviteLink: (inviteCode: string) => string;
+  voteGroupRecommendation: (
+    groupId: string,
+    recKey: string,
+    vote: RecommendationVoteValue | null,
+    gameName?: string
+  ) => void;
 
   // Sessions & Schedule Precision (±5, ±15, ±30, ±60 min)
   sessions: GamingSession[];
