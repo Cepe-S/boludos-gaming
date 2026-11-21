@@ -233,6 +233,8 @@ function mapParticipantRow(row: Record<string, unknown>): LolMatchParticipantSum
     isMvp: Boolean(row.is_mvp),
     isAce: Boolean(row.is_ace),
     highlights: Array.isArray(row.highlights) ? row.highlights.map(String) : [],
+    totalTimeSpentDead: Number(row.total_time_spent_dead ?? 0),
+    enemyMissingPings: Number(row.enemy_missing_pings ?? 0),
   };
 }
 
@@ -296,7 +298,7 @@ export async function fetchGroupLolData(memberIds: string[]): Promise<{
   const { data: participantRows, error: partError } = await supabase
     .from('lol_match_participants')
     .select(
-      'match_id, puuid, participant_id, team_id, riot_id_game_name, riot_id_tag_line, summoner_name, champion_id, champion_name, champ_level, team_position, individual_position, win, game_ended_in_surrender, game_ended_in_early_surrender, team_early_surrendered, outcome, enemy_surrendered, kills, deaths, assists, kda, cs, cs_per_min, gold_earned, damage_to_champions, damage_taken, damage_to_objectives, damage_to_turrets, vision_score, kill_participation, summoner1_id, summoner2_id, primary_rune_id, primary_style_id, sub_style_id, items, performance_score, performance_grade, performance_breakdown, match_rank, is_mvp, is_ace, highlights'
+      'match_id, puuid, participant_id, team_id, riot_id_game_name, riot_id_tag_line, summoner_name, champion_id, champion_name, champ_level, team_position, individual_position, win, game_ended_in_surrender, game_ended_in_early_surrender, team_early_surrendered, outcome, enemy_surrendered, kills, deaths, assists, kda, cs, cs_per_min, gold_earned, damage_to_champions, damage_taken, damage_to_objectives, damage_to_turrets, vision_score, kill_participation, summoner1_id, summoner2_id, primary_rune_id, primary_style_id, sub_style_id, items, performance_score, performance_grade, performance_breakdown, match_rank, is_mvp, is_ace, highlights, total_time_spent_dead:raw_participant->>totalTimeSpentDead, enemy_missing_pings:raw_participant->>enemyMissingPings'
     )
     .in('match_id', matchIds);
 

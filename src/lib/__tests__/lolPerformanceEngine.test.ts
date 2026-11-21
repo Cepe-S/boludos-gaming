@@ -4,6 +4,8 @@ import {
   classifyMatchOutcome,
   computeDurationBuckets,
   computeGroupLeaderboard,
+  computeGroupLeaderboardByRole,
+  computeGroupRecords,
   computePlayerAggregates,
   countGroupMembersInMatch,
   getGradeFromScore,
@@ -920,6 +922,143 @@ describe('BG-PERF v2 LoL Performance Engine', () => {
       expect(u4Entry.groupGamesTotal).toBe(1);
       expect(u4Entry.groupRankScore).toBe(0);
       expect(u4Entry.personalGamesTotal).toBe(2);
+    });
+
+    it('computes role leaderboard by lane (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY) excluding remakes and non-group matches', () => {
+      const accounts: LolAccount[] = [
+        makeAccount({ userId: 'u1', puuid: 'p1', gameName: 'Santi' }),
+        makeAccount({ userId: 'u2', puuid: 'p2', gameName: 'Fede' }),
+        makeAccount({ userId: 'u3', puuid: 'p3', gameName: 'Tincho' }),
+      ];
+
+      const profiles = [
+        { id: 'u1', displayName: 'Santi', avatarUrl: '' },
+        { id: 'u2', displayName: 'Fede', avatarUrl: '' },
+        { id: 'u3', displayName: 'Tincho', avatarUrl: '' },
+      ];
+
+      const mGroup1 = buildSyntheticSummary({
+        matchId: 'lane-grp-1',
+        puuids: ['p1', 'p2', 'p3'],
+        playerSpecs: [
+          { puuid: 'p1', win: true, score: 85, championName: 'Ahri' },
+          { puuid: 'p2', win: true, score: 78, championName: 'LeeSin' },
+          { puuid: 'p3', win: true, score: 72, championName: 'Jinx' },
+        ],
+      });
+      mGroup1.participants[0].performanceBreakdown.role = 'MIDDLE';
+      mGroup1.participants[1].performanceBreakdown.role = 'JUNGLE';
+      mGroup1.participants[2].performanceBreakdown.role = 'BOTTOM';
+
+      // u2 plays stronger MID in one group game than u1 does in another, or u1 plays 4 MID games and wins
+      const mGroup2 = buildSyntheticSummary({
+        matchId: 'lane-grp-2',
+        puuids: ['p1', 'p2'],
+        playerSpecs: [
+          { puuid: 'p1', win: true, score: 88, championName: 'Sylas' },
+          { puuid: 'p2', win: true, score: 65, championName: 'Darius' },
+        ],
+      });
+      mGroup2.participants[0].performanceBreakdown.role = 'MIDDLE';
+      mGroup2.participants[1].performanceBreakdown.role = 'TOP';
+
+      // Solo match on JUNGLE by u3 should NOT appear in >=2 group role leaderboard
+      const mSolo = buildSyntheticSummary({
+        matchId: 'lane-solo-1',
+        puuids: ['p3', 'random'],
+        playerSpecs: [{ puuid: 'p3', win: true, score: 99, championName: 'Garen' }],
+      });
+      mSolo.participants[0].performanceBreakdown.role = 'TOP';
+
+      // ARAM group match should NOT pollute Rift lanes
+      const mAram = buildSyntheticSummary({
+        matchId: 'lane-aram-1',
+        puuids: ['p1', 'p2'],
+        queueId: 450,
+        playerSpecs: [
+          { puuid: 'p1', win: true, score: 90 },
+          { puuid: 'p2', win: true, score: 80 },
+        ],
+      });
+      mAram.participants[0].performanceBreakdown.role = 'ARAM';
+      mAram.participants[1].performanceBreakdown.role = 'ARAM';
+
+      const byRole = computeGroupLeaderboardByRole({
+        matches: [mGroup1, mGroup2, mSolo, mAram],
+        accounts,
+        playerProfiles: profiles,
+      });
+
+      expect(byRole.MIDDLE).toHaveLength(1);
+      expect(byRole.MIDDLE[0].userId).toBe('u1');
+      expect(byRole.MIDDLE[0].games).toBe(2);
+      expect(byRole.JUNGLE).toHaveLength(1);
+      expect(byRole.JUNGLE[0].userId).toBe('u2');
+      expect(byRole.TOP).toHaveLength(1);
+      expect(byRole.TOP[0].userId).toBe('u2'); // u3 solo TOP excluded
+      expect(byRole.BOTTOM).toHaveLength(1);
+      expect(byRole.BOTTOM[0].userId).toBe('u3');
+      expect(byRole.UTILITY).toHaveLength(0);
+    });
+
+    it('computes group records (most_time_dead, highest_kp, most_kills, least_kills, best_kda, highest_ff_rate, most_mia_pings, best_single_game)', () => {
+      const accounts: LolAccount[] = [
+        makeAccount({ userId: 'u1', puuid: 'p1', gameName: 'Carry' }),
+        makeAccount({ userId: 'u2', puuid: 'p2', gameName: 'Supp' }),
+        makeAccount({ userId: 'u3', puuid: 'p3', gameName: 'Feeder' }),
+      ];
+
+      const profiles = [
+        { id: 'u1', displayName: 'Carry', avatarUrl: '' },
+        { id: 'u2', displayName: 'Supp', avatarUrl: '' },
+        { id: 'u3', displayName: 'Feeder', avatarUrl: '' },
+      ];
+
+      const m1 = buildSyntheticSummary({
+        matchId: 'rec-grp-1',
+        puuids: ['p1', 'p2', 'p3'],
+        gameDuration: 1800,
+        playerSpecs: [
+          { puuid: 'p1', win: false, surrender: true, kills: 14, deaths: 2, assists: 8, score: 91, championName: 'Jinx' },
+          { puuid: 'p2', win: false, surrender: true, kills: 1, deaths: 2, assists: 21, score: 80, championName: 'Thresh' },
+          { puuid: 'p3', win: false, surrender: true, kills: 2, deaths: 11, assists: 3, score: 34, championName: 'Yasuo' },
+        ],
+      });
+      // Carry: KDA 11, KP 0.65, low dead time
+      m1.participants[0].killParticipation = 0.72;
+      m1.participants[0].totalTimeSpentDead = 45;
+      m1.participants[0].enemyMissingPings = 3;
+      // Supp: KP 0.90, highest vision
+      m1.participants[1].killParticipation = 0.9;
+      m1.participants[1].visionScore = 75;
+      m1.participants[1].totalTimeSpentDead = 50;
+      m1.participants[1].enemyMissingPings = 1;
+      // Feeder: highest dead time & MIA pings
+      m1.participants[2].killParticipation = 0.25;
+      m1.participants[2].totalTimeSpentDead = 420;
+      m1.participants[2].enemyMissingPings = 18;
+
+      const records = computeGroupRecords({
+        matches: [m1],
+        accounts,
+        playerProfiles: profiles,
+        scope: 'group',
+      });
+
+      const byId = new Map(records.map((r) => [r.id, r]));
+      expect(byId.get('most_time_dead')?.userId).toBe('u3');
+      expect(byId.get('most_time_dead')?.valueLabel).toBe('7m 00s/g');
+      expect(byId.get('highest_kp')?.userId).toBe('u2');
+      expect(byId.get('highest_kp')?.valueLabel).toBe('90%');
+      expect(byId.get('most_kills')?.userId).toBe('u1');
+      expect(byId.get('least_kills')?.userId).toBe('u2');
+      expect(byId.get('best_kda')?.userId).toBe('u1'); // (14+8)/2 = 11 == (1+21)/2 = 11, u1 first
+      expect(byId.get('most_deaths')?.userId).toBe('u3');
+      expect(byId.get('highest_vision')?.userId).toBe('u2');
+      expect(byId.get('highest_ff_rate')?.tone).toBe('ff');
+      expect(byId.get('most_mia_pings')?.userId).toBe('u3');
+      expect(byId.get('best_single_game')?.userId).toBe('u1');
+      expect(byId.get('best_single_game')?.matchId).toBe('rec-grp-1');
     });
   });
 });

@@ -75,12 +75,26 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
   const team100Summary = match.teams.find((t) => t.teamId === 100);
   const team200Summary = match.teams.find((t) => t.teamId === 200);
 
+  const eventMs =
+    match.gameEndTimestamp && match.gameEndTimestamp > 0
+      ? match.gameEndTimestamp
+      : (match.gameStartTimestamp > 0 ? match.gameStartTimestamp : match.gameCreation) +
+        match.gameDuration * 1000;
+  const eventTimeLabel =
+    Number.isFinite(eventMs) && eventMs > 0
+      ? new Date(eventMs).toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        })
+      : '';
+
   const groupMates = match.participants.filter((p) => groupPuuids.has(p.puuid));
 
   const content = (
     <div
       style={{ left: `${position.left}px`, top: `${position.top}px`, width: `${cardWidth}px` }}
-      className="fixed z-[70] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-3 text-popover-foreground shadow-[0_20px_56px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2.5 animate-in fade-in duration-100"
+      className="fixed z-[70] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-3 text-popover-foreground shadow-[0_20px_56px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2.5"
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/80">
@@ -95,8 +109,14 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground shrink-0">
-          <span>{formatDuration(match.gameDuration)}</span>
+        <div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground shrink-0">
+          <span>Min {Math.round(match.gameDuration / 60)} ({formatDuration(match.gameDuration)})</span>
+          {eventTimeLabel && (
+            <>
+              <span>·</span>
+              <span className="text-foreground font-semibold">{eventTimeLabel}hs</span>
+            </>
+          )}
           <span>·</span>
           <span>{formatRelativeTime(match.gameCreation)}</span>
         </div>
@@ -188,7 +208,7 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
       </div>
 
       {/* 6 Pillars */}
-      <LolPillarBars pillars={participant.performanceBreakdown.pillars} compact />
+      <LolPillarBars pillars={participant.performanceBreakdown.pillars} compact showInfo={false} />
 
       {/* Team Score + Objectives + Group Mates */}
       <div className="pt-1.5 border-t border-border/70 space-y-1.5">
@@ -218,7 +238,7 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
                 className={cn(
                   'flex items-center gap-1 px-1 py-0.5 rounded border text-[9px] truncate',
                   isTarget
-                    ? 'border-amber-400/70 bg-amber-400/10 text-amber-200'
+                    ? 'border-cyan-400/75 bg-cyan-400/15 text-cyan-200'
                     : isGroup
                       ? 'border-primary/60 bg-primary/10 text-primary'
                       : 'border-border/70 bg-background/40 text-muted-foreground'

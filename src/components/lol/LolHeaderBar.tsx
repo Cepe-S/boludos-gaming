@@ -91,7 +91,7 @@ export interface LolHeaderBarProps {
   userGroups: GamingGroup[];
   activeGroup: GamingGroup | null;
   onSelectGroup: (groupId: string) => void;
-  groupMembers: PlayerProfile[];
+  groupMembers: Array<Pick<PlayerProfile, 'id' | 'displayName' | 'avatarUrl'>>;
   accounts: LolAccount[];
   selectedUserId: string | null;
   onSelectUser: (userId: string) => void;

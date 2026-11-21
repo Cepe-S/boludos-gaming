@@ -594,11 +594,32 @@ function buildDemoParticipant(params: {
   };
 }
 
+export interface DemoLolMember {
+  id: string;
+  displayName: string;
+  avatarUrl: string;
+}
+
 export function buildDemoLolDataset(groupMembers: PlayerProfile[]): {
+  members: DemoLolMember[];
   accounts: LolAccount[];
   matches: LolMatchSummary[];
 } {
-  const usableMembers = groupMembers.slice(0, 5);
+  const usableMembers: DemoLolMember[] = groupMembers.slice(0, 5).map((m) => ({
+    id: m.id,
+    displayName: m.displayName,
+    avatarUrl: m.avatarUrl,
+  }));
+
+  while (usableMembers.length < DEMO_TEMPLATES.length) {
+    const tpl = DEMO_TEMPLATES[usableMembers.length];
+    usableMembers.push({
+      id: `demo-member-${usableMembers.length + 1}`,
+      displayName: tpl.gameName,
+      avatarUrl: `https://ddragon.leagueoflegends.com/cdn/${DEFAULT_DDRAGON_VERSION}/img/profileicon/${tpl.profileIconId}.png`,
+    });
+  }
+
   const nowIso = new Date().toISOString();
 
   const accounts: LolAccount[] = usableMembers.map((member, idx) => {
@@ -636,7 +657,7 @@ export function buildDemoLolDataset(groupMembers: PlayerProfile[]): {
   });
 
   if (accounts.length === 0) {
-    return { accounts: [], matches: [] };
+    return { members: [], accounts: [], matches: [] };
   }
 
   const baseRoles = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'] as const;
@@ -870,5 +891,5 @@ export function buildDemoLolDataset(groupMembers: PlayerProfile[]): {
     return buildMatchSummaryFromRiotMatch(rawMatch, true);
   });
 
-  return { accounts, matches };
+  return { members: usableMembers, accounts, matches };
 }

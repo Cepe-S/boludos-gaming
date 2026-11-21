@@ -4,8 +4,11 @@ import { buildDemoLolDataset } from '@/lib/lolDemoData';
 import { DEFAULT_DDRAGON_VERSION, loadDdragonRunesAndSpells } from '@/lib/lolDdragon';
 import {
   computeGroupLeaderboard,
+  computeGroupLeaderboardByRole,
+  computeGroupRecords,
   computePlayerAggregates,
   getQueueCategory,
+  isGroupMatch,
 } from '@/lib/lolPerformanceEngine';
 import {
   fetchGroupLolData,
@@ -21,6 +24,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { LolAccount, LolMatchSummary, LolPlatform, LolQueueCategory } from '@/types/lol';
 import { LolDurationScatterPanel } from './lol/LolDurationScatterPanel';
 import { LolGroupLeaderboard } from './lol/LolGroupLeaderboard';
+import { LolGroupRecordsPanel } from './lol/LolGroupRecordsPanel';
 import { LolHeaderBar } from './lol/LolHeaderBar';
 import { LolMatchDetailModal } from './lol/LolMatchDetailModal';
 import { LolRecentMatchesList } from './lol/LolRecentMatchesList';
@@ -48,6 +52,7 @@ export const LeagueOfLegendsView: React.FC = () => {
 
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [queueFilter, setQueueFilter] = useState<LolQueueCategory>('all');
+  const [recordsScope, setRecordsScope] = useState<'group' | 'all'>('group');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
 
@@ -134,6 +139,7 @@ export const LeagueOfLegendsView: React.FC = () => {
 
   const demoData = useMemo(() => buildDemoLolDataset(groupMembers), [groupMembers]);
 
+  const activeMembers = isDemoMode ? demoData.members : groupMembers;
   const activeAccounts = isDemoMode ? demoData.accounts : liveAccounts;
   const activeMatches = isDemoMode ? demoData.matches : liveMatches;
 
@@ -160,8 +166,8 @@ export const LeagueOfLegendsView: React.FC = () => {
   );
 
   const selectedMemberProfile = useMemo(
-    () => groupMembers.find((m) => m.id === selectedAccount?.userId) ?? currentUser,
-    [groupMembers, selectedAccount, currentUser]
+    () => activeMembers.find((m) => m.id === selectedAccount?.userId) ?? currentUser,
+    [activeMembers, selectedAccount, currentUser]
   );
 
   const groupPuuids = useMemo(
@@ -196,10 +202,38 @@ export const LeagueOfLegendsView: React.FC = () => {
       computeGroupLeaderboard({
         matches: activeMatches,
         accounts: activeAccounts,
-        playerProfiles: groupMembers,
+        playerProfiles: activeMembers,
         queueFilter,
       }),
-    [activeMatches, activeAccounts, groupMembers, queueFilter]
+    [activeMatches, activeAccounts, activeMembers, queueFilter]
+  );
+
+  const roleLeaderboard = useMemo(
+    () =>
+      computeGroupLeaderboardByRole({
+        matches: activeMatches,
+        accounts: activeAccounts,
+        playerProfiles: activeMembers,
+        queueFilter,
+      }),
+    [activeMatches, activeAccounts, activeMembers, queueFilter]
+  );
+
+  const hasGroupMatches = useMemo(
+    () => queueFilteredMatches.some((m) => isGroupMatch(m, groupPuuids)),
+    [queueFilteredMatches, groupPuuids]
+  );
+
+  const groupRecords = useMemo(
+    () =>
+      computeGroupRecords({
+        matches: activeMatches,
+        accounts: activeAccounts,
+        playerProfiles: activeMembers,
+        queueFilter,
+        scope: recordsScope,
+      }),
+    [activeMatches, activeAccounts, activeMembers, queueFilter, recordsScope]
   );
 
   const selectedMatch = useMemo(
@@ -311,7 +345,7 @@ export const LeagueOfLegendsView: React.FC = () => {
         userGroups={userGroups}
         activeGroup={activeGroup}
         onSelectGroup={setActiveGroupId}
-        groupMembers={groupMembers}
+        groupMembers={activeMembers}
         accounts={activeAccounts}
         selectedUserId={selectedAccount?.userId ?? selectedUserId}
         onSelectUser={(uid) => {
@@ -395,31 +429,57 @@ export const LeagueOfLegendsView: React.FC = () => {
             ddragonVersion={ddragonVersion}
           />
 
-          <LolDurationScatterPanel
-            matches={queueFilteredMatches}
-            targetPuuid={selectedAccount.puuid}
-            groupPuuids={groupPuuids}
-            accountByPuuid={accountByPuuid}
-            ddragonVersion={ddragonVersion}
-            onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
-          />
+          {/* Bento Row 3: Compact Recent Matches (left) + Unified Time vs Duration Scatter (right) */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+            <div className="xl:col-span-7 min-w-0">
+              <LolRecentMatchesList
+                matches={queueFilteredMatches}
+                targetPuuid={selectedAccount.puuid}
+                groupPuuids={groupPuuids}
+                accountByPuuid={accountByPuuid}
+                ddragonVersion={ddragonVersion}
+                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+              />
+            </div>
 
-          <LolRecentMatchesList
-            matches={queueFilteredMatches}
-            targetPuuid={selectedAccount.puuid}
-            groupPuuids={groupPuuids}
-            accountByPuuid={accountByPuuid}
-            ddragonVersion={ddragonVersion}
-            onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
-          />
+            <div className="xl:col-span-5 min-w-0">
+              <LolDurationScatterPanel
+                matches={queueFilteredMatches}
+                targetPuuid={selectedAccount.puuid}
+                groupPuuids={groupPuuids}
+                accountByPuuid={accountByPuuid}
+                ddragonVersion={ddragonVersion}
+                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+              />
+            </div>
+          </div>
 
-          <LolGroupLeaderboard
-            entries={leaderboardEntries}
-            selectedUserId={selectedAccount.userId}
-            queueFilter={queueFilter}
-            ddragonVersion={ddragonVersion}
-            onSelectPlayer={(uid) => setSelectedUserId(uid)}
-          />
+          {/* Bento Row 4: Compact Group Leaderboard + Role Leaders (left) + Group Records (right) */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+            <div className="xl:col-span-6 min-w-0">
+              <LolGroupLeaderboard
+                entries={leaderboardEntries}
+                roleLeaderboard={roleLeaderboard}
+                selectedUserId={selectedAccount.userId}
+                queueFilter={queueFilter}
+                ddragonVersion={ddragonVersion}
+                onSelectPlayer={(uid) => setSelectedUserId(uid)}
+              />
+            </div>
+
+            <div className="xl:col-span-6 min-w-0">
+              <LolGroupRecordsPanel
+                records={groupRecords}
+                scope={recordsScope}
+                onChangeScope={setRecordsScope}
+                hasGroupMatches={hasGroupMatches}
+                selectedUserId={selectedAccount.userId}
+                ddragonVersion={ddragonVersion}
+                onSelectPlayer={(uid) => setSelectedUserId(uid)}
+                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+              />
+            </div>
+          </div>
         </>
       )}
 

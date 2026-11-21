@@ -28,7 +28,7 @@ export function App() {
 
   if (!isAuthenticated) {
     return (
-      <TooltipProvider delayDuration={200}>
+      <TooltipProvider delayDuration={0} skipDelayDuration={0}>
         <MeshBackground />
         <WelcomeAuthView />
       </TooltipProvider>
@@ -36,7 +36,7 @@ export function App() {
   }
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <TooltipProvider delayDuration={0} skipDelayDuration={0}>
       <MeshBackground />
       <div className="relative min-h-screen text-foreground flex flex-col">
         {/* Global Full-Width GitHub-Style Top Header */}

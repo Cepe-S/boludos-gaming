@@ -450,6 +450,8 @@ export interface LolMatchParticipantSummary {
   isMvp: boolean;
   isAce: boolean;
   highlights: string[];
+  totalTimeSpentDead?: number;
+  enemyMissingPings?: number;
   rawParticipant?: RiotMatchV5Participant;
 }
 
@@ -569,4 +571,58 @@ export interface LolGroupLeaderboardEntry {
     gamesTogether: number;
     winRateTogether: number;
   } | null;
+}
+
+export type LolRiftRoleKey = 'TOP' | 'JUNGLE' | 'MIDDLE' | 'BOTTOM' | 'UTILITY';
+
+export interface LolRoleLeaderboardEntry {
+  role: LolRiftRoleKey;
+  userId: string;
+  displayName: string;
+  avatarUrl: string;
+  account: LolAccount;
+  roleRankScore: number;
+  avgPerformance: number;
+  games: number;
+  wins: number;
+  losses: number;
+  ffs: number;
+  winRate: number;
+  avgKda: number;
+  mvpCount: number;
+  topChampion: LolChampionSummary | null;
+}
+
+export type LolRoleLeaderboardByLane = Record<LolRiftRoleKey, LolRoleLeaderboardEntry[]>;
+
+export type LolGroupRecordTone = 'good' | 'bad' | 'ff' | 'fun';
+
+export type LolGroupRecordId =
+  | 'most_time_dead'
+  | 'highest_kp'
+  | 'most_kills'
+  | 'least_kills'
+  | 'best_kda'
+  | 'most_deaths'
+  | 'highest_dpm'
+  | 'highest_cs_min'
+  | 'highest_vision'
+  | 'highest_ff_rate'
+  | 'most_mia_pings'
+  | 'best_single_game';
+
+export interface LolGroupRecordEntry {
+  id: LolGroupRecordId;
+  title: string;
+  description: string;
+  tone: LolGroupRecordTone;
+  valueLabel: string;
+  subLabel: string;
+  userId: string;
+  displayName: string;
+  avatarUrl: string;
+  gameName: string;
+  gamesSample: number;
+  championName?: string;
+  matchId?: string;
 }

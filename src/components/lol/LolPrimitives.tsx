@@ -23,18 +23,166 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { Info } from 'lucide-react';
+
+export const LOL_FF_BADGE_CLASS =
+  'border-[#9F1239] bg-[#4C0519]/95 text-[#FDA4AF]';
+export const LOL_FF_TEXT_CLASS = 'text-[#FB7185]';
+export const LOL_FF_CHIP_CLASS =
+  'inline-flex items-center px-1 rounded border border-[#9F1239]/80 bg-[#4C0519]/85 text-[#FDA4AF]';
+export const LOL_FF_BAR_CLASS = 'bg-[#881337]';
+export const LOL_WIN_DOT_FILL = '#20B26B';
+export const LOL_LOSS_DOT_FILL = '#EF4444';
+export const LOL_FF_DOT_FILL = '#881337';
+export const LOL_FF_DOT_STROKE = '#FB7185';
+
+export interface LolStatGlossaryEntry {
+  acronym: string;
+  title: string;
+  description: string;
+}
+
+export const LOL_STAT_GLOSSARY = {
+  bgPerf: {
+    acronym: 'BG-PERF',
+    title: 'Performance Boludos Gaming',
+    description:
+      'Puntaje de 0 a 100 ponderado por rol que evalúa combate, impacto, economía, objetivos, visión y dominio.',
+  },
+  wr: {
+    acronym: 'WR',
+    title: 'Win Rate',
+    description:
+      'Porcentaje de victorias sobre el total de partidas válidas (excluye remakes).',
+  },
+  kda: {
+    acronym: 'KDA',
+    title: 'Kills / Deaths / Assists',
+    description:
+      'Ratio promedio de bajas y asistencias por muerte: (K + A) / max(1, D).',
+  },
+  kp: {
+    acronym: 'KP%',
+    title: 'Kill Participation',
+    description:
+      'Porcentaje de las bajas totales de tu equipo en las que participaste.',
+  },
+  csMin: {
+    acronym: 'CS/m',
+    title: 'Creep Score por Minuto',
+    description:
+      'Promedio de súbditos y monstruos de jungla farmeados cada minuto.',
+  },
+  dpm: {
+    acronym: 'DPM',
+    title: 'Damage Per Minute',
+    description:
+      'Daño promedio infligido a campeones enemigos por minuto de partida.',
+  },
+  gpm: {
+    acronym: 'GPM',
+    title: 'Gold Per Minute',
+    description: 'Oro promedio ganado por minuto durante la partida.',
+  },
+  visMin: {
+    acronym: 'Vis/m',
+    title: 'Visión por Minuto',
+    description:
+      'Puntuación de visión obtenida por minuto (centinelas colocados, limpiados y pinks).',
+  },
+  mvp: {
+    acronym: 'MVP',
+    title: 'Most Valuable Player',
+    description: 'Jugador con mayor puntaje BG-PERF del equipo ganador.',
+  },
+  ace: {
+    acronym: 'ACE',
+    title: 'Mejor del Equipo Perdedor',
+    description: 'Jugador con mayor puntaje BG-PERF del equipo derrotado.',
+  },
+  ff: {
+    acronym: 'FF',
+    title: 'Forfeit / Rendición',
+    description: 'Derrota por votación anticipada de rendición del equipo.',
+  },
+} as const satisfies Record<string, LolStatGlossaryEntry>;
+
+export const LolInfoTip: React.FC<{
+  acronym: string;
+  title: string;
+  description: string;
+  className?: string;
+}> = ({ acronym, title, description, className }) => (
+  <Tooltip delayDuration={0}>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`${acronym}: ${title}`}
+        className={cn(
+          'inline-flex items-center justify-center text-muted-foreground/75 hover:text-foreground transition-colors cursor-help align-middle shrink-0',
+          className
+        )}
+      >
+        <Info className="w-3 h-3" strokeWidth={1.75} />
+      </button>
+    </TooltipTrigger>
+    <TooltipContent
+      side="top"
+      className="max-w-[230px] text-left space-y-0.5 py-1.5 px-2.5 z-[80]"
+    >
+      <div className="text-[11px] font-bold text-foreground leading-tight">
+        {acronym} — {title}
+      </div>
+      <p className="text-[10px] font-normal text-muted-foreground leading-snug">
+        {description}
+      </p>
+    </TooltipContent>
+  </Tooltip>
+);
 
 export const PILLAR_META: Array<{
   key: keyof LolPerformancePillarScores;
   label: string;
   short: string;
+  description: string;
 }> = [
-  { key: 'combat', label: 'Combate', short: 'CMB' },
-  { key: 'impact', label: 'Impacto', short: 'IMP' },
-  { key: 'economy', label: 'Economía', short: 'ECO' },
-  { key: 'objectives', label: 'Objetivos', short: 'OBJ' },
-  { key: 'vision', label: 'Visión', short: 'VIS' },
-  { key: 'dominance', label: 'Dominio', short: 'DOM' },
+  {
+    key: 'combat',
+    label: 'Combate',
+    short: 'CMB',
+    description: 'KDA, participación en kills (KP%), multi-kills y penalización por tiempo muerto.',
+  },
+  {
+    key: 'impact',
+    label: 'Impacto',
+    short: 'IMP',
+    description: 'Daño/min, % daño del equipo, mitigación frontline y curación/escudos/CC.',
+  },
+  {
+    key: 'economy',
+    label: 'Economía',
+    short: 'ECO',
+    description: 'CS/min y GPM calibrados por rol, eficiencia de gasto y ventaja temprana.',
+  },
+  {
+    key: 'objectives',
+    label: 'Objetivos',
+    short: 'OBJ',
+    description: 'Daño a torres y objetivos épicos, dragones, barones, heraldos y robos.',
+  },
+  {
+    key: 'vision',
+    label: 'Visión',
+    short: 'VIS',
+    description: 'Visión/min, wards de control comprados/puestos y limpieza de visión.',
+  },
+  {
+    key: 'dominance',
+    label: 'Dominio',
+    short: 'DOM',
+    description: 'Diferencial directo frente a tu rival de línea y percentil global del game.',
+  },
 ];
 
 export const LolChampionAvatar: React.FC<{
@@ -64,7 +212,7 @@ export const LolChampionAvatar: React.FC<{
 
   const ringClasses: Record<NonNullable<typeof ring>, string> = {
     none: 'border-border',
-    user: 'border-amber-400 ring-2 ring-amber-400/50',
+    user: 'border-cyan-300 ring-2 ring-cyan-400/75 shadow-[0_0_8px_rgba(34,211,238,0.35)]',
     group: 'border-primary ring-2 ring-primary/50',
     team100: 'border-sky-500/60',
     team200: 'border-rose-500/60',
@@ -138,7 +286,7 @@ export const LolSpellsRunesBadge: React.FC<{
     roundedFull = false,
     fallbackText = '?'
   ) => (
-    <Tooltip>
+    <Tooltip delayDuration={0}>
       <TooltipTrigger asChild>
         <div
           className={cn(
@@ -234,7 +382,7 @@ export const LolOutcomeBadge: React.FC<{
     outcome === 'win'
       ? 'success'
       : outcome === 'ff'
-        ? 'warning'
+        ? 'outline'
         : outcome === 'remake'
           ? 'secondary'
           : 'destructive';
@@ -254,13 +402,19 @@ export const LolOutcomeBadge: React.FC<{
 
   return (
     <span className="inline-flex items-center gap-1 shrink-0">
-      <Badge variant={variant} className="font-mono tracking-wide px-1.5 py-0 text-[10px]">
+      <Badge
+        variant={variant}
+        className={cn(
+          'font-mono tracking-wide px-1.5 py-0 text-[10px]',
+          outcome === 'ff' && LOL_FF_BADGE_CLASS
+        )}
+      >
         {label}
       </Badge>
       {outcome === 'win' && enemySurrendered && (
         <Badge
           variant="outline"
-          className="px-1.5 py-0 text-[9px] font-mono border-warning/40 text-warning"
+          className="px-1.5 py-0 text-[9px] font-mono border-[#9F1239]/70 bg-[#4C0519]/60 text-[#FDA4AF]"
           title="El equipo rival se rindió"
         >
           Enemy FF
@@ -335,7 +489,8 @@ export const LolPillarBars: React.FC<{
   pillars: LolPerformancePillarScores;
   weights?: LolPerformancePillarScores;
   compact?: boolean;
-}> = ({ pillars, weights, compact = false }) => {
+  showInfo?: boolean;
+}> = ({ pillars, weights, compact = false, showInfo = true }) => {
   const getBarColor = (val: number) => {
     if (val >= 78) return 'bg-success';
     if (val >= 58) return 'bg-primary';
@@ -350,14 +505,23 @@ export const LolPillarBars: React.FC<{
         const weight = weights ? Math.round((weights[item.key] ?? 0) * 100) : null;
         return (
           <div key={item.key} className="space-y-0.5">
-            <div className="flex items-center justify-between text-[10px] font-mono">
-              <span className="text-muted-foreground truncate">
-                {compact ? item.short : item.label}
+            <div className="flex items-center justify-between text-[10px] font-mono gap-1">
+              <span className="inline-flex items-center gap-1 text-muted-foreground min-w-0">
+                <span className="truncate">
+                  {compact ? item.short : item.label}
+                </span>
+                {showInfo && (
+                  <LolInfoTip
+                    acronym={item.short}
+                    title={item.label}
+                    description={item.description}
+                  />
+                )}
                 {weight !== null && weight > 0 ? (
-                  <span className="opacity-60 ml-1">{weight}%</span>
+                  <span className="opacity-60">{weight}%</span>
                 ) : null}
               </span>
-              <span className="text-foreground font-semibold">{val}</span>
+              <span className="text-foreground font-semibold shrink-0">{val}</span>
             </div>
             <div className="h-1 rounded-full bg-secondary overflow-hidden">
               <div

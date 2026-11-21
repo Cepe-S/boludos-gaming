@@ -25,10 +25,9 @@ import {
   LolSpellsRunesBadge,
 } from './LolPrimitives';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Eye, Swords, Users } from 'lucide-react';
+import { Eye, Swords, Users } from 'lucide-react';
 
 export interface LolRecentMatchesListProps {
   matches: LolMatchSummary[];
@@ -81,7 +80,7 @@ const ParticipantHoverPortal: React.FC<{
   const card = (
     <div
       style={{ left: `${left}px`, top: `${top}px`, width: `${width}px` }}
-      className="fixed z-[75] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-2.5 text-popover-foreground shadow-[0_20px_50px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2 animate-in fade-in duration-100"
+      className="fixed z-[75] pointer-events-none rounded-md border border-white/15 bg-popover/95 backdrop-blur-xl p-2.5 text-popover-foreground shadow-[0_20px_50px_-10px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 space-y-2"
     >
       {/* Top identity */}
       <div className="flex items-start justify-between gap-2 pb-1.5 border-b border-border/80">
@@ -91,7 +90,15 @@ const ParticipantHoverPortal: React.FC<{
             level={participant.champLevel}
             version={ddragonVersion}
             size="sm"
-            ring={isInspectedUser ? 'user' : groupAccount ? 'group' : participant.teamId === 100 ? 'team100' : 'team200'}
+            ring={
+              isInspectedUser
+                ? 'user'
+                : groupAccount
+                  ? 'group'
+                  : participant.teamId === 100
+                    ? 'team100'
+                    : 'team200'
+            }
           />
           <div className="min-w-0">
             <div className="flex items-center gap-1 flex-wrap">
@@ -214,7 +221,6 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
 }) => {
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
   const [onlyGroup, setOnlyGroup] = useState(false);
-  const [visibleLimit, setVisibleLimit] = useState(15);
 
   const [hoveredParticipant, setHoveredParticipant] =
     useState<HoveredParticipantInfo | null>(null);
@@ -254,13 +260,11 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
     return out;
   }, [matches, targetPuuid, groupPuuids, outcomeFilter, onlyGroup]);
 
-  const visibleRows = filteredRows.slice(0, visibleLimit);
-
   return (
-    <Card>
-      <CardHeader className="pb-2.5">
+    <Card className="h-full flex flex-col">
+      <CardHeader className="pb-2 pt-3 px-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
             <Swords className="w-4 h-4 text-primary" strokeWidth={1.75} />
             <span>Partidas Recientes</span>
             <Badge variant="secondary" className="font-mono text-[10px]">
@@ -268,26 +272,25 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
             </Badge>
           </CardTitle>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1">
             {(
               [
                 { id: 'all', label: 'Todas' },
-                { id: 'win', label: 'Victorias' },
+                { id: 'win', label: 'Wins' },
                 { id: 'loss', label: 'Derrotas' },
-                { id: 'ff', label: 'FF / Remake' },
+                { id: 'ff', label: 'FF' },
               ] as Array<{ id: OutcomeFilter; label: string }>
             ).map((opt) => (
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => {
-                  setOutcomeFilter(opt.id);
-                  setVisibleLimit(15);
-                }}
+                onClick={() => setOutcomeFilter(opt.id)}
                 className={cn(
-                  'px-2 py-1 rounded border text-[11px] font-medium cursor-pointer transition-colors',
+                  'px-2 py-0.5 rounded border text-[11px] font-medium cursor-pointer transition-colors',
                   outcomeFilter === opt.id
-                    ? 'bg-primary/15 border-primary text-primary font-semibold'
+                    ? opt.id === 'ff'
+                      ? 'bg-[#4C0519]/90 border-[#9F1239] text-[#FDA4AF] font-semibold'
+                      : 'bg-primary/15 border-primary text-primary font-semibold'
                     : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -297,97 +300,102 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
 
             <button
               type="button"
-              onClick={() => {
-                setOnlyGroup((prev) => !prev);
-                setVisibleLimit(15);
-              }}
+              onClick={() => setOnlyGroup((prev) => !prev)}
               className={cn(
-                'px-2 py-1 rounded border text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
+                'px-2 py-0.5 rounded border text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
                 onlyGroup
                   ? 'bg-primary/20 border-primary text-primary font-semibold'
                   : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
               )}
+              title="Filtrar solo partidas con al menos 2 miembros del grupo"
             >
               <Users className="w-3 h-3" strokeWidth={1.75} />
-              <span>Solo Grupo</span>
+              <span>Grupo</span>
             </button>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="p-3 space-y-2.5">
-        {visibleRows.length === 0 ? (
+      <CardContent className="p-3 pt-1 flex-1 min-h-0">
+        {filteredRows.length === 0 ? (
           <div className="py-10 text-center text-xs text-muted-foreground border border-dashed border-border rounded-md bg-background/30">
             No hay partidas para los filtros seleccionados.
           </div>
         ) : (
-          visibleRows.map(({ match, userPart, groupCount }) => {
-            const mins = Math.max(1, match.gameDuration / 60);
-            const team = match.teams.find((t) => t.teamId === userPart.teamId);
-            const teamTotalDmg = Math.max(1, team?.totalDamageToChampions ?? 1);
-            const dmgPct = Math.round((userPart.damageToChampions / teamTotalDmg) * 100);
-            const runeMeta = userPart.primaryRuneId
-              ? getRuneMeta(userPart.primaryRuneId)
-              : null;
-            const subStyleMeta = userPart.subStyleId
-              ? getRuneStyleMeta(userPart.subStyleId)
-              : null;
+          <div className="max-h-[396px] overflow-y-auto scroller-thin pr-1 space-y-2">
+            {filteredRows.map(({ match, userPart, groupCount }) => {
+              const mins = Math.max(1, match.gameDuration / 60);
+              const team = match.teams.find((t) => t.teamId === userPart.teamId);
+              const teamTotalDmg = Math.max(1, team?.totalDamageToChampions ?? 1);
+              const dmgPct = Math.round((userPart.damageToChampions / teamTotalDmg) * 100);
+              const runeMeta = userPart.primaryRuneId
+                ? getRuneMeta(userPart.primaryRuneId)
+                : null;
+              const subStyleMeta = userPart.subStyleId
+                ? getRuneStyleMeta(userPart.subStyleId)
+                : null;
 
-            const team100 = match.participants
-              .filter((p) => p.teamId === 100)
-              .slice(0, 5);
-            const team200 = match.participants
-              .filter((p) => p.teamId === 200)
-              .slice(0, 5);
+              const team100 = match.participants
+                .filter((p) => p.teamId === 100)
+                .slice(0, 5);
+              const team200 = match.participants
+                .filter((p) => p.teamId === 200)
+                .slice(0, 5);
 
-            const leftBorderClass =
-              userPart.outcome === 'win'
-                ? 'border-l-success'
-                : userPart.outcome === 'ff'
-                  ? 'border-l-warning'
-                  : userPart.outcome === 'remake'
-                    ? 'border-l-muted-foreground'
-                    : 'border-l-destructive';
+              const leftBorderClass =
+                userPart.outcome === 'win'
+                  ? 'border-l-success'
+                  : userPart.outcome === 'ff'
+                    ? 'border-l-[#881337] border-[#9F1239]/55'
+                    : userPart.outcome === 'remake'
+                      ? 'border-l-muted-foreground'
+                      : 'border-l-destructive';
 
-            const bgTintClass =
-              userPart.outcome === 'win'
-                ? 'bg-success/[0.04] hover:bg-success/[0.09]'
-                : userPart.outcome === 'ff'
-                  ? 'bg-warning/[0.04] hover:bg-warning/[0.09]'
-                  : userPart.outcome === 'remake'
-                    ? 'bg-muted/30 hover:bg-muted/50'
-                    : 'bg-destructive/[0.04] hover:bg-destructive/[0.09]';
+              const bgTintClass =
+                userPart.outcome === 'win'
+                  ? 'bg-success/[0.04] hover:bg-success/[0.09]'
+                  : userPart.outcome === 'ff'
+                    ? 'bg-[#4C0519]/40 hover:bg-[#4C0519]/60'
+                    : userPart.outcome === 'remake'
+                      ? 'bg-muted/30 hover:bg-muted/50'
+                      : 'bg-destructive/[0.04] hover:bg-destructive/[0.09]';
 
-            return (
-              <div
-                key={match.matchId}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelectMatch(match.matchId)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSelectMatch(match.matchId);
-                  }
-                }}
-                className={cn(
-                  'rounded-md border border-border border-l-4 p-3 transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring',
-                  leftBorderClass,
-                  bgTintClass
-                )}
-              >
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center">
-                  {/* Col 1: Mode, Outcome, Duration, Relative Time */}
-                  <div className="lg:col-span-2 flex lg:flex-col items-center lg:items-start justify-between gap-1.5 min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
+              return (
+                <div
+                  key={match.matchId}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onSelectMatch(match.matchId)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelectMatch(match.matchId);
+                    }
+                  }}
+                  className={cn(
+                    'rounded-md border border-border border-l-4 p-2.5 transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring',
+                    leftBorderClass,
+                    bgTintClass
+                  )}
+                >
+                  {/* Top Meta Strip */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 mb-1.5 border-b border-border/50">
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                       <LolOutcomeBadge
                         outcome={userPart.outcome}
                         enemySurrendered={userPart.enemySurrendered}
+                        compact
                       />
+                      <span className="text-[11px] font-semibold text-foreground truncate">
+                        {formatQueueLabel(match.queueId, match.gameMode)}
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {formatDuration(match.gameDuration)} · {formatRelativeTime(match.gameCreation)}
+                      </span>
                       {groupCount >= 2 && (
                         <Badge
                           variant="default"
-                          className="px-1.5 py-0 text-[9px] font-mono"
+                          className="px-1 py-0 text-[9px] font-mono"
                           title={`${groupCount} jugadores del grupo`}
                         >
                           <Users className="w-2.5 h-2.5" strokeWidth={1.75} />
@@ -396,218 +404,185 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                       )}
                     </div>
 
-                    <div className="text-left lg:space-y-0.5">
-                      <p className="text-xs font-semibold text-foreground truncate">
-                        {formatQueueLabel(match.queueId, match.gameMode)}
-                      </p>
-                      <p className="text-[11px] font-mono text-muted-foreground">
-                        {formatDuration(match.gameDuration)} ·{' '}
-                        {formatRelativeTime(match.gameCreation)}
-                      </p>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <LolPerformanceBadge
+                        score={userPart.performanceScore}
+                        grade={userPart.performanceGrade}
+                        isMvp={userPart.isMvp}
+                        isAce={userPart.isAce}
+                        matchRank={userPart.matchRank}
+                        isRemake={userPart.performanceBreakdown.isRemake}
+                        compact
+                      />
+                      <button
+                        type="button"
+                        title="Vista rápida"
+                        aria-label="Vista rápida de la partida"
+                        onMouseEnter={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setHoveredMatchSummary({
+                            match,
+                            participant: userPart,
+                            rect: {
+                              left: r.left,
+                              top: r.top,
+                              right: r.right,
+                              bottom: r.bottom,
+                            },
+                          });
+                        }}
+                        onMouseLeave={() => setHoveredMatchSummary(null)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectMatch(match.matchId);
+                        }}
+                        className="p-1 rounded border border-border bg-background/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3 h-3" strokeWidth={1.75} />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Col 2: Larger User Champion + Spells/Runes + Items */}
-                  <div className="lg:col-span-4 flex items-center gap-3 min-w-0">
-                    <LolChampionAvatar
-                      championName={userPart.championName}
-                      level={userPart.champLevel}
-                      version={ddragonVersion}
-                      size="lg"
-                      ring="user"
-                    />
-
-                    <LolSpellsRunesBadge
-                      summoner1Id={userPart.summoner1Id}
-                      summoner2Id={userPart.summoner2Id}
-                      primaryRuneId={userPart.primaryRuneId}
-                      subStyleId={userPart.subStyleId}
-                      version={ddragonVersion}
-                      size="md"
-                      layout="grid"
-                    />
-
-                    <div className="min-w-0 space-y-1.5 flex-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm font-bold text-foreground truncate">
-                          {userPart.championName}
-                        </span>
-                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
-                          {formatRoleLabel(userPart.performanceBreakdown.role)}
-                        </Badge>
-                      </div>
-
-                      <LolItemRow
-                        items={userPart.items}
+                  {/* Main Body: Left (User Champ + Spells/Runes + Items + KDA/Stats) | Right (2x5 Grid) */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <LolChampionAvatar
+                        championName={userPart.championName}
+                        level={userPart.champLevel}
                         version={ddragonVersion}
-                        size="sm"
+                        size="lg"
+                        ring="user"
                       />
 
-                      <div className="text-[10px] font-mono text-muted-foreground truncate">
-                        {runeMeta?.name || 'Runa'}
-                        {subStyleMeta ? ` · ${subStyleMeta.name}` : ''}
-                      </div>
-                    </div>
-                  </div>
+                      <LolSpellsRunesBadge
+                        summoner1Id={userPart.summoner1Id}
+                        summoner2Id={userPart.summoner2Id}
+                        primaryRuneId={userPart.primaryRuneId}
+                        subStyleId={userPart.subStyleId}
+                        version={ddragonVersion}
+                        size="sm"
+                        layout="grid"
+                      />
 
-                  {/* Col 3: KDA, Stats, Performance & Highlights */}
-                  <div className="lg:col-span-3 flex flex-col gap-1.5 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-mono">
-                        <span className="text-sm font-bold text-foreground">
-                          {userPart.kills}
-                          <span className="text-muted-foreground">/</span>
-                          <span className="text-destructive">{userPart.deaths}</span>
-                          <span className="text-muted-foreground">/</span>
-                          {userPart.assists}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground ml-1.5">
-                          {userPart.kda.toFixed(2)} KDA
-                        </span>
-                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-bold text-foreground truncate">
+                              {userPart.championName}
+                            </span>
+                            <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
+                              {formatRoleLabel(userPart.performanceBreakdown.role)}
+                            </Badge>
+                          </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
-                        <LolPerformanceBadge
-                          score={userPart.performanceScore}
-                          grade={userPart.performanceGrade}
-                          isMvp={userPart.isMvp}
-                          isAce={userPart.isAce}
-                          matchRank={userPart.matchRank}
-                          isRemake={userPart.performanceBreakdown.isRemake}
-                        />
-                        <button
-                          type="button"
-                          title="Vista rápida"
-                          aria-label="Vista rápida de la partida"
-                          onMouseEnter={(e) => {
-                            const r = e.currentTarget.getBoundingClientRect();
-                            setHoveredMatchSummary({
-                              match,
-                              participant: userPart,
-                              rect: {
-                                left: r.left,
-                                top: r.top,
-                                right: r.right,
-                                bottom: r.bottom,
-                              },
-                            });
-                          }}
-                          onMouseLeave={() => setHoveredMatchSummary(null)}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectMatch(match.matchId);
-                          }}
-                          className="p-1 rounded border border-border bg-background/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" strokeWidth={1.75} />
-                        </button>
-                      </div>
-                    </div>
+                          <div className="font-mono text-xs shrink-0">
+                            <span className="font-bold text-foreground">
+                              {userPart.kills}
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-destructive">{userPart.deaths}</span>
+                              <span className="text-muted-foreground">/</span>
+                              {userPart.assists}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground ml-1">
+                              ({userPart.kda.toFixed(1)})
+                            </span>
+                          </div>
+                        </div>
 
-                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
-                      <span>KP {Math.round(userPart.killParticipation * 100)}%</span>
-                      <span>
-                        {userPart.cs} CS ({userPart.csPerMin.toFixed(1)})
-                      </span>
-                      <span>
-                        {formatCompactNumber(userPart.damageToChampions)} DMG ({dmgPct}%)
-                      </span>
-                      <span>
-                        {userPart.visionScore} Vis ({(userPart.visionScore / mins).toFixed(1)}/m)
-                      </span>
-                    </div>
-
-                    {userPart.highlights.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1">
-                        {userPart.highlights.slice(0, 3).map((tag) => (
-                          <Badge
-                            key={tag}
-                            variant="outline"
-                            className="px-1.5 py-0 text-[9px] font-mono bg-background/50"
-                          >
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Col 4: 2x5 Champion Grid (Blue row 1, Red row 2) with per-player hover */}
-                  <div className="lg:col-span-3 space-y-1 shrink-0">
-                    {[team100, team200].map((teamRoster, teamIdx) => (
-                      <div
-                        key={teamIdx}
-                        className={cn(
-                          'grid grid-cols-5 gap-1 p-1 rounded border bg-background/45',
-                          teamIdx === 0
-                            ? 'border-sky-500/25'
-                            : 'border-rose-500/25'
-                        )}
-                      >
-                        {teamRoster.map((p) => {
-                          const isUser = p.puuid === targetPuuid;
-                          const isGroup = !isUser && groupPuuids.has(p.puuid);
-                          return (
-                            <div
-                              key={`${p.puuid}-${p.participantId}`}
-                              onMouseEnter={(e) => {
-                                const r = e.currentTarget.getBoundingClientRect();
-                                setHoveredParticipant({
-                                  participant: p,
-                                  match,
-                                  rect: {
-                                    left: r.left,
-                                    top: r.top,
-                                    right: r.right,
-                                    bottom: r.bottom,
-                                  },
-                                });
-                              }}
-                              onMouseLeave={() => setHoveredParticipant(null)}
-                              className="flex flex-col items-center gap-0.5 min-w-0 group"
+                        <div className="flex flex-wrap items-center gap-2">
+                          <LolItemRow
+                            items={userPart.items}
+                            version={ddragonVersion}
+                            size="xs"
+                          />
+                          {userPart.highlights.slice(0, 2).map((tag) => (
+                            <Badge
+                              key={tag}
+                              variant="outline"
+                              className="px-1 py-0 text-[9px] font-mono bg-background/50"
                             >
-                              <LolChampionAvatar
-                                championName={p.championName}
-                                version={ddragonVersion}
-                                size="xs"
-                                ring={isUser ? 'user' : isGroup ? 'group' : 'none'}
-                                className="w-6 h-6 transition-transform group-hover:scale-110"
-                              />
-                              <span
-                                className={cn(
-                                  'text-[8.5px] font-mono truncate max-w-full leading-none',
-                                  isUser
-                                    ? 'text-amber-300 font-bold'
-                                    : isGroup
-                                      ? 'text-primary font-semibold'
-                                      : 'text-muted-foreground'
-                                )}
-                              >
-                                {p.riotIdGameName || p.championName}
-                              </span>
-                            </div>
-                          );
-                        })}
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
+                          <span>KP {Math.round(userPart.killParticipation * 100)}%</span>
+                          <span>{userPart.csPerMin.toFixed(1)} CS/m</span>
+                          <span>
+                            {formatCompactNumber(userPart.damageToChampions)} DMG ({dmgPct}%)
+                          </span>
+                          <span>{(userPart.visionScore / mins).toFixed(1)} Vis/m</span>
+                          {(runeMeta?.name || subStyleMeta?.name) && (
+                            <span className="truncate opacity-80">
+                              {runeMeta?.name || subStyleMeta?.name}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    ))}
+                    </div>
+
+                    {/* Right: Compact 2x5 Champion Grid */}
+                    <div className="sm:w-[196px] shrink-0 space-y-1">
+                      {[team100, team200].map((teamRoster, teamIdx) => (
+                        <div
+                          key={teamIdx}
+                          className={cn(
+                            'grid grid-cols-5 gap-1 p-1 rounded border bg-background/45',
+                            teamIdx === 0 ? 'border-sky-500/25' : 'border-rose-500/25'
+                          )}
+                        >
+                          {teamRoster.map((p) => {
+                            const isUser = p.puuid === targetPuuid;
+                            const isGroup = !isUser && groupPuuids.has(p.puuid);
+                            return (
+                              <div
+                                key={`${p.puuid}-${p.participantId}`}
+                                onMouseEnter={(e) => {
+                                  const r = e.currentTarget.getBoundingClientRect();
+                                  setHoveredParticipant({
+                                    participant: p,
+                                    match,
+                                    rect: {
+                                      left: r.left,
+                                      top: r.top,
+                                      right: r.right,
+                                      bottom: r.bottom,
+                                    },
+                                  });
+                                }}
+                                onMouseLeave={() => setHoveredParticipant(null)}
+                                className="flex flex-col items-center gap-0.5 min-w-0 group"
+                              >
+                                <LolChampionAvatar
+                                  championName={p.championName}
+                                  version={ddragonVersion}
+                                  size="xs"
+                                  ring={isUser ? 'user' : isGroup ? 'group' : 'none'}
+                                  className="w-6 h-6 transition-transform group-hover:scale-110"
+                                />
+                                <span
+                                  className={cn(
+                                    'text-[8px] font-mono truncate max-w-full leading-none',
+                                    isUser
+                                      ? 'text-cyan-300 font-bold'
+                                      : isGroup
+                                        ? 'text-primary font-semibold'
+                                        : 'text-muted-foreground'
+                                  )}
+                                >
+                                  {p.riotIdGameName || p.championName}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
-        )}
-
-        {filteredRows.length > visibleLimit && (
-          <div className="pt-2 flex justify-center">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setVisibleLimit((prev) => prev + 15)}
-            >
-              <ChevronDown className="w-4 h-4" strokeWidth={1.75} />
-              <span>Mostrar más ({filteredRows.length - visibleLimit} restantes)</span>
-            </Button>
+              );
+            })}
           </div>
         )}
       </CardContent>

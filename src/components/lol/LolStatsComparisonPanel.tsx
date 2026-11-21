@@ -15,7 +15,14 @@ import {
   getTierColorClasses,
 } from '@/lib/lolDdragon';
 import { getGradeFromScore } from '@/lib/lolPerformanceEngine';
-import { LolChampionAvatar, LolPillarBars } from './LolPrimitives';
+import {
+  LOL_FF_CHIP_CLASS,
+  LOL_FF_TEXT_CLASS,
+  LOL_STAT_GLOSSARY,
+  LolChampionAvatar,
+  LolInfoTip,
+  LolPillarBars,
+} from './LolPrimitives';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -136,9 +143,9 @@ const StatsColumnCard: React.FC<StatsColumnCardProps> = ({
 
   return (
     <Card className="h-full">
-      <CardHeader className="pb-2.5">
+      <CardHeader className="pb-2 pt-3 px-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
             <span className={accentClass}>{icon}</span>
             <span>{title}</span>
             <Badge variant="secondary" className="font-mono text-[10px]">
@@ -162,7 +169,7 @@ const StatsColumnCard: React.FC<StatsColumnCardProps> = ({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3">
+      <CardContent className="p-3.5 pt-1 space-y-2.5">
         {agg.totalGames === 0 ? (
           <div className="py-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-md bg-background/30">
             {emptyMessage || 'Sin partidas registradas.'}
@@ -170,7 +177,7 @@ const StatsColumnCard: React.FC<StatsColumnCardProps> = ({
         ) : (
           <>
             {/* Performance Score Hero + 6 Pillars */}
-            <div className="p-3 rounded-md border border-border bg-background/45 space-y-2.5">
+            <div className="p-2.5 rounded-md border border-border bg-background/45 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div
@@ -185,34 +192,42 @@ const StatsColumnCard: React.FC<StatsColumnCardProps> = ({
                     <span className="text-xs font-bold">{grade}</span>
                   </div>
                   <div>
-                    <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <span>Performance BG-PERF</span>
+                    <div className="text-xs font-semibold text-foreground flex items-center gap-1">
+                      <span>BG-PERF</span>
+                      <LolInfoTip {...LOL_STAT_GLOSSARY.bgPerf} />
                     </div>
                     <div className="text-[11px] font-mono text-muted-foreground flex items-center gap-2">
-                      <span className="text-amber-300 inline-flex items-center gap-0.5">
+                      <span className="text-amber-300 inline-flex items-center gap-1">
                         <Crown className="w-3 h-3" strokeWidth={1.75} />
                         {agg.mvpCount} MVP
+                        <LolInfoTip {...LOL_STAT_GLOSSARY.mvp} />
                       </span>
-                      <span className="text-primary inline-flex items-center gap-0.5">
+                      <span className="text-primary inline-flex items-center gap-1">
                         <Award className="w-3 h-3" strokeWidth={1.75} />
                         {agg.aceCount} ACE
+                        <LolInfoTip {...LOL_STAT_GLOSSARY.ace} />
                       </span>
                     </div>
                   </div>
                 </div>
 
                 <div className="text-right font-mono">
-                  <div className="text-base font-bold text-foreground">
-                    {agg.winRate}% <span className="text-[10px] text-muted-foreground font-normal">WR</span>
+                  <div className="text-base font-bold text-foreground inline-flex items-center justify-end gap-1">
+                    <span>{agg.winRate}%</span>
+                    <span className="text-[10px] text-muted-foreground font-normal">WR</span>
+                    <LolInfoTip {...LOL_STAT_GLOSSARY.wr} />
                   </div>
-                  <div className="text-[11px]">
-                    <span className="text-success">{agg.wins}V</span>
-                    <span className="text-muted-foreground"> · </span>
-                    <span className="text-destructive">{agg.losses}D</span>
-                    <span className="text-muted-foreground"> · </span>
-                    <span className="text-warning">{agg.ffs}FF</span>
+                  <div className="text-[11px] flex items-center justify-end gap-1">
+                    <span className="text-success font-semibold">{agg.wins}V</span>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-destructive font-semibold">{agg.losses}D</span>
+                    <span className="text-muted-foreground">·</span>
+                    <span className={cn('text-[10px] font-bold', LOL_FF_CHIP_CLASS)}>
+                      {agg.ffs}FF
+                    </span>
+                    <LolInfoTip {...LOL_STAT_GLOSSARY.ff} />
                     {agg.remakes > 0 && (
-                      <span className="text-muted-foreground"> ({agg.remakes}R)</span>
+                      <span className="text-muted-foreground">({agg.remakes}R)</span>
                     )}
                   </div>
                 </div>
@@ -224,42 +239,62 @@ const StatsColumnCard: React.FC<StatsColumnCardProps> = ({
             {/* Compact KPI Grid */}
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 font-mono">
               <div className="p-2 rounded-md border border-border bg-background/40">
-                <span className="text-[10px] text-muted-foreground block">KDA</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">KDA</span>
+                  <LolInfoTip {...LOL_STAT_GLOSSARY.kda} />
+                </div>
                 <strong className="text-xs text-foreground">{agg.avgKda.toFixed(2)}</strong>
                 <span className="text-[10px] text-muted-foreground block">
                   {agg.avgKills}/{agg.avgDeaths}/{agg.avgAssists}
                 </span>
               </div>
               <div className="p-2 rounded-md border border-border bg-background/40">
-                <span className="text-[10px] text-muted-foreground block">KP%</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">KP%</span>
+                  <LolInfoTip {...LOL_STAT_GLOSSARY.kp} />
+                </div>
                 <strong className="text-xs text-foreground">
                   {Math.round(agg.avgKp * 100)}%
                 </strong>
                 <span className="text-[10px] text-muted-foreground block">Partic.</span>
               </div>
               <div className="p-2 rounded-md border border-border bg-background/40">
-                <span className="text-[10px] text-muted-foreground block">CS/m</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">CS/m</span>
+                  <LolInfoTip {...LOL_STAT_GLOSSARY.csMin} />
+                </div>
                 <strong className="text-xs text-foreground">{agg.avgCsPerMin.toFixed(1)}</strong>
                 <span className="text-[10px] text-muted-foreground block">Farm</span>
               </div>
               <div className="p-2 rounded-md border border-border bg-background/40">
-                <span className="text-[10px] text-muted-foreground block">DPM</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">DPM</span>
+                  <LolInfoTip {...LOL_STAT_GLOSSARY.dpm} />
+                </div>
                 <strong className="text-xs text-foreground">
                   {formatCompactNumber(agg.avgDpm)}
                 </strong>
                 <span className="text-[10px] text-muted-foreground block">Daño/m</span>
               </div>
               <div className="p-2 rounded-md border border-border bg-background/40">
-                <span className="text-[10px] text-muted-foreground block">GPM</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">GPM</span>
+                  <LolInfoTip {...LOL_STAT_GLOSSARY.gpm} />
+                </div>
                 <strong className="text-xs text-foreground">{Math.round(agg.avgGpm)}</strong>
                 <span className="text-[10px] text-muted-foreground block">Oro/m</span>
               </div>
               <div className="p-2 rounded-md border border-border bg-background/40">
-                <span className="text-[10px] text-muted-foreground block">Vis/m</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">Vis/m</span>
+                  <LolInfoTip {...LOL_STAT_GLOSSARY.visMin} />
+                </div>
                 <strong className="text-xs text-foreground">
                   {agg.avgVisionPerMin.toFixed(2)}
                 </strong>
-                <span className="text-[10px] text-muted-foreground block">FF {agg.ffRate}%</span>
+                <span className={cn('text-[10px] font-semibold block', LOL_FF_TEXT_CLASS)}>
+                  FF {agg.ffRate}%
+                </span>
               </div>
             </div>
 
@@ -329,10 +364,10 @@ export const LolStatsComparisonPanel: React.FC<LolStatsComparisonPanelProps> = (
   const version = account.ddragonVersion || ddragonVersion;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Summoner Profile & Ranked Banner */}
       <Card>
-        <CardContent className="p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <CardContent className="p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="relative shrink-0">
               <img

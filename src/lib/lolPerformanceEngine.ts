@@ -17,6 +17,7 @@ import type {
   LolDurationBucketKey,
   LolDurationBucketStats,
   LolGroupLeaderboardEntry,
+  LolGroupRecordEntry,
   LolMatchOutcome,
   LolMatchParticipantSummary,
   LolMatchSummary,
@@ -30,10 +31,21 @@ import type {
   LolPlayerAggregateStats,
   LolQueueCategory,
   LolRegionalCluster,
+  LolRiftRoleKey,
+  LolRoleLeaderboardByLane,
+  LolRoleLeaderboardEntry,
   LolRoleKey,
   RiotMatchV5,
   RiotMatchV5Participant,
 } from '../types/lol';
+
+export const RIFT_ROLE_KEYS: LolRiftRoleKey[] = [
+  'TOP',
+  'JUNGLE',
+  'MIDDLE',
+  'BOTTOM',
+  'UTILITY',
+];
 
 export const ROLE_WEIGHT_MATRIX: Record<LolRoleKey, LolPerformancePillarScores> = {
   TOP: { combat: 0.22, impact: 0.24, economy: 0.22, objectives: 0.15, vision: 0.07, dominance: 0.10 },
@@ -1102,6 +1114,8 @@ export function scoreMatchParticipants(
       isMvp,
       isAce,
       highlights,
+      totalTimeSpentDead: p.totalTimeSpentDead ?? 0,
+      enemyMissingPings: p.enemyMissingPings ?? 0,
     };
 
     if (includeRaw) {
@@ -1601,4 +1615,525 @@ export function computeGroupLeaderboard(params: {
     if (b.groupGamesScored !== a.groupGamesScored) return b.groupGamesScored - a.groupGamesScored;
     return b.groupWinRate - a.groupWinRate;
   });
+}
+
+export function computeGroupLeaderboardByRole(params: {
+  matches: LolMatchSummary[];
+  accounts: LolAccount[];
+  playerProfiles: Array<{ id: string; displayName: string; avatarUrl: string }>;
+  queueFilter?: LolQueueCategory;
+}): LolRoleLeaderboardByLane {
+  const { matches, accounts, playerProfiles, queueFilter = 'all' } = params;
+  const groupMemberPuuids = new Set(accounts.map((a) => a.puuid));
+  const profileById = new Map(playerProfiles.map((p) => [p.id, p]));
+  const filteredMatches = filterMatchesByQueue(matches, queueFilter);
+  const groupMatches = filteredMatches.filter((m) => isGroupMatch(m, groupMemberPuuids));
+
+  const out: LolRoleLeaderboardByLane = {
+    TOP: [],
+    JUNGLE: [],
+    MIDDLE: [],
+    BOTTOM: [],
+    UTILITY: [],
+  };
+
+  for (const role of RIFT_ROLE_KEYS) {
+    interface RoleDraft {
+      account: LolAccount;
+      displayName: string;
+      avatarUrl: string;
+      samples: PlayerMatchSample[];
+      avgPerformance: number;
+      wins: number;
+      losses: number;
+      ffs: number;
+      winRate: number;
+      avgKda: number;
+      mvpCount: number;
+    }
+
+    const drafts: RoleDraft[] = [];
+
+    for (const account of accounts) {
+      const profile = profileById.get(account.userId);
+      const roleSamples: PlayerMatchSample[] = [];
+
+      for (const match of groupMatches) {
+        const participant = match.participants.find((p) => p.puuid === account.puuid);
+        if (!participant || participant.outcome === 'remake') continue;
+        if (participant.performanceBreakdown.role !== role) continue;
+        roleSamples.push({ match, participant });
+      }
+
+      if (roleSamples.length === 0) continue;
+
+      let perfSum = 0;
+      let kdaSum = 0;
+      let wins = 0;
+      let losses = 0;
+      let ffs = 0;
+      let mvpCount = 0;
+
+      for (const { participant: p } of roleSamples) {
+        perfSum += p.performanceScore;
+        kdaSum += p.kda;
+        if (p.outcome === 'win') wins += 1;
+        else if (p.outcome === 'ff') ffs += 1;
+        else losses += 1;
+        if (p.isMvp) mvpCount += 1;
+      }
+
+      const n = roleSamples.length;
+      drafts.push({
+        account,
+        displayName: profile?.displayName ?? account.gameName,
+        avatarUrl: profile?.avatarUrl ?? '',
+        samples: roleSamples,
+        avgPerformance: round1(perfSum / n),
+        wins,
+        losses,
+        ffs,
+        winRate: round1((wins / n) * 100),
+        avgKda: round2(kdaSum / n),
+        mvpCount,
+      });
+    }
+
+    const rolePrior =
+      drafts.length > 0
+        ? drafts.reduce((sum, d) => sum + d.avgPerformance, 0) / drafts.length
+        : 55;
+    const k = 3;
+
+    const entries: LolRoleLeaderboardEntry[] = drafts.map((d) => {
+      const n = d.samples.length;
+      const pBayes = (n * d.avgPerformance + k * rolePrior) / (n + k);
+      const activityBonus = 10 * (1 - Math.exp(-n / 6));
+      const wrBonus = clamp(((d.winRate - 50) / 50) * 4, -4, 4);
+      const roleRankScore = round1(clamp(pBayes * 0.88 + activityBonus + wrBonus, 0, 100));
+      const topChamp = buildTopChampions(d.samples)[0] ?? null;
+
+      return {
+        role,
+        userId: d.account.userId,
+        displayName: d.displayName,
+        avatarUrl: d.avatarUrl,
+        account: d.account,
+        roleRankScore,
+        avgPerformance: d.avgPerformance,
+        games: n,
+        wins: d.wins,
+        losses: d.losses,
+        ffs: d.ffs,
+        winRate: d.winRate,
+        avgKda: d.avgKda,
+        mvpCount: d.mvpCount,
+        topChampion: topChamp,
+      };
+    });
+
+    out[role] = entries.sort((a, b) => {
+      if (b.roleRankScore !== a.roleRankScore) return b.roleRankScore - a.roleRankScore;
+      if (b.games !== a.games) return b.games - a.games;
+      return b.winRate - a.winRate;
+    });
+  }
+
+  return out;
+}
+
+function formatSecondsCompact(seconds: number): string {
+  const safe = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}m ${String(secs).padStart(2, '0')}s`;
+}
+
+export function computeGroupRecords(params: {
+  matches: LolMatchSummary[];
+  accounts: LolAccount[];
+  playerProfiles: Array<{ id: string; displayName: string; avatarUrl: string }>;
+  queueFilter?: LolQueueCategory;
+  scope?: 'group' | 'all';
+}): LolGroupRecordEntry[] {
+  const {
+    matches,
+    accounts,
+    playerProfiles,
+    queueFilter = 'all',
+    scope = 'group',
+  } = params;
+
+  const groupMemberPuuids = new Set(accounts.map((a) => a.puuid));
+  const profileById = new Map(playerProfiles.map((p) => [p.id, p]));
+  const filteredMatches = filterMatchesByQueue(matches, queueFilter);
+  const scopedMatches =
+    scope === 'group'
+      ? filteredMatches.filter((m) => isGroupMatch(m, groupMemberPuuids))
+      : filteredMatches;
+
+  interface RecordCandidate {
+    account: LolAccount;
+    displayName: string;
+    avatarUrl: string;
+    games: number;
+    wins: number;
+    ffs: number;
+    ffRate: number;
+    killsTotal: number;
+    deathsTotal: number;
+    assistsTotal: number;
+    maxKills: number;
+    maxDeaths: number;
+    avgKills: number;
+    avgDeaths: number;
+    avgAssists: number;
+    avgKda: number;
+    avgKp: number;
+    avgDpm: number;
+    avgCsPerMin: number;
+    avgCs: number;
+    avgVisionPerMin: number;
+    avgDeadSeconds: number;
+    deadTimePct: number;
+    totalDeadSeconds: number;
+    avgMiaPings: number;
+    totalMiaPings: number;
+  }
+
+  const candidates: RecordCandidate[] = [];
+  let bestSingle: {
+    account: LolAccount;
+    displayName: string;
+    avatarUrl: string;
+    score: number;
+    grade: LolPerformanceGrade;
+    championName: string;
+    kills: number;
+    deaths: number;
+    assists: number;
+    matchId: string;
+    gamesCount: number;
+  } | null = null;
+
+  for (const account of accounts) {
+    const profile = profileById.get(account.userId);
+    const displayName = profile?.displayName ?? account.gameName;
+    const avatarUrl = profile?.avatarUrl ?? '';
+
+    const samples: PlayerMatchSample[] = [];
+    for (const match of scopedMatches) {
+      const p = match.participants.find((part) => part.puuid === account.puuid);
+      if (!p || p.outcome === 'remake') continue;
+      samples.push({ match, participant: p });
+    }
+
+    if (samples.length === 0) continue;
+
+    let wins = 0;
+    let ffs = 0;
+    let killsTotal = 0;
+    let deathsTotal = 0;
+    let assistsTotal = 0;
+    let maxKills = 0;
+    let maxDeaths = 0;
+    let kdaSum = 0;
+    let kpSum = 0;
+    let dpmSum = 0;
+    let csMinSum = 0;
+    let csSum = 0;
+    let visMinSum = 0;
+    let deadSecSum = 0;
+    let durationSum = 0;
+    let miaSum = 0;
+
+    for (const { match, participant: p } of samples) {
+      const mins = Math.max(1, match.gameDuration / 60);
+      const deadSec = p.totalTimeSpentDead ?? p.rawParticipant?.totalTimeSpentDead ?? 0;
+      const miaPings = p.enemyMissingPings ?? p.rawParticipant?.enemyMissingPings ?? 0;
+
+      if (p.outcome === 'win') wins += 1;
+      if (p.outcome === 'ff') ffs += 1;
+      killsTotal += p.kills;
+      deathsTotal += p.deaths;
+      assistsTotal += p.assists;
+      if (p.kills > maxKills) maxKills = p.kills;
+      if (p.deaths > maxDeaths) maxDeaths = p.deaths;
+
+      kdaSum += p.kda;
+      kpSum += p.killParticipation;
+      dpmSum += p.damageToChampions / mins;
+      csMinSum += p.csPerMin;
+      csSum += p.cs;
+      visMinSum += p.visionScore / mins;
+      deadSecSum += deadSec;
+      durationSum += Math.max(1, match.gameDuration);
+      miaSum += miaPings;
+
+      if (!bestSingle || p.performanceScore > bestSingle.score) {
+        bestSingle = {
+          account,
+          displayName,
+          avatarUrl,
+          score: p.performanceScore,
+          grade: p.performanceGrade,
+          championName: p.championName,
+          kills: p.kills,
+          deaths: p.deaths,
+          assists: p.assists,
+          matchId: match.matchId,
+          gamesCount: samples.length,
+        };
+      }
+    }
+
+    const n = samples.length;
+    candidates.push({
+      account,
+      displayName,
+      avatarUrl,
+      games: n,
+      wins,
+      ffs,
+      ffRate: round1((ffs / n) * 100),
+      killsTotal,
+      deathsTotal,
+      assistsTotal,
+      maxKills,
+      maxDeaths,
+      avgKills: killsTotal / n,
+      avgDeaths: deathsTotal / n,
+      avgAssists: assistsTotal / n,
+      avgKda: kdaSum / n,
+      avgKp: kpSum / n,
+      avgDpm: dpmSum / n,
+      avgCsPerMin: csMinSum / n,
+      avgCs: csSum / n,
+      avgVisionPerMin: visMinSum / n,
+      avgDeadSeconds: deadSecSum / n,
+      deadTimePct: durationSum > 0 ? (deadSecSum / durationSum) * 100 : 0,
+      totalDeadSeconds: deadSecSum,
+      avgMiaPings: miaSum / n,
+      totalMiaPings: miaSum,
+    });
+  }
+
+  if (candidates.length === 0) return [];
+
+  const pickBest = (
+    cmp: (a: RecordCandidate, b: RecordCandidate) => number
+  ): RecordCandidate => [...candidates].sort(cmp)[0];
+
+  const records: LolGroupRecordEntry[] = [];
+
+  // 1. Most time dead
+  const deadWinner = pickBest((a, b) => b.avgDeadSeconds - a.avgDeadSeconds);
+  if (deadWinner.totalDeadSeconds > 0) {
+    records.push({
+      id: 'most_time_dead',
+      title: 'Más Tiempo Muerto',
+      description: 'Mayor promedio de segundos mirando la pantalla gris por partida.',
+      tone: 'bad',
+      valueLabel: `${formatSecondsCompact(deadWinner.avgDeadSeconds)}/g`,
+      subLabel: `${Math.round(deadWinner.deadTimePct)}% del game muerto · ${deadWinner.games}G`,
+      userId: deadWinner.account.userId,
+      displayName: deadWinner.displayName,
+      avatarUrl: deadWinner.avatarUrl,
+      gameName: deadWinner.account.gameName,
+      gamesSample: deadWinner.games,
+    });
+  }
+
+  // 2. Highest Kill Participation
+  const kpWinner = pickBest((a, b) => b.avgKp - a.avgKp || b.games - a.games);
+  records.push({
+    id: 'highest_kp',
+    title: 'Mayor KP%',
+    description: 'Mayor porcentaje promedio de participación en las bajas del equipo.',
+    tone: 'good',
+    valueLabel: `${Math.round(kpWinner.avgKp * 100)}%`,
+    subLabel: `Participación en ${kpWinner.games}G`,
+    userId: kpWinner.account.userId,
+    displayName: kpWinner.displayName,
+    avatarUrl: kpWinner.avatarUrl,
+    gameName: kpWinner.account.gameName,
+    gamesSample: kpWinner.games,
+  });
+
+  // 3. Most kills per game
+  const mostKillsWinner = pickBest(
+    (a, b) => b.avgKills - a.avgKills || b.maxKills - a.maxKills
+  );
+  records.push({
+    id: 'most_kills',
+    title: 'Más Kills',
+    description: 'Mayor promedio de asesinatos por partida.',
+    tone: 'good',
+    valueLabel: `${mostKillsWinner.avgKills.toFixed(1)}/g`,
+    subLabel: `Pico ${mostKillsWinner.maxKills} · ${mostKillsWinner.killsTotal} en ${mostKillsWinner.games}G`,
+    userId: mostKillsWinner.account.userId,
+    displayName: mostKillsWinner.displayName,
+    avatarUrl: mostKillsWinner.avatarUrl,
+    gameName: mostKillsWinner.account.gameName,
+    gamesSample: mostKillsWinner.games,
+  });
+
+  // 4. Least kills per game
+  const leastKillsWinner = pickBest(
+    (a, b) => a.avgKills - b.avgKills || b.games - a.games
+  );
+  records.push({
+    id: 'least_kills',
+    title: 'Menos Kills',
+    description: 'Menor promedio de asesinatos por partida (pacifista del grupo).',
+    tone: 'fun',
+    valueLabel: `${leastKillsWinner.avgKills.toFixed(1)}/g`,
+    subLabel: `${leastKillsWinner.killsTotal} kills en ${leastKillsWinner.games}G`,
+    userId: leastKillsWinner.account.userId,
+    displayName: leastKillsWinner.displayName,
+    avatarUrl: leastKillsWinner.avatarUrl,
+    gameName: leastKillsWinner.account.gameName,
+    gamesSample: leastKillsWinner.games,
+  });
+
+  // 5. Best KDA
+  const bestKdaWinner = pickBest((a, b) => b.avgKda - a.avgKda || b.games - a.games);
+  records.push({
+    id: 'best_kda',
+    title: 'Mejor KDA',
+    description: 'Mayor promedio de (Kills + Asistencias) / Muertes.',
+    tone: 'good',
+    valueLabel: bestKdaWinner.avgKda.toFixed(2),
+    subLabel: `${bestKdaWinner.avgKills.toFixed(1)}/${bestKdaWinner.avgDeaths.toFixed(1)}/${bestKdaWinner.avgAssists.toFixed(1)} · ${bestKdaWinner.games}G`,
+    userId: bestKdaWinner.account.userId,
+    displayName: bestKdaWinner.displayName,
+    avatarUrl: bestKdaWinner.avatarUrl,
+    gameName: bestKdaWinner.account.gameName,
+    gamesSample: bestKdaWinner.games,
+  });
+
+  // 6. Most deaths
+  const mostDeathsWinner = pickBest(
+    (a, b) => b.avgDeaths - a.avgDeaths || b.maxDeaths - a.maxDeaths
+  );
+  records.push({
+    id: 'most_deaths',
+    title: 'Más Muertes',
+    description: 'Mayor promedio de muertes por partida.',
+    tone: 'bad',
+    valueLabel: `${mostDeathsWinner.avgDeaths.toFixed(1)}/g`,
+    subLabel: `Pico ${mostDeathsWinner.maxDeaths} · ${mostDeathsWinner.deathsTotal} en ${mostDeathsWinner.games}G`,
+    userId: mostDeathsWinner.account.userId,
+    displayName: mostDeathsWinner.displayName,
+    avatarUrl: mostDeathsWinner.avatarUrl,
+    gameName: mostDeathsWinner.account.gameName,
+    gamesSample: mostDeathsWinner.games,
+  });
+
+  // 7. Highest DPM
+  const dpmWinner = pickBest((a, b) => b.avgDpm - a.avgDpm || b.games - a.games);
+  records.push({
+    id: 'highest_dpm',
+    title: 'Mayor Daño (DPM)',
+    description: 'Mayor daño promedio a campeones por minuto.',
+    tone: 'good',
+    valueLabel: `${Math.round(dpmWinner.avgDpm)}/m`,
+    subLabel: `${dpmWinner.games}G analizadas`,
+    userId: dpmWinner.account.userId,
+    displayName: dpmWinner.displayName,
+    avatarUrl: dpmWinner.avatarUrl,
+    gameName: dpmWinner.account.gameName,
+    gamesSample: dpmWinner.games,
+  });
+
+  // 8. Highest CS/min
+  const csWinner = pickBest((a, b) => b.avgCsPerMin - a.avgCsPerMin || b.games - a.games);
+  records.push({
+    id: 'highest_cs_min',
+    title: 'Rey del Farm',
+    description: 'Mayor promedio de súbditos + monstruos por minuto (CS/m).',
+    tone: 'good',
+    valueLabel: `${csWinner.avgCsPerMin.toFixed(1)} CS/m`,
+    subLabel: `${Math.round(csWinner.avgCs)} CS/g · ${csWinner.games}G`,
+    userId: csWinner.account.userId,
+    displayName: csWinner.displayName,
+    avatarUrl: csWinner.avatarUrl,
+    gameName: csWinner.account.gameName,
+    gamesSample: csWinner.games,
+  });
+
+  // 9. Highest Vision/min
+  const visionWinner = pickBest(
+    (a, b) => b.avgVisionPerMin - a.avgVisionPerMin || b.games - a.games
+  );
+  records.push({
+    id: 'highest_vision',
+    title: 'Rey de la Visión',
+    description: 'Mayor puntuación promedio de visión por minuto.',
+    tone: 'good',
+    valueLabel: `${visionWinner.avgVisionPerMin.toFixed(2)}/m`,
+    subLabel: `Control de mapa · ${visionWinner.games}G`,
+    userId: visionWinner.account.userId,
+    displayName: visionWinner.displayName,
+    avatarUrl: visionWinner.avatarUrl,
+    gameName: visionWinner.account.gameName,
+    gamesSample: visionWinner.games,
+  });
+
+  // 10. Highest FF rate (only if at least 1 FF occurred)
+  const ffWinner = pickBest((a, b) => b.ffRate - a.ffRate || b.ffs - a.ffs);
+  if (ffWinner.ffs > 0) {
+    records.push({
+      id: 'highest_ff_rate',
+      title: 'Rey del FF',
+      description: 'Mayor porcentaje de partidas terminadas por rendición propia.',
+      tone: 'ff',
+      valueLabel: `${ffWinner.ffRate}%`,
+      subLabel: `${ffWinner.ffs} FF en ${ffWinner.games}G`,
+      userId: ffWinner.account.userId,
+      displayName: ffWinner.displayName,
+      avatarUrl: ffWinner.avatarUrl,
+      gameName: ffWinner.account.gameName,
+      gamesSample: ffWinner.games,
+    });
+  }
+
+  // 11. Most MIA (?) pings
+  const miaWinner = pickBest((a, b) => b.avgMiaPings - a.avgMiaPings || b.totalMiaPings - a.totalMiaPings);
+  if (miaWinner.totalMiaPings > 0) {
+    records.push({
+      id: 'most_mia_pings',
+      title: 'Rey del Ping ?',
+      description: 'Quien más veces pingueó "¿Falta enemigo?" por partida.',
+      tone: 'fun',
+      valueLabel: `${miaWinner.avgMiaPings.toFixed(1)}/g`,
+      subLabel: `${miaWinner.totalMiaPings} pings · ${miaWinner.games}G`,
+      userId: miaWinner.account.userId,
+      displayName: miaWinner.displayName,
+      avatarUrl: miaWinner.avatarUrl,
+      gameName: miaWinner.account.gameName,
+      gamesSample: miaWinner.games,
+    });
+  }
+
+  // 12. Best single game
+  if (bestSingle) {
+    records.push({
+      id: 'best_single_game',
+      title: 'Mejor Partida',
+      description: 'Mayor puntaje BG-PERF individual en una sola partida.',
+      tone: 'good',
+      valueLabel: `${bestSingle.score.toFixed(1)} ${bestSingle.grade}`,
+      subLabel: `${bestSingle.championName} · ${bestSingle.kills}/${bestSingle.deaths}/${bestSingle.assists}`,
+      userId: bestSingle.account.userId,
+      displayName: bestSingle.displayName,
+      avatarUrl: bestSingle.avatarUrl,
+      gameName: bestSingle.account.gameName,
+      gamesSample: bestSingle.gamesCount,
+      championName: bestSingle.championName,
+      matchId: bestSingle.matchId,
+    });
+  }
+
+  return records;
 }
