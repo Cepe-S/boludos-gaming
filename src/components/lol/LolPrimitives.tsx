@@ -12,6 +12,7 @@ import {
   getSpellMeta,
 } from '@/lib/lolDdragon';
 import {
+  LolGroupPickEntry,
   LolMatchOutcome,
   LolPerformanceGrade,
   LolPerformancePillarScores,
@@ -105,6 +106,12 @@ export const LOL_STAT_GLOSSARY = {
     title: 'Forfeit / Rendición',
     description: 'Derrota por votación anticipada de rendición del equipo.',
   },
+  pickScore: {
+    acronym: 'Pick Score',
+    title: 'Impacto Real del Pick',
+    description:
+      'Score de 0 a 100 (≥3G) que pondera impacto del jugador vs su equipo y lobby en cada partida, duelo y dificultad de rivales, BG-PERF, WR ajustado por mérito (anti-pasajero), sinergia y FF.',
+  },
 } as const satisfies Record<string, LolStatGlossaryEntry>;
 
 export const LolInfoTip: React.FC<{
@@ -140,6 +147,139 @@ export const LolInfoTip: React.FC<{
     </TooltipContent>
   </Tooltip>
 );
+
+export const LolPickScoreTooltip: React.FC<{
+  pick: LolGroupPickEntry;
+  tone?: 'best' | 'worst' | 'neutral';
+  children: React.ReactElement;
+}> = ({ pick, tone = 'neutral', children }) => {
+  const formatSigned = (val: number, suffix = '') =>
+    `${val > 0 ? '+' : ''}${val.toFixed(1)}${suffix}`;
+
+  const deltaClass = (val: number, threshold = 0.5) =>
+    val >= threshold
+      ? 'text-success'
+      : val <= -threshold
+        ? 'text-destructive'
+        : 'text-foreground';
+
+  const scoreToneClass =
+    tone === 'best'
+      ? 'text-success'
+      : tone === 'worst'
+        ? 'text-destructive'
+        : 'text-primary';
+
+  return (
+    <Tooltip delayDuration={0}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent
+        side="top"
+        className="w-[256px] text-left space-y-1.5 py-2 px-2.5 z-[80]"
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-1">
+          <span className="text-[11px] font-bold text-foreground truncate">
+            {pick.displayName} × {pick.championName}
+          </span>
+          <span className={cn('text-[11px] font-mono font-bold shrink-0', scoreToneClass)}>
+            {pick.pickScore.toFixed(1)}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-mono">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">WR Imp.</span>
+            <span
+              className={cn(
+                'font-semibold',
+                pick.impactWinRate >= 58
+                  ? 'text-success'
+                  : pick.impactWinRate <= 44
+                    ? 'text-destructive'
+                    : 'text-foreground'
+              )}
+            >
+              {pick.impactWinRate.toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">vs Equipo</span>
+            <span className={cn('font-semibold', deltaClass(pick.impactVsTeamDelta, 1.5))}>
+              {formatSigned(pick.impactVsTeamDelta)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">vs Rival</span>
+            <span className={cn('font-semibold', deltaClass(pick.vsOpponentDelta, 1.5))}>
+              {formatSigned(pick.vsOpponentDelta)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">Dificultad</span>
+            <span
+              className={cn(
+                'font-semibold',
+                pick.avgDifficulty >= 56
+                  ? 'text-amber-300'
+                  : pick.avgDifficulty <= 42
+                    ? 'text-muted-foreground'
+                    : 'text-foreground'
+              )}
+            >
+              {Math.round(pick.avgDifficulty)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">Aliados</span>
+            <span className={cn('font-semibold', deltaClass(pick.teammatePerfDelta, 0.5))}>
+              {formatSigned(pick.teammatePerfDelta)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">Rank med.</span>
+            <span className="font-semibold text-foreground">
+              {pick.avgMatchRank > 0 ? `#${pick.avgMatchRank.toFixed(1)}` : '—'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">FF%</span>
+            <span
+              className={cn(
+                'font-semibold',
+                pick.ffRate >= 30
+                  ? LOL_FF_TEXT_CLASS
+                  : pick.ffRate === 0
+                    ? 'text-success'
+                    : 'text-foreground'
+              )}
+            >
+              {pick.ffRate.toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-muted-foreground">Consist.</span>
+            <span className="font-semibold text-foreground">
+              {Math.round(pick.consistency)}%
+            </span>
+          </div>
+        </div>
+
+        {pick.pickDrivers.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1 border-t border-border/70">
+            {pick.pickDrivers.map((driver) => (
+              <span
+                key={driver}
+                className="inline-flex items-center px-1.5 py-0.5 rounded border border-border bg-secondary/70 text-[9.5px] font-mono text-foreground leading-none"
+              >
+                {driver}
+              </span>
+            ))}
+          </div>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
+};
 
 export const PILLAR_META: Array<{
   key: keyof LolPerformancePillarScores;

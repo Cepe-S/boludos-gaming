@@ -8,6 +8,7 @@ import {
   LolPlatform,
   LolSpecificQueueCategory,
   LolTimeRangeFilter,
+  LolViewMode,
 } from '@/types/lol';
 import {
   DEFAULT_DDRAGON_VERSION,
@@ -15,6 +16,7 @@ import {
   getProfileIconUrl,
 } from '@/lib/lolDdragon';
 import { getLocalRiotApiKey, setLocalRiotApiKey } from '@/lib/lolService';
+import { getUserAccounts, resolveUserPrimaryAccount } from '@/lib/lolPerformanceEngine';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,13 +46,16 @@ import { cn } from '@/lib/utils';
 import {
   AlertCircle,
   Calendar,
+  Crown,
   FolderKanban,
   KeyRound,
   Link2,
+  Plus,
   RefreshCw,
   ShieldCheck,
   Sparkles,
   Unlink,
+  User,
   Users,
 } from 'lucide-react';
 
@@ -102,6 +107,8 @@ const TIME_RANGE_FILTERS: Array<{ id: LolTimeRangeFilter; label: string }> = [
 ];
 
 export interface LolHeaderBarProps {
+  viewMode: LolViewMode;
+  onChangeViewMode: (mode: LolViewMode) => void;
   userGroups: GamingGroup[];
   activeGroup: GamingGroup | null;
   onSelectGroup: (groupId: string) => void;
@@ -124,10 +131,12 @@ export interface LolHeaderBarProps {
     gameName: string;
     tagLine: string;
     platform: LolPlatform;
+    isPrimary?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
   onSyncPlayer: (userId: string) => Promise<void>;
   onSyncGroup: () => Promise<void>;
-  onUnlinkAccount: (userId: string) => Promise<void>;
+  onUnlinkAccount: (userId: string, puuid?: string) => Promise<void>;
+  onSetPrimaryAccount: (userId: string, puuid: string) => Promise<void>;
   onSaveServerRiotKey: (apiKey: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -144,6 +153,8 @@ function formatKeyUpdatedAt(iso?: string | null): string | null {
 }
 
 export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
+  viewMode,
+  onChangeViewMode,
   userGroups,
   activeGroup,
   onSelectGroup,
@@ -165,17 +176,32 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
   onSyncPlayer,
   onSyncGroup,
   onUnlinkAccount,
+  onSetPrimaryAccount,
   onSaveServerRiotKey,
 }) => {
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [isKeyDialogOpen, setIsKeyDialogOpen] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkAsPrimary, setLinkAsPrimary] = useState(true);
   const [keyInput, setKeyInput] = useState('');
   const [hasLocalKey, setHasLocalKey] = useState(() => Boolean(getLocalRiotApiKey()));
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
 
-  const accountByUserId = new Map(accounts.map((a) => [a.userId, a]));
+  const primaryAccountByUserId = new Map<string, LolAccount>();
+  const accountsCountByUserId = new Map<string, number>();
+  for (const m of groupMembers) {
+    const primary = resolveUserPrimaryAccount(accounts, m.id);
+    if (primary) primaryAccountByUserId.set(m.id, primary);
+    accountsCountByUserId.set(m.id, getUserAccounts(accounts, m.id).length);
+  }
+  for (const acc of accounts) {
+    if (!primaryAccountByUserId.has(acc.userId)) {
+      const primary = resolveUserPrimaryAccount(accounts, acc.userId);
+      if (primary) primaryAccountByUserId.set(acc.userId, primary);
+      accountsCountByUserId.set(acc.userId, getUserAccounts(accounts, acc.userId).length);
+    }
+  }
 
   const linkForm = useForm<LinkRiotFormValues>({
     resolver: zodResolver(linkRiotSchema),
@@ -190,40 +216,45 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
   useEffect(() => {
     if (isLinkDialogOpen) {
       const targetId = selectedUserId || groupMembers[0]?.id || '';
-      const existing = accountByUserId.get(targetId);
+      const userAccs = getUserAccounts(accounts, targetId);
       linkForm.reset({
         userId: targetId,
-        gameName: existing?.gameName || '',
-        tagLine: existing?.tagLine || 'LAS',
-        platform: existing?.platform || 'la2',
+        gameName: '',
+        tagLine: userAccs[0]?.tagLine || 'LAS',
+        platform: userAccs[0]?.platform || 'la2',
       });
+      setLinkAsPrimary(userAccs.length === 0);
       setLinkError(null);
     }
   }, [isLinkDialogOpen, selectedUserId]);
 
   const handleOpenLinkForMember = (memberId?: string) => {
     const targetId = memberId || selectedUserId || groupMembers[0]?.id || '';
-    const existing = accountByUserId.get(targetId);
+    const userAccs = getUserAccounts(accounts, targetId);
     linkForm.reset({
       userId: targetId,
-      gameName: existing?.gameName || '',
-      tagLine: existing?.tagLine || 'LAS',
-      platform: existing?.platform || 'la2',
+      gameName: '',
+      tagLine: userAccs[0]?.tagLine || 'LAS',
+      platform: userAccs[0]?.platform || 'la2',
     });
+    setLinkAsPrimary(userAccs.length === 0);
     setLinkError(null);
     setIsLinkDialogOpen(true);
   };
 
   const handleSubmitLink = linkForm.handleSubmit(async (values) => {
     setLinkError(null);
+    const existingCount = getUserAccounts(accounts, values.userId).length;
     const res = await onLinkAndSync({
       userId: values.userId,
       gameName: values.gameName,
       tagLine: values.tagLine.replace(/^#/, ''),
       platform: values.platform,
+      isPrimary: existingCount === 0 ? true : linkAsPrimary,
     });
     if (res.ok) {
-      setIsLinkDialogOpen(false);
+      linkForm.setValue('gameName', '');
+      setLinkAsPrimary(false);
     } else {
       setLinkError(res.error || 'No se pudo vincular la cuenta de Riot.');
     }
@@ -267,15 +298,147 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
   };
 
   const formattedUpdatedAt = formatKeyUpdatedAt(serverKeyUpdatedAt);
+  const selectedMember =
+    groupMembers.find((m) => m.id === selectedUserId) ?? groupMembers[0] ?? null;
+  const selectedAcc = selectedMember
+    ? primaryAccountByUserId.get(selectedMember.id)
+    : undefined;
+  const selectedAltCount = selectedMember
+    ? Math.max(0, (accountsCountByUserId.get(selectedMember.id) ?? 0) - 1)
+    : 0;
+  const dialogUserId = linkForm.watch('userId');
+  const dialogUserAccounts = dialogUserId ? getUserAccounts(accounts, dialogUserId) : [];
 
   return (
     <>
-      <div className="p-3 rounded-md bg-card/55 backdrop-blur-md border border-border space-y-3">
-        {/* Top Row: Group Switcher + Mode Toggle + Actions */}
+      <div className="p-2.5 rounded-md bg-card/55 backdrop-blur-md border border-border">
+        {/* Top Row: View Mode Switch + Compact Summoner Select (personal) / Group Switcher (group) + Filters + Actions */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
-            {userGroups.length > 1 && (
-              <div className="flex items-center gap-1.5 pr-2 border-r border-border">
+            {/* Personal | Group Segmented View Switch */}
+            <div
+              role="group"
+              aria-label="Modo de vista"
+              className="inline-flex items-center rounded-md border border-border bg-background/55 p-0.5 shrink-0"
+            >
+              {(
+                [
+                  { id: 'personal', label: 'Personal', Icon: User },
+                  { id: 'group', label: 'Grupo', Icon: Users },
+                ] as const
+              ).map(({ id, label, Icon }) => {
+                const isActive = viewMode === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => onChangeViewMode(id)}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-xs transition-all duration-150 cursor-pointer',
+                      isActive
+                        ? 'bg-primary/20 border-primary text-primary font-semibold'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Compact Summoner Dropdown (Personal Mode Only) */}
+            {viewMode === 'personal' && groupMembers.length > 0 && (
+              <div className="pl-2 border-l border-border">
+                <Select
+                  value={selectedMember?.id ?? ''}
+                  onValueChange={(memberId) => {
+                    if (primaryAccountByUserId.has(memberId)) {
+                      onSelectUser(memberId);
+                    } else if (!isDemoMode) {
+                      handleOpenLinkForMember(memberId);
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label="Seleccionar invocador"
+                    title="Cambiar invocador"
+                    className="h-7 w-auto min-w-[136px] max-w-[196px] px-2 gap-1.5 bg-background/55 border-border text-xs font-medium"
+                  >
+                    {selectedMember ? (
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+                        <img
+                          src={
+                            selectedAcc
+                              ? getProfileIconUrl(
+                                  selectedAcc.profileIconId,
+                                  selectedAcc.ddragonVersion || ddragonVersion
+                                )
+                              : selectedMember.avatarUrl
+                          }
+                          alt={selectedMember.displayName}
+                          className="w-4 h-4 rounded-full object-cover border border-border shrink-0"
+                        />
+                        <span className="truncate text-foreground leading-none">
+                          {selectedMember.displayName}
+                        </span>
+                        {selectedAltCount > 0 && (
+                          <span className="text-[9px] font-mono font-semibold text-primary shrink-0">
+                            +{selectedAltCount}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <SelectValue placeholder="Invocador" />
+                    )}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groupMembers.map((member) => {
+                      const acc = primaryAccountByUserId.get(member.id);
+                      const altCount = Math.max(
+                        0,
+                        (accountsCountByUserId.get(member.id) ?? 0) - 1
+                      );
+                      return (
+                        <SelectItem key={member.id} value={member.id}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={
+                                acc
+                                  ? getProfileIconUrl(
+                                      acc.profileIconId,
+                                      acc.ddragonVersion || ddragonVersion
+                                    )
+                                  : member.avatarUrl
+                              }
+                              alt={member.displayName}
+                              className="w-4 h-4 rounded-full object-cover border border-border shrink-0"
+                            />
+                            <span className="text-xs font-medium text-foreground truncate">
+                              {member.displayName}
+                            </span>
+                            {acc ? (
+                              <span className="text-[10px] font-mono text-muted-foreground truncate">
+                                {acc.gameName}#{acc.tagLine}
+                                {altCount > 0 ? ` (+${altCount})` : ''}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-mono text-primary">
+                                Vincular
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {viewMode === 'group' && userGroups.length > 1 && (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-border">
                 <FolderKanban
                   className="w-4 h-4 text-primary shrink-0"
                   strokeWidth={1.75}
@@ -300,7 +463,7 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
             )}
 
             {/* Global Queue Filters (Multi-select) */}
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1 pl-2 border-l border-border">
               {QUEUE_FILTERS.map((q, idx) => {
                 const isActive =
                   q.id === 'all'
@@ -395,25 +558,27 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                   <span>Riot ID</span>
                 </Button>
 
-                {selectedUserId && accountByUserId.has(selectedUserId) && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isSyncing}
-                    onClick={() => onSyncPlayer(selectedUserId)}
-                    title="Sincronizar jugador seleccionado"
-                    aria-label="Sincronizar jugador"
-                  >
-                    <RefreshCw
-                      className={cn('w-4 h-4', isSyncing && 'animate-spin')}
-                      strokeWidth={1.75}
-                    />
-                    <span className="hidden sm:inline">Sync</span>
-                  </Button>
-                )}
+                {viewMode === 'personal' &&
+                  selectedUserId &&
+                  primaryAccountByUserId.has(selectedUserId) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={isSyncing}
+                      onClick={() => onSyncPlayer(selectedUserId)}
+                      title="Sincronizar jugador seleccionado"
+                      aria-label="Sincronizar jugador"
+                    >
+                      <RefreshCw
+                        className={cn('w-4 h-4', isSyncing && 'animate-spin')}
+                        strokeWidth={1.75}
+                      />
+                      <span className="hidden sm:inline">Sync</span>
+                    </Button>
+                  )}
 
-                {accounts.length > 0 && (
+                {viewMode === 'group' && accounts.length > 0 && (
                   <Button
                     type="button"
                     size="sm"
@@ -457,71 +622,15 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
             )}
           </div>
         </div>
-
-        {/* Bottom Row: Group Member Selector Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto scroller-thin pt-2 border-t border-border/70">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
-            Invocador:
-          </span>
-          {groupMembers.map((member, idx) => {
-            const acc = accountByUserId.get(member.id);
-            const isSelected = selectedUserId === member.id;
-            return (
-              <button
-                key={member.id}
-                type="button"
-                style={{ animationDelay: `${idx * 35 + 40}ms` }}
-                onClick={() => {
-                  if (acc) {
-                    onSelectUser(member.id);
-                  } else if (!isDemoMode) {
-                    handleOpenLinkForMember(member.id);
-                  }
-                }}
-                className={cn(
-                  'group inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs transition-all duration-150 shrink-0 cursor-pointer active:scale-95 animate-lol-card-pop',
-                  isSelected
-                    ? 'bg-primary/15 border-primary text-foreground font-semibold shadow-[0_0_12px_-3px_rgba(88,101,242,0.5)] animate-tile-selected'
-                    : acc
-                      ? 'bg-background/45 border-border text-muted-foreground hover:text-foreground hover:bg-muted/60 hover:-translate-y-0.5'
-                      : 'bg-background/25 border-dashed border-border/70 text-muted-foreground/70 hover:text-foreground hover:-translate-y-0.5'
-                )}
-              >
-                <img
-                  src={
-                    acc
-                      ? getProfileIconUrl(
-                          acc.profileIconId,
-                          acc.ddragonVersion || ddragonVersion
-                        )
-                      : member.avatarUrl
-                  }
-                  alt={member.displayName}
-                  className="w-5 h-5 rounded-full object-cover border border-border shrink-0 transition-transform duration-150 group-hover:scale-110"
-                />
-                <span>{member.displayName}</span>
-                {acc ? (
-                  <span className="text-[10px] font-mono text-muted-foreground">
-                    {acc.gameName}#{acc.tagLine}
-                  </span>
-                ) : (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0">
-                    Vincular
-                  </Badge>
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Link Riot ID Modal */}
+      {/* Link & Manage Riot Accounts Modal */}
       <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Link2 className="w-4 h-4 text-primary" strokeWidth={1.75} />
-              <span>Vincular Riot ID</span>
+              <span>Cuentas de Riot</span>
             </DialogTitle>
           </DialogHeader>
 
@@ -532,17 +641,19 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                 name="userId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Miembro del Grupo</FormLabel>
+                    <FormLabel>
+                      {viewMode === 'group' ? 'Miembro del Grupo' : 'Invocador'}
+                    </FormLabel>
                     <Select
                       value={field.value}
                       onValueChange={(val) => {
                         field.onChange(val);
-                        const existing = accountByUserId.get(val);
-                        if (existing) {
-                          linkForm.setValue('gameName', existing.gameName);
-                          linkForm.setValue('tagLine', existing.tagLine);
-                          linkForm.setValue('platform', existing.platform);
-                        }
+                        const userAccs = getUserAccounts(accounts, val);
+                        linkForm.setValue('gameName', '');
+                        linkForm.setValue('tagLine', userAccs[0]?.tagLine || 'LAS');
+                        linkForm.setValue('platform', userAccs[0]?.platform || 'la2');
+                        setLinkAsPrimary(userAccs.length === 0);
+                        setLinkError(null);
                       }}
                     >
                       <FormControl>
@@ -551,11 +662,21 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {groupMembers.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.displayName}
-                          </SelectItem>
-                        ))}
+                        {groupMembers.map((m) => {
+                          const cnt = accountsCountByUserId.get(m.id) ?? 0;
+                          return (
+                            <SelectItem key={m.id} value={m.id}>
+                              <span className="flex items-center gap-2">
+                                <span>{m.displayName}</span>
+                                {cnt > 0 && (
+                                  <span className="text-[10px] font-mono text-muted-foreground">
+                                    ({cnt} {cnt === 1 ? 'cuenta' : 'cuentas'})
+                                  </span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -563,60 +684,195 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                 )}
               />
 
-              <div className="grid grid-cols-3 gap-2">
-                <FormField
-                  control={linkForm.control}
-                  name="gameName"
-                  render={({ field }) => (
-                    <FormItem className="col-span-2">
-                      <FormLabel>Game Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Ej. SantiSuizo" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+              {/* Existing linked accounts for selected member */}
+              {dialogUserAccounts.length > 0 && (
+                <div className="space-y-1.5 rounded-md border border-border bg-background/45 p-2.5">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+                    <span>Cuentas vinculadas ({dialogUserAccounts.length})</span>
+                    <span className="font-mono text-[10px]">Stats unificadas</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
+                    {dialogUserAccounts.map((acc) => {
+                      const isMain = acc.isPrimary !== false;
+                      return (
+                        <div
+                          key={acc.puuid}
+                          className="flex items-center justify-between gap-2 px-2 py-1.5 rounded border border-border/80 bg-card/70"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={getProfileIconUrl(
+                                acc.profileIconId,
+                                acc.ddragonVersion || ddragonVersion
+                              )}
+                              alt={acc.gameName}
+                              className="w-6 h-6 rounded-full border border-border object-cover shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-foreground truncate">
+                                  {acc.gameName}
+                                  <span className="text-muted-foreground font-mono text-[10px]">
+                                    #{acc.tagLine}
+                                  </span>
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] font-mono uppercase px-1 py-0"
+                                >
+                                  {acc.platform}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                {isMain ? (
+                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-amber-400">
+                                    <Crown className="w-2.5 h-2.5" strokeWidth={2} />
+                                    Principal
+                                  </span>
+                                ) : (
+                                  <span className="text-[9.5px] font-mono text-muted-foreground">
+                                    Secundaria
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!isMain && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={isSyncing}
+                                title="Marcar como cuenta principal"
+                                aria-label={`Hacer principal a ${acc.gameName}`}
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-amber-400"
+                                onClick={() =>
+                                  void onSetPrimaryAccount(dialogUserId, acc.puuid)
+                                }
+                              >
+                                <Crown className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={isSyncing}
+                              title="Desvincular esta cuenta"
+                              aria-label={`Desvincular ${acc.gameName}`}
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={() =>
+                                void onUnlinkAccount(dialogUserId, acc.puuid)
+                              }
+                            >
+                              <Unlink className="w-3.5 h-3.5" strokeWidth={1.75} />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Add new account section */}
+              <div className="space-y-2.5 pt-1 border-t border-border/70">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-foreground inline-flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5 text-primary" strokeWidth={2} />
+                    {dialogUserAccounts.length > 0
+                      ? 'Agregar cuenta'
+                      : 'Vincular cuenta principal'}
+                  </span>
+
+                  {dialogUserAccounts.length > 0 && (
+                    <div className="inline-flex items-center rounded-md border border-border bg-background/55 p-0.5 text-[10px] gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setLinkAsPrimary(false)}
+                        className={cn(
+                          'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors',
+                          !linkAsPrimary
+                            ? 'bg-primary/20 text-primary font-semibold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        Secundaria
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLinkAsPrimary(true)}
+                        className={cn(
+                          'px-2 py-0.5 rounded-sm font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
+                          linkAsPrimary
+                            ? 'bg-amber-500/20 text-amber-300 font-semibold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <Crown className="w-2.5 h-2.5" strokeWidth={2} />
+                        Principal
+                      </button>
+                    </div>
                   )}
-                />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <FormField
+                    control={linkForm.control}
+                    name="gameName"
+                    render={({ field }) => (
+                      <FormItem className="col-span-2">
+                        <FormLabel>Game Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Ej. SantiSmurf" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={linkForm.control}
+                    name="tagLine"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tag</FormLabel>
+                        <FormControl>
+                          <Input placeholder="LAS" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
                 <FormField
                   control={linkForm.control}
-                  name="tagLine"
+                  name="platform"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Tag</FormLabel>
-                      <FormControl>
-                        <Input placeholder="LAS" {...field} />
-                      </FormControl>
+                      <FormLabel>Servidor</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Servidor" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {LOL_PLATFORM_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.id} value={opt.id}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
-
-              <FormField
-                control={linkForm.control}
-                name="platform"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Servidor</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Servidor" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {LOL_PLATFORM_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.id} value={opt.id}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               {linkError && (
                 <p className="text-xs text-destructive font-medium bg-destructive/10 border border-destructive/40 rounded-md px-2.5 py-2">
@@ -625,28 +881,19 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
               )}
 
               <DialogFooter className="gap-2 pt-2">
-                {accountByUserId.has(linkForm.watch('userId')) && (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    disabled={isSyncing}
-                    onClick={async () => {
-                      await onUnlinkAccount(linkForm.getValues('userId'));
-                      setIsLinkDialogOpen(false);
-                    }}
-                  >
-                    <Unlink className="w-3.5 h-3.5" strokeWidth={1.75} />
-                    <span>Desvincular</span>
-                  </Button>
-                )}
                 <Button type="submit" disabled={isSyncing}>
                   {isSyncing ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
                   ) : (
                     <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                   )}
-                  <span>{isSyncing ? 'Sincronizando...' : 'Vincular y Sync'}</span>
+                  <span>
+                    {isSyncing
+                      ? 'Sincronizando...'
+                      : dialogUserAccounts.length > 0 && !linkAsPrimary
+                        ? 'Agregar secundaria'
+                        : 'Vincular y Sync'}
+                  </span>
                 </Button>
               </DialogFooter>
             </form>

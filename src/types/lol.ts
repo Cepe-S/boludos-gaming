@@ -37,6 +37,7 @@ export interface LolRankedEntry {
 export interface LolAccount {
   userId: string;
   puuid: string;
+  isPrimary?: boolean;
   gameName: string;
   tagLine: string;
   platform: LolPlatform;
@@ -64,6 +65,8 @@ export type LolQueueCategory =
 export type LolSpecificQueueCategory = Exclude<LolQueueCategory, 'all'>;
 
 export type LolTimeRangeFilter = '7d' | '30d' | '90d' | 'all';
+
+export type LolViewMode = 'personal' | 'group';
 
 export type LolRoleKey =
   | 'TOP'
@@ -500,6 +503,7 @@ export interface LolDurationBucketStats {
 export interface LolChampionSummary {
   championName: string;
   championId: number;
+  primaryRole: LolRoleKey;
   games: number;
   wins: number;
   losses: number;
@@ -508,6 +512,11 @@ export interface LolChampionSummary {
   avgPerformance: number;
   avgKda: number;
   avgCsPerMin: number;
+  avgDpm: number;
+  avgVisionPerMin: number;
+  avgKp: number;
+  mvpCount: number;
+  aceCount: number;
 }
 
 export interface LolPlayerAggregateStats {
@@ -600,7 +609,9 @@ export interface LolRoleLeaderboardEntry {
 
 export type LolRoleLeaderboardByLane = Record<LolRiftRoleKey, LolRoleLeaderboardEntry[]>;
 
-export type LolGroupRecordTone = 'good' | 'bad' | 'ff' | 'fun';
+export type LolRecordTone = 'good' | 'bad' | 'ff' | 'fun';
+
+export type LolGroupRecordTone = LolRecordTone;
 
 export type LolGroupRecordId =
   | 'most_time_dead'
@@ -616,6 +627,41 @@ export type LolGroupRecordId =
   | 'most_mia_pings'
   | 'best_single_game';
 
+export type LolPersonalRecordId =
+  | 'best_single_game'
+  | 'most_kills'
+  | 'most_assists'
+  | 'best_kda'
+  | 'highest_kp'
+  | 'highest_dpm'
+  | 'highest_cs_min'
+  | 'highest_vision'
+  | 'best_win_streak'
+  | 'most_deaths'
+  | 'most_time_dead'
+  | 'most_mia_pings'
+  | 'fastest_ff'
+  | 'longest_game';
+
+export type LolRecordId = LolGroupRecordId | LolPersonalRecordId;
+
+export interface LolRecordEntry {
+  id: LolRecordId;
+  title: string;
+  description: string;
+  tone: LolRecordTone;
+  valueLabel: string;
+  subLabel: string;
+  userId?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  gameName?: string;
+  gamesSample: number;
+  championName?: string;
+  matchId?: string;
+  dateLabel?: string;
+}
+
 export interface LolGroupRecordEntry {
   id: LolGroupRecordId;
   title: string;
@@ -630,4 +676,211 @@ export interface LolGroupRecordEntry {
   gamesSample: number;
   championName?: string;
   matchId?: string;
+  dateLabel?: string;
+}
+
+export interface LolGroupAggregateStats {
+  totalMatches: number;
+  scoredMatches: number;
+  wins: number;
+  losses: number;
+  ffs: number;
+  remakes: number;
+  winRate: number;
+  ffRate: number;
+  avgSquadSize: number;
+  avgPerformance: number;
+  avgPillars: LolPerformancePillarScores;
+  avgKda: number;
+  avgKills: number;
+  avgDeaths: number;
+  avgAssists: number;
+  avgKp: number;
+  avgCsPerMin: number;
+  avgDpm: number;
+  avgGpm: number;
+  avgVisionPerMin: number;
+  mvpCount: number;
+  aceCount: number;
+  durationBuckets: LolDurationBucketStats[];
+}
+
+export interface LolGroupPickBreakdown {
+  winRateScore: number;
+  impactWinRateScore: number;
+  performanceScore: number;
+  teamImpactScore: number;
+  relativeImpactScore: number;
+  rivalDuelScore: number;
+  consistencyClutchScore: number;
+  mentalFfScore: number;
+  highFfPenalty: number;
+  passengerPenalty: number;
+  difficultyBonus: number;
+  wrDeltaVsPlayer: number;
+}
+
+export interface LolGroupPickEntry {
+  pickKey: string;
+  userId: string;
+  puuid: string;
+  displayName: string;
+  avatarUrl: string;
+  account: LolAccount;
+  championId: number;
+  championName: string;
+  primaryRole: LolRoleKey;
+  games: number;
+  wins: number;
+  losses: number;
+  ffs: number;
+  winRate: number;
+  ffRate: number;
+  bayesWinRate: number;
+  impactWinRate: number;
+  wrDeltaVsGroup: number;
+  teammatePerfDelta: number;
+  impactVsTeamDelta: number;
+  vsOpponentDelta: number;
+  avgDifficulty: number;
+  carryRate: number;
+  passengerWins: number;
+  avgMatchRank: number;
+  consistency: number;
+  enemyFfWins: number;
+  pickDrivers: string[];
+  pickBreakdown: LolGroupPickBreakdown;
+  avgPerformance: number;
+  pickScore: number;
+  avgKda: number;
+  avgKills: number;
+  avgDeaths: number;
+  avgAssists: number;
+  avgCsPerMin: number;
+  avgDpm: number;
+  avgKp: number;
+  mvpCount: number;
+  aceCount: number;
+}
+
+export interface LolGroupPicksResult {
+  minGames: number;
+  allPicks: LolGroupPickEntry[];
+  bestPicks: LolGroupPickEntry[];
+  worstPicks: LolGroupPickEntry[];
+}
+
+export interface LolChampionDetailedStats {
+  championId: number;
+  championName: string;
+  account: LolAccount;
+  displayName: string;
+  avatarUrl: string;
+  scope: LolViewMode;
+  totalGames: number;
+  scoredGames: number;
+  wins: number;
+  losses: number;
+  ffs: number;
+  remakes: number;
+  winRate: number;
+  ffRate: number;
+  avgPerformance: number;
+  avgPillars: LolPerformancePillarScores;
+  avgKda: number;
+  avgKills: number;
+  avgDeaths: number;
+  avgAssists: number;
+  avgKp: number;
+  avgCsPerMin: number;
+  avgCs: number;
+  avgDpm: number;
+  avgDamage: number;
+  avgGpm: number;
+  avgVisionPerMin: number;
+  avgDamageTakenPerMin: number;
+  avgDeadSeconds: number;
+  avgDurationSeconds: number;
+  mvpCount: number;
+  aceCount: number;
+  roleDistribution: Array<{ role: LolRoleKey; games: number; pct: number; winRate: number }>;
+  topRunes: Array<{ primaryRuneId: number; subStyleId: number | null; games: number; winRate: number }>;
+  topSpells: Array<{ summoner1Id: number; summoner2Id: number; games: number; winRate: number }>;
+  topItems: Array<{ itemId: number; games: number; pickRate: number; winRate: number }>;
+  durationBuckets: LolDurationBucketStats[];
+  bestMatch: { match: LolMatchSummary; participant: LolMatchParticipantSummary } | null;
+  worstMatch: { match: LolMatchSummary; participant: LolMatchParticipantSummary } | null;
+  matches: Array<{ match: LolMatchSummary; participant: LolMatchParticipantSummary }>;
+}
+
+// ==============================================================================
+// OUTCOME × DURATION CURVE (minute-by-minute V/D/FF estimator for small samples)
+// ==============================================================================
+
+/** Valid (scored) match outcome — remakes are excluded from outcome curves. */
+export type LolValidOutcome = Exclude<LolMatchOutcome, 'remake'>;
+
+/** Macro duration ranges used by the outcome chart hover: 0–10 / 10–20 / 20–30 / 30–40 / 40+. */
+export type LolMacroDurationRangeKey = '0-10' | '10-20' | '20-30' | '30-40' | '40+';
+
+export interface LolMacroDurationRangeDef {
+  key: LolMacroDurationRangeKey;
+  label: string;
+  /** Exclusive lower bound in seconds (except '0-10', which includes 0). */
+  startSec: number;
+  /** Inclusive upper bound in seconds; null = open-ended (40+). */
+  endSec: number | null;
+}
+
+export interface LolMacroDurationRangeStats extends LolMacroDurationRangeDef {
+  total: number;
+  wins: number;
+  losses: number;
+  ffs: number;
+  /** Integer percentages (largest-remainder rounding, sum = 100 when total > 0). */
+  winPct: number;
+  lossPct: number;
+  ffPct: number;
+}
+
+export interface LolOutcomeCurveSample {
+  durationSeconds: number;
+  outcome: LolMatchOutcome;
+}
+
+/** Fitted Nadaraya–Watson + Dirichlet-shrinkage model (pure data, serializable). */
+export interface LolOutcomeCurveModel {
+  /** Valid (non-remake) games used. */
+  sampleSize: number;
+  /** Sorted durations in minutes with outcome. */
+  points: Array<{ minute: number; outcome: LolValidOutcome }>;
+  /** Global (pilot) Gaussian bandwidth in minutes. */
+  bandwidthMin: number;
+  /** k for the k-nearest-neighbour balloon bandwidth. */
+  kNeighbors: number;
+  /** Dirichlet prior strength in pseudo-games. */
+  priorStrength: number;
+  /** Global empirical composition (fractions, sum = 1). */
+  prior: { win: number; loss: number; ff: number };
+  minDurationMin: number;
+  maxDurationMin: number;
+}
+
+export interface LolOutcomeMinuteEstimate {
+  minute: number;
+  /** Percentages with 2 decimals; winRate + lossRate + ffRate = 100 (exact in basis points). */
+  winRate: number;
+  lossRate: number;
+  ffRate: number;
+  /** Σ kernel weights at this minute ≈ games supporting the local estimate. */
+  effectiveGames: number;
+  /** Kernel density of games (games / minute, integrates to N). */
+  density: number;
+  /** Local (balloon) bandwidth used at this minute. */
+  localBandwidthMin: number;
+}
+
+export interface LolOutcomeMinuteCurve {
+  model: LolOutcomeCurveModel | null;
+  points: LolOutcomeMinuteEstimate[];
 }

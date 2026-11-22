@@ -23,9 +23,11 @@ interface DemoRosterTemplate {
   rankFlex: string;
   lpFlex: number;
   preferredRoles: string[];
-  champions: Array<{ championId: number; championName: string }>;
+  champions: Array<{ championId: number; championName: string; skillMod: number }>;
   skillFactor: number;
 }
+
+const CHAMP_PICK_PATTERN = [0, 0, 1, 0, 1, 2, 0, 1, 3] as const;
 
 const DEMO_TEMPLATES: DemoRosterTemplate[] = [
   {
@@ -42,10 +44,10 @@ const DEMO_TEMPLATES: DemoRosterTemplate[] = [
     lpFlex: 22,
     preferredRoles: ['MIDDLE', 'JUNGLE'],
     champions: [
-      { championId: 103, championName: 'Ahri' },
-      { championId: 517, championName: 'Sylas' },
-      { championId: 64, championName: 'LeeSin' },
-      { championId: 61, championName: 'Orianna' },
+      { championId: 103, championName: 'Ahri', skillMod: 1.16 },
+      { championId: 517, championName: 'Sylas', skillMod: 0.72 },
+      { championId: 64, championName: 'LeeSin', skillMod: 1.04 },
+      { championId: 61, championName: 'Orianna', skillMod: 0.94 },
     ],
     skillFactor: 1.18,
   },
@@ -63,10 +65,10 @@ const DEMO_TEMPLATES: DemoRosterTemplate[] = [
     lpFlex: 47,
     preferredRoles: ['BOTTOM', 'MIDDLE'],
     champions: [
-      { championId: 222, championName: 'Jinx' },
-      { championId: 145, championName: 'Kaisa' },
-      { championId: 81, championName: 'Ezreal' },
-      { championId: 498, championName: 'Xayah' },
+      { championId: 222, championName: 'Jinx', skillMod: 1.14 },
+      { championId: 145, championName: 'Kaisa', skillMod: 0.72 },
+      { championId: 81, championName: 'Ezreal', skillMod: 1.02 },
+      { championId: 498, championName: 'Xayah', skillMod: 0.92 },
     ],
     skillFactor: 1.12,
   },
@@ -84,10 +86,10 @@ const DEMO_TEMPLATES: DemoRosterTemplate[] = [
     lpFlex: 73,
     preferredRoles: ['TOP', 'JUNGLE'],
     champions: [
-      { championId: 266, championName: 'Aatrox' },
-      { championId: 24, championName: 'Jax' },
-      { championId: 234, championName: 'Viego' },
-      { championId: 59, championName: 'JarvanIV' },
+      { championId: 266, championName: 'Aatrox', skillMod: 1.14 },
+      { championId: 24, championName: 'Jax', skillMod: 0.74 },
+      { championId: 234, championName: 'Viego', skillMod: 1.04 },
+      { championId: 59, championName: 'JarvanIV', skillMod: 0.90 },
     ],
     skillFactor: 1.08,
   },
@@ -105,10 +107,10 @@ const DEMO_TEMPLATES: DemoRosterTemplate[] = [
     lpFlex: 14,
     preferredRoles: ['UTILITY', 'MIDDLE'],
     champions: [
-      { championId: 412, championName: 'Thresh' },
-      { championId: 111, championName: 'Nautilus' },
-      { championId: 89, championName: 'Leona' },
-      { championId: 99, championName: 'Lux' },
+      { championId: 412, championName: 'Thresh', skillMod: 1.18 },
+      { championId: 111, championName: 'Nautilus', skillMod: 0.76 },
+      { championId: 89, championName: 'Leona', skillMod: 1.02 },
+      { championId: 99, championName: 'Lux', skillMod: 0.88 },
     ],
     skillFactor: 0.96,
   },
@@ -126,10 +128,10 @@ const DEMO_TEMPLATES: DemoRosterTemplate[] = [
     lpFlex: 40,
     preferredRoles: ['JUNGLE', 'TOP'],
     champions: [
-      { championId: 120, championName: 'Hecarim' },
-      { championId: 777, championName: 'Yone' },
-      { championId: 122, championName: 'Darius' },
-      { championId: 154, championName: 'Zac' },
+      { championId: 120, championName: 'Hecarim', skillMod: 0.88 },
+      { championId: 777, championName: 'Yone', skillMod: 0.74 },
+      { championId: 122, championName: 'Darius', skillMod: 1.05 },
+      { championId: 154, championName: 'Zac', skillMod: 0.92 },
     ],
     skillFactor: 0.86,
   },
@@ -276,6 +278,26 @@ const SCENARIO_SPECS: ScenarioSpec[] = [
   { idSuffix: '023', hoursAgo: 168, queueId: 420, gameMode: 'CLASSIC', durationSec: 1690, team100Win: false, isSurrender: false, isEarlySurrender: false, groupIndices: [0] },
   // 24: 5-stack Flex Loss FF 32m (30+)
   { idSuffix: '024', hoursAgo: 180, queueId: 440, gameMode: 'CLASSIC', durationSec: 1920, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 1, 2, 3, 4] },
+  // 25: 5-stack Flex Win 28m
+  { idSuffix: '025', hoursAgo: 194, queueId: 440, gameMode: 'CLASSIC', durationSec: 1710, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 1, 2, 3, 4] },
+  // 26: 4-stack Normal FF 24m
+  { idSuffix: '026', hoursAgo: 215, queueId: 400, gameMode: 'CLASSIC', durationSec: 1440, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 1, 2, 4] },
+  // 27: 4-stack Modo 5v5 Win 31m
+  { idSuffix: '027', hoursAgo: 240, queueId: 710, gameMode: 'CLASSIC', durationSec: 1860, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [1, 2, 3, 4] },
+  // 28: 4-stack Flex Loss 26m
+  { idSuffix: '028', hoursAgo: 265, queueId: 440, gameMode: 'CLASSIC', durationSec: 1560, team100Win: false, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 2, 3, 4] },
+  // 29: 4-stack Flex Win 33m
+  { idSuffix: '029', hoursAgo: 295, queueId: 440, gameMode: 'CLASSIC', durationSec: 1980, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 1, 3, 4] },
+  // 30: 4-stack Normal FF 22m
+  { idSuffix: '030', hoursAgo: 325, queueId: 400, gameMode: 'CLASSIC', durationSec: 1320, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [0, 1, 2, 3] },
+  // 31: Trio Flex Win 28m
+  { idSuffix: '031', hoursAgo: 355, queueId: 440, gameMode: 'CLASSIC', durationSec: 1690, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [1, 2, 4] },
+  // 32: 4-stack Modo 5v5 Loss 29m
+  { idSuffix: '032', hoursAgo: 390, queueId: 710, gameMode: 'CLASSIC', durationSec: 1780, team100Win: false, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 1, 3, 4] },
+  // 33: Trio Flex Win 25m
+  { idSuffix: '033', hoursAgo: 425, queueId: 440, gameMode: 'CLASSIC', durationSec: 1510, team100Win: true, isSurrender: false, isEarlySurrender: false, groupIndices: [0, 2, 3] },
+  // 34: 4-stack Flex FF 30m
+  { idSuffix: '034', hoursAgo: 460, queueId: 440, gameMode: 'CLASSIC', durationSec: 1830, team100Win: false, isSurrender: true, isEarlySurrender: false, groupIndices: [1, 2, 3, 4] },
 ];
 
 function buildPerks(role: string, seed: number): RiotMatchV5Perks {
@@ -662,6 +684,7 @@ export function buildDemoLolDataset(groupMembers: PlayerProfile[]): {
 
   const baseRoles = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'] as const;
   const nowMs = Date.now();
+  const playerAppearanceCounts = new Array<number>(accounts.length).fill(0);
 
   const matches: LolMatchSummary[] = SCENARIO_SPECS.map((spec, mIdx) => {
     const isAram = spec.gameMode === 'ARAM';
@@ -691,7 +714,10 @@ export function buildDemoLolDataset(groupMembers: PlayerProfile[]): {
       if (accIdx !== undefined) {
         const account = accounts[accIdx];
         const tpl = DEMO_TEMPLATES[accIdx % DEMO_TEMPLATES.length];
-        const champ = tpl.champions[(mIdx + idx) % tpl.champions.length];
+        const appearanceIdx = playerAppearanceCounts[accIdx]++;
+        const champSlot = CHAMP_PICK_PATTERN[appearanceIdx % CHAMP_PICK_PATTERN.length];
+        const champ = tpl.champions[champSlot % tpl.champions.length];
+        const modulatedSkill = tpl.skillFactor * champ.skillMod;
         participants.push(
           buildDemoParticipant({
             participantId: idx + 1,
@@ -707,7 +733,7 @@ export function buildDemoLolDataset(groupMembers: PlayerProfile[]): {
             isEarlySurrender: spec.isEarlySurrender,
             durationSec: spec.durationSec,
             isAram,
-            skillFactor: tpl.skillFactor,
+            skillFactor: modulatedSkill,
             seed,
             profileIconId: account.profileIconId,
             summonerLevel: account.summonerLevel,

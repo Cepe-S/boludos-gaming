@@ -1,22 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   LolAccount,
-  LolDurationBucketKey,
-  LolDurationBucketStats,
+  LolMatchOutcome,
   LolMatchParticipantSummary,
   LolMatchSummary,
   LolTimeRangeFilter,
+  LolViewMode,
 } from '@/types/lol';
 import {
-  computeDurationBuckets,
+  getGradeFromScore,
   isGroupMatch,
+  resolveGroupMatchOutcome,
   TIME_RANGE_DAYS,
 } from '@/lib/lolPerformanceEngine';
 import { DEFAULT_DDRAGON_VERSION } from '@/lib/lolDdragon';
 import { LolMatchHoverCard } from './LolMatchHoverCard';
 import {
-  LOL_FF_BAR_CLASS,
-  LOL_FF_CHIP_CLASS,
   LOL_FF_DOT_FILL,
   LOL_FF_DOT_STROKE,
   LOL_LOSS_DOT_FILL,
@@ -29,21 +28,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
   Activity,
-  Clock,
   RotateCcw,
   TrendingUp,
+  User,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 
 export interface LolDurationScatterPanelProps {
+  mode: LolViewMode;
   matches: LolMatchSummary[];
   targetPuuid: string;
+  targetPuuids?: ReadonlySet<string>;
   groupPuuids: Set<string>;
+  puuidToUserId?: ReadonlyMap<string, string>;
   accountByPuuid: Map<string, LolAccount>;
   timeRange: LolTimeRangeFilter;
   ddragonVersion?: string;
-  onSelectMatch: (matchId: string) => void;
+  onSelectMatch: (matchId: string, initialPuuid?: string) => void;
 }
 
 type ScatterOutcomeFilter = 'all' | 'win' | 'loss' | 'ff';
@@ -52,33 +54,43 @@ interface ScatterPoint {
   match: LolMatchSummary;
   participant: LolMatchParticipantSummary;
   eventMs: number;
-  /** Average performanceScore (0-100) of all group members present in the game */
-  groupPerf: number;
-  groupScorers: number;
-  isGroup: boolean;
+  perf: number;
+  outcome: LolMatchOutcome;
+  enemySurrendered: boolean;
+  selectPuuid: string;
 }
 
-interface GroupWrPoint {
+interface TimelineSeriesPoint {
   matchId: string;
   eventMs: number;
   winRate: number;
+  avgPerf: number;
   winsSoFar: number;
   lossesSoFar: number;
   totalSoFar: number;
   won: boolean;
 }
 
+interface PersonalInGroupSeriesPoint {
+  matchId: string;
+  eventMs: number;
+  avgPerf: number;
+  gamesSoFar: number;
+}
+
 interface CrosshairState {
   ms: number;
   perf: number | null;
-  scorers: number | null;
 }
 
-function bucketMatchesDuration(key: LolDurationBucketKey, sec: number): boolean {
-  if (key === '0-5') return sec <= 300;
-  if (key === '0-20') return sec <= 1200;
-  if (key === '20-30') return sec > 1200 && sec <= 1800;
-  return sec > 1800;
+function buildStepPath(coords: Array<{ x: number; y: number }>): string {
+  if (coords.length === 0) return '';
+  const segs: string[] = [`M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`];
+  for (let i = 1; i < coords.length; i++) {
+    segs.push(`L ${coords[i].x.toFixed(1)} ${coords[i - 1].y.toFixed(1)}`);
+    segs.push(`L ${coords[i].x.toFixed(1)} ${coords[i].y.toFixed(1)}`);
+  }
+  return segs.join(' ');
 }
 
 function resolveEventTimestampMs(match: LolMatchSummary): number {
@@ -165,11 +177,11 @@ function buildTimeTicks(
 }
 
 const SVG_W = 1120;
-const SVG_H = 292;
+const SVG_H = 326;
 const PAD_L = 44;
 const PAD_R = 46;
-const PAD_T = 30;
-const PAD_B = 38;
+const PAD_T = 46;
+const PAD_B = 42;
 const PLOT_W = SVG_W - PAD_L - PAD_R;
 const PLOT_H = SVG_H - PAD_T - PAD_B;
 const MIN_ZOOM_SPAN_MS = 20 * MIN_MS;
@@ -179,23 +191,41 @@ const GRADE_LINES: ReadonlyArray<{ score: number; grade: string }> = [
   { score: 66, grade: 'A' },
   { score: 82, grade: 'S' },
 ];
-const CROSSHAIR_LABEL_W = 210;
-const SNAP_DISTANCE = 12;
+const TOP_HUD_W = 296;
+const TOP_HUD_W_EXPANDED = 418;
+const BOTTOM_TIME_W = 152;
+const SNAP_DISTANCE = 14;
+const DRAG_THRESHOLD_PX = 4;
 
 export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = ({
+  mode,
   matches,
   targetPuuid,
+  targetPuuids,
   groupPuuids,
+  puuidToUserId,
   accountByPuuid,
   timeRange,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
   onSelectMatch,
 }) => {
-  const [outcomeFilter, setOutcomeFilter] = useState<ScatterOutcomeFilter>('all');
-  const [showGroupWrLine, setShowGroupWrLine] = useState(true);
-  const [highlightedBucket, setHighlightedBucket] = useState<LolDurationBucketKey | null>(
-    null
+  const effectiveTargetPuuids = useMemo(
+    () =>
+      targetPuuids && targetPuuids.size > 0
+        ? targetPuuids
+        : targetPuuid
+          ? new Set([targetPuuid])
+          : new Set<string>(),
+    [targetPuuids, targetPuuid]
   );
+  const isPersonal = mode === 'personal';
+  const wrLabel = isPersonal ? 'WR Personal' : 'WR Grupo';
+  const avgPerfLabel = isPersonal ? 'Perf Personal' : 'Perf Grupo';
+
+  const [outcomeFilter, setOutcomeFilter] = useState<ScatterOutcomeFilter>('all');
+  const [showWrLine, setShowWrLine] = useState(true);
+  const [showAvgPerfLine, setShowAvgPerfLine] = useState(true);
+  const [showPersonalInGroupLine, setShowPersonalInGroupLine] = useState(false);
   const [hoveredState, setHoveredState] = useState<{
     match: LolMatchSummary;
     participant: LolMatchParticipantSummary;
@@ -203,126 +233,165 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
   } | null>(null);
   const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
 
+  useEffect(() => {
+    setHoveredState(null);
+    setCrosshair(null);
+  }, [mode, targetPuuid]);
+
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
-    active: boolean;
+    pointerDown: boolean;
+    dragging: boolean;
+    pointerId: number | null;
     startClientX: number;
+    startClientY: number;
     startMinMs: number;
     startMaxMs: number;
     movedPx: number;
   }>({
-    active: false,
+    pointerDown: false,
+    dragging: false,
+    pointerId: null,
     startClientX: 0,
+    startClientY: 0,
     startMinMs: 0,
     startMaxMs: 0,
     movedPx: 0,
   });
   const [isDragging, setIsDragging] = useState(false);
 
-  const { allPoints, groupWrSeries, buckets, fullDomain } = useMemo(() => {
-    const samples: Array<{
-      match: LolMatchSummary;
-      participant: LolMatchParticipantSummary;
-    }> = [];
-
-    for (const match of matches) {
-      const p = match.participants.find((part) => part.puuid === targetPuuid);
-      if (p) samples.push({ match, participant: p });
-    }
-
-    // Duration buckets remain the source of truth for "minute of win / loss / FF"
-    const bucketStats = computeDurationBuckets(
-      samples.map((s) => ({
-        durationSeconds: s.match.gameDuration,
-        outcome: s.participant.outcome,
-      }))
-    );
-
+  const { allPoints, timelineSeries, personalInGroupSeries, fullDomain } = useMemo(() => {
     const points: ScatterPoint[] = [];
-    for (const { match, participant } of samples) {
-      const scorers = match.participants.filter(
-        (p) =>
-          (groupPuuids.has(p.puuid) || p.puuid === targetPuuid) &&
-          p.outcome !== 'remake' &&
-          Number.isFinite(p.performanceScore)
-      );
-      if (scorers.length === 0) continue;
-      const avg = scorers.reduce((sum, p) => sum + p.performanceScore, 0) / scorers.length;
-      points.push({
-        match,
-        participant,
-        eventMs: resolveEventTimestampMs(match),
-        groupPerf: Math.round(avg * 10) / 10,
-        groupScorers: scorers.length,
-        isGroup: isGroupMatch(match, groupPuuids),
-      });
-    }
-    points.sort((a, b) => a.eventMs - b.eventMs);
 
-    // Chronological cumulative Group Winrate across ALL group (≥2) games in the active filter
-    const groupChronological = matches
-      .filter((m) => isGroupMatch(m, groupPuuids))
-      .map((m) => {
-        const groupParts = m.participants.filter((p) => groupPuuids.has(p.puuid));
-        const nonRemake = groupParts.filter((p) => p.outcome !== 'remake');
-        if (nonRemake.length === 0) return null;
-        const winsInMatch = nonRemake.filter((p) => p.outcome === 'win').length;
-        const won = winsInMatch >= Math.ceil(nonRemake.length / 2);
-        return {
-          matchId: m.matchId,
-          eventMs: resolveEventTimestampMs(m),
-          won,
-        };
-      })
-      .filter((x): x is { matchId: string; eventMs: number; won: boolean } => x !== null)
-      .sort((a, b) => a.eventMs - b.eventMs);
+    if (mode === 'personal') {
+      for (const match of matches) {
+        const participant = match.participants.find((part) =>
+          effectiveTargetPuuids.has(part.puuid)
+        );
+        if (
+          !participant ||
+          participant.outcome === 'remake' ||
+          !Number.isFinite(participant.performanceScore)
+        ) {
+          continue;
+        }
+        const eventMs = resolveEventTimestampMs(match);
+        points.push({
+          match,
+          participant,
+          eventMs,
+          perf: Math.round(participant.performanceScore * 10) / 10,
+          outcome: participant.outcome,
+          enemySurrendered: participant.enemySurrendered,
+          selectPuuid: participant.puuid,
+        });
+      }
+    } else {
+      for (const match of matches) {
+        if (!isGroupMatch(match, groupPuuids, puuidToUserId)) continue;
+        const resolved = resolveGroupMatchOutcome(match, groupPuuids);
+
+        if (
+          resolved.outcome === 'remake' ||
+          !resolved.representative ||
+          !Number.isFinite(resolved.avgPerformance)
+        ) {
+          continue;
+        }
+
+        const myPart =
+          effectiveTargetPuuids.size > 0
+            ? match.participants.find((part) => effectiveTargetPuuids.has(part.puuid))
+            : undefined;
+        const hoverParticipant = myPart ?? resolved.representative;
+
+        const eventMs = resolveEventTimestampMs(match);
+        points.push({
+          match,
+          participant: hoverParticipant,
+          eventMs,
+          perf: resolved.avgPerformance,
+          outcome: resolved.outcome,
+          enemySurrendered: resolved.enemySurrendered,
+          selectPuuid: hoverParticipant.puuid,
+        });
+      }
+    }
+
+    points.sort((a, b) => a.eventMs - b.eventMs);
 
     let winsSoFar = 0;
     let lossesSoFar = 0;
-    const wrSeries: GroupWrPoint[] = groupChronological.map((item) => {
-      if (item.won) winsSoFar += 1;
+    let perfSumSoFar = 0;
+    const computedSeries: TimelineSeriesPoint[] = points.map((pt) => {
+      const won = pt.outcome === 'win';
+      if (won) winsSoFar += 1;
       else lossesSoFar += 1;
+      perfSumSoFar += pt.perf;
       const totalSoFar = winsSoFar + lossesSoFar;
       return {
-        matchId: item.matchId,
-        eventMs: item.eventMs,
+        matchId: pt.match.matchId,
+        eventMs: pt.eventMs,
         winRate: Math.round((winsSoFar / totalSoFar) * 1000) / 10,
+        avgPerf: Math.round((perfSumSoFar / totalSoFar) * 10) / 10,
         winsSoFar,
         lossesSoFar,
         totalSoFar,
-        won: item.won,
+        won,
       };
     });
 
-    // X domain follows the global timeframe filter (7d / 30d / 90d) — "Todo" fits the data
-    const now = Date.now();
-    let domain: { minMs: number; maxMs: number };
-    if (timeRange !== 'all') {
-      const startMs = now - TIME_RANGE_DAYS[timeRange] * DAY_MS;
-      const span = now - startMs;
-      domain = { minMs: startMs - span * 0.005, maxMs: now + span * 0.012 };
-    } else {
-      const allTimestamps = [
-        ...points.map((p) => p.eventMs),
-        ...wrSeries.map((w) => w.eventMs),
-      ];
-      let rawMin = now - 30 * DAY_MS;
-      let rawMax = now;
-      if (allTimestamps.length > 0) {
-        rawMin = Math.min(...allTimestamps);
-        rawMax = Math.max(now, ...allTimestamps);
+    const computedPersonalInGroupSeries: PersonalInGroupSeriesPoint[] = [];
+    if (mode === 'group' && effectiveTargetPuuids.size > 0) {
+      let personalPerfSumSoFar = 0;
+      let personalGamesSoFar = 0;
+      for (const pt of points) {
+        const myPart = pt.match.participants.find((part) =>
+          effectiveTargetPuuids.has(part.puuid)
+        );
+        if (
+          !myPart ||
+          myPart.outcome === 'remake' ||
+          !Number.isFinite(myPart.performanceScore)
+        ) {
+          continue;
+        }
+        personalPerfSumSoFar += myPart.performanceScore;
+        personalGamesSoFar += 1;
+        computedPersonalInGroupSeries.push({
+          matchId: pt.match.matchId,
+          eventMs: pt.eventMs,
+          avgPerf: Math.round((personalPerfSumSoFar / personalGamesSoFar) * 10) / 10,
+          gamesSoFar: personalGamesSoFar,
+        });
       }
-      const pad = Math.max(HOUR_MS, (rawMax - rawMin) * 0.02);
-      domain = { minMs: rawMin - pad, maxMs: rawMax + pad };
+    }
+
+    // X domain starts at the exact first game and ends at the exact last game (zero leading/trailing gap)
+    const now = Date.now();
+    const allTimestamps = points.map((p) => p.eventMs);
+    let domain: { minMs: number; maxMs: number };
+    if (allTimestamps.length > 0) {
+      const rawMin = Math.min(...allTimestamps);
+      const rawMax = Math.max(...allTimestamps);
+      if (rawMax > rawMin) {
+        domain = { minMs: rawMin, maxMs: rawMax };
+      } else {
+        const half = MIN_ZOOM_SPAN_MS / 2;
+        domain = { minMs: rawMin - half, maxMs: rawMax + half };
+      }
+    } else {
+      const fallbackDays = timeRange === 'all' ? 30 : TIME_RANGE_DAYS[timeRange];
+      domain = { minMs: now - fallbackDays * DAY_MS, maxMs: now };
     }
 
     return {
       allPoints: points,
-      groupWrSeries: wrSeries,
-      buckets: bucketStats,
+      timelineSeries: computedSeries,
+      personalInGroupSeries: computedPersonalInGroupSeries,
       fullDomain: domain,
     };
-  }, [matches, targetPuuid, groupPuuids, timeRange]);
+  }, [mode, matches, effectiveTargetPuuids, groupPuuids, puuidToUserId, timeRange]);
 
   const [viewDomain, setViewDomain] = useState<{ minMs: number; maxMs: number }>(fullDomain);
 
@@ -331,16 +400,17 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
     setViewDomain(fullDomain);
   }, [fullDomain.minMs, fullDomain.maxMs]);
 
-  const fullSpanMs = Math.max(MIN_ZOOM_SPAN_MS, fullDomain.maxMs - fullDomain.minMs);
-  const viewSpanMs = Math.max(MIN_ZOOM_SPAN_MS, viewDomain.maxMs - viewDomain.minMs);
-  const isZoomed = viewSpanMs < fullSpanMs * 0.98;
+  const fullSpanMs = Math.max(1000, fullDomain.maxMs - fullDomain.minMs);
+  const minZoomSpanMs = Math.min(MIN_ZOOM_SPAN_MS, fullSpanMs);
+  const viewSpanMs = Math.max(1000, viewDomain.maxMs - viewDomain.minMs);
+  const isZoomed = viewSpanMs < fullSpanMs * 0.995;
 
   const clampDomain = useCallback(
     (nextMin: number, nextMax: number) => {
       let span = nextMax - nextMin;
-      if (span < MIN_ZOOM_SPAN_MS) {
+      if (span < minZoomSpanMs) {
         const mid = (nextMin + nextMax) / 2;
-        span = MIN_ZOOM_SPAN_MS;
+        span = minZoomSpanMs;
         nextMin = mid - span / 2;
         nextMax = mid + span / 2;
       }
@@ -357,25 +427,25 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       }
       return { minMs: nextMin, maxMs: nextMax };
     },
-    [fullDomain.minMs, fullDomain.maxMs, fullSpanMs]
+    [fullDomain.minMs, fullDomain.maxMs, fullSpanMs, minZoomSpanMs]
   );
 
   const zoomAtRatio = useCallback(
     (factor: number, anchorRatio: number) => {
       setViewDomain((prev) => {
         const clampedRatio = Math.min(1, Math.max(0, anchorRatio));
-        const prevSpan = Math.max(MIN_ZOOM_SPAN_MS, prev.maxMs - prev.minMs);
+        const prevSpan = Math.max(minZoomSpanMs, prev.maxMs - prev.minMs);
         const anchorMs = prev.minMs + clampedRatio * prevSpan;
         const nextSpan = Math.min(
           fullSpanMs,
-          Math.max(MIN_ZOOM_SPAN_MS, prevSpan * factor)
+          Math.max(minZoomSpanMs, prevSpan * factor)
         );
         const nextMin = anchorMs - clampedRatio * nextSpan;
         const nextMax = nextMin + nextSpan;
         return clampDomain(nextMin, nextMax);
       });
     },
-    [clampDomain, fullSpanMs]
+    [clampDomain, fullSpanMs, minZoomSpanMs]
   );
 
   // Non-passive wheel listener so zooming never scrolls the outer page
@@ -390,6 +460,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
       const svgX = ((e.clientX - rect.left) / rect.width) * SVG_W;
       const ratio = (svgX - PAD_L) / PLOT_W;
       const factor = e.deltaY < 0 ? 0.8 : 1.25;
+      setHoveredState(null);
       zoomAtRatio(factor, ratio);
     };
 
@@ -401,68 +472,115 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
 
   const visiblePoints = useMemo(() => {
     if (outcomeFilter === 'all') return allPoints;
-    return allPoints.filter((pt) => pt.participant.outcome === outcomeFilter);
+    return allPoints.filter((pt) => pt.outcome === outcomeFilter);
   }, [allPoints, outcomeFilter]);
 
   const toX = (ms: number) => PAD_L + ((ms - viewDomain.minMs) / viewSpanMs) * PLOT_W;
   const toY = (value0to100: number) =>
     PAD_T + PLOT_H - Math.min(1, Math.max(0, value0to100 / 100)) * PLOT_H;
 
-  const updateCrosshair = (clientX: number, containerEl: HTMLDivElement) => {
-    const rect = containerEl.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const svgX = ((clientX - rect.left) / rect.width) * SVG_W;
-    if (svgX < PAD_L || svgX > SVG_W - PAD_R) {
-      setCrosshair(null);
-      return;
-    }
-
-    // Snap to the nearest game (scatter dot) when close enough
-    let best: ScatterPoint | null = null;
-    let bestDist = Infinity;
+  const findSnappedPoint = (svgX: number, svgY: number): ScatterPoint | null => {
+    const candidates: Array<{ pt: ScatterPoint; dx: number; dy: number }> = [];
     for (const pt of visiblePoints) {
-      const dist = Math.abs(toX(pt.eventMs) - svgX);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = pt;
+      const cx = toX(pt.eventMs);
+      if (cx < PAD_L - 1 || cx > SVG_W - PAD_R + 1) continue;
+      const dx = Math.abs(cx - svgX);
+      if (dx <= SNAP_DISTANCE) {
+        const cy = Math.min(PAD_T + PLOT_H - 4, Math.max(PAD_T + 4, toY(pt.perf)));
+        candidates.push({ pt, dx, dy: Math.abs(cy - svgY) });
       }
     }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => {
+      // When two games share essentially the same X column, let Y disambiguate them
+      if (Math.abs(a.dx - b.dx) <= 4) {
+        return a.dy - b.dy || a.dx - b.dx;
+      }
+      return a.dx - b.dx;
+    });
+    return candidates[0].pt;
+  };
 
-    if (best && bestDist <= SNAP_DISTANCE) {
-      setCrosshair({ ms: best.eventMs, perf: best.groupPerf, scorers: best.groupScorers });
+  const updateCrosshairAndHover = (
+    clientX: number,
+    clientY: number,
+    containerEl: HTMLDivElement
+  ) => {
+    const rect = containerEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const svgX = ((clientX - rect.left) / rect.width) * SVG_W;
+    const svgY = ((clientY - rect.top) / rect.height) * SVG_H;
+    if (svgX < PAD_L - 8 || svgX > SVG_W - PAD_R + 8) {
+      setCrosshair(null);
+      setHoveredState(null);
       return;
     }
 
-    const ms = viewDomain.minMs + ((svgX - PAD_L) / PLOT_W) * viewSpanMs;
-    setCrosshair({ ms, perf: null, scorers: null });
+    const snapped = findSnappedPoint(svgX, svgY);
+    if (snapped) {
+      const cx = toX(snapped.eventMs);
+      const cy = Math.min(PAD_T + PLOT_H - 4, Math.max(PAD_T + 4, toY(snapped.perf)));
+      const dotScreenX = rect.left + (cx / SVG_W) * rect.width;
+      const dotScreenY = rect.top + (cy / SVG_H) * rect.height;
+      setCrosshair({ ms: snapped.eventMs, perf: snapped.perf });
+      setHoveredState({
+        match: snapped.match,
+        participant: snapped.participant,
+        rect: {
+          left: dotScreenX - 6,
+          right: dotScreenX + 6,
+          top: dotScreenY - 6,
+          bottom: dotScreenY + 6,
+        },
+      });
+      return;
+    }
+
+    const clampedSvgX = Math.min(SVG_W - PAD_R, Math.max(PAD_L, svgX));
+    const ms = viewDomain.minMs + ((clampedSvgX - PAD_L) / PLOT_W) * viewSpanMs;
+    setCrosshair({ ms, perf: null });
+    setHoveredState(null);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
     dragStateRef.current = {
-      active: true,
+      pointerDown: true,
+      dragging: false,
+      pointerId: e.pointerId,
       startClientX: e.clientX,
+      startClientY: e.clientY,
       startMinMs: viewDomain.minMs,
       startMaxMs: viewDomain.maxMs,
       movedPx: 0,
     };
-    setIsDragging(true);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const st = dragStateRef.current;
-    if (!st.active) {
-      updateCrosshair(e.clientX, e.currentTarget);
+    if (!st.pointerDown) {
+      updateCrosshairAndHover(e.clientX, e.clientY, e.currentTarget);
       return;
     }
 
     const dxPx = e.clientX - st.startClientX;
-    st.movedPx = Math.max(st.movedPx, Math.abs(dxPx));
-    if (st.movedPx > 3) {
+    const dyPx = e.clientY - st.startClientY;
+    const distPx = Math.hypot(dxPx, dyPx);
+    st.movedPx = Math.max(st.movedPx, distPx);
+
+    if (!st.dragging && st.movedPx > DRAG_THRESHOLD_PX) {
+      st.dragging = true;
+      setIsDragging(true);
       setHoveredState(null);
       setCrosshair(null);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore if pointer already released
+      }
     }
+
+    if (!st.dragging) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const plotPxWidth = Math.max(1, (PLOT_W / SVG_W) * rect.width);
@@ -472,12 +590,44 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStateRef.current.active) {
-      dragStateRef.current.active = false;
-      setIsDragging(false);
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
+    const st = dragStateRef.current;
+    if (!st.pointerDown) return;
+
+    const wasDragging = st.dragging || st.movedPx > DRAG_THRESHOLD_PX;
+    st.pointerDown = false;
+    st.dragging = false;
+    st.pointerId = null;
+    setIsDragging(false);
+
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+
+    if (!wasDragging) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const svgX = ((e.clientX - rect.left) / rect.width) * SVG_W;
+        const svgY = ((e.clientY - rect.top) / rect.height) * SVG_H;
+        if (svgX >= PAD_L - 8 && svgX <= SVG_W - PAD_R + 8) {
+          const snapped = findSnappedPoint(svgX, svgY);
+          if (snapped) {
+            setHoveredState(null);
+            setCrosshair(null);
+            onSelectMatch(snapped.match.matchId, snapped.selectPuuid);
+          }
+        }
       }
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = dragStateRef.current;
+    st.pointerDown = false;
+    st.dragging = false;
+    st.pointerId = null;
+    setIsDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
     }
   };
 
@@ -489,9 +639,9 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
     [visiblePoints, viewDomain.minMs, viewDomain.maxMs]
   );
 
-  const avgGroupPerfInView = useMemo(() => {
+  const avgPerfInView = useMemo(() => {
     if (inViewPoints.length === 0) return null;
-    const sum = inViewPoints.reduce((acc, pt) => acc + pt.groupPerf, 0);
+    const sum = inViewPoints.reduce((acc, pt) => acc + pt.perf, 0);
     return Math.round(sum / inViewPoints.length);
   }, [inViewPoints]);
 
@@ -501,35 +651,112 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
   );
   const showTickHours = xStepMs < DAY_MS;
 
-  const groupWrPolyline = useMemo(() => {
-    if (!showGroupWrLine || groupWrSeries.length === 0) return '';
-    return groupWrSeries
-      .map((pt) => `${toX(pt.eventMs).toFixed(1)},${toY(pt.winRate).toFixed(1)}`)
-      .join(' ');
-  }, [showGroupWrLine, groupWrSeries, viewDomain.minMs, viewSpanMs]);
+  const wrStepPath = useMemo(() => {
+    if (!showWrLine || timelineSeries.length < 2) return '';
+    return buildStepPath(
+      timelineSeries.map((pt) => ({ x: toX(pt.eventMs), y: toY(pt.winRate) }))
+    );
+  }, [showWrLine, timelineSeries, viewDomain.minMs, viewSpanMs]);
 
-  const groupWrAreaPath = useMemo(() => {
-    if (!showGroupWrLine || groupWrSeries.length < 2) return '';
-    const first = groupWrSeries[0];
-    const last = groupWrSeries[groupWrSeries.length - 1];
-    const lineSegs = groupWrSeries
-      .map(
-        (pt, idx) =>
-          `${idx === 0 ? 'M' : 'L'} ${toX(pt.eventMs).toFixed(1)} ${toY(pt.winRate).toFixed(1)}`
-      )
-      .join(' ');
-    return `${lineSegs} L ${toX(last.eventMs).toFixed(1)} ${(PAD_T + PLOT_H).toFixed(1)} L ${toX(first.eventMs).toFixed(1)} ${(PAD_T + PLOT_H).toFixed(1)} Z`;
-  }, [showGroupWrLine, groupWrSeries, viewDomain.minMs, viewSpanMs]);
+  const wrStepAreaPath = useMemo(() => {
+    if (!wrStepPath || timelineSeries.length < 2) return '';
+    const first = timelineSeries[0];
+    const last = timelineSeries[timelineSeries.length - 1];
+    const baseY = (PAD_T + PLOT_H).toFixed(1);
+    return `${wrStepPath} L ${toX(last.eventMs).toFixed(1)} ${baseY} L ${toX(first.eventMs).toFixed(1)} ${baseY} Z`;
+  }, [wrStepPath, timelineSeries, viewDomain.minMs, viewSpanMs]);
 
-  const latestGroupWr =
-    groupWrSeries.length > 0 ? groupWrSeries[groupWrSeries.length - 1].winRate : null;
+  const avgPerfStepPath = useMemo(() => {
+    if (!showAvgPerfLine || timelineSeries.length < 2) return '';
+    return buildStepPath(
+      timelineSeries.map((pt) => ({ x: toX(pt.eventMs), y: toY(pt.avgPerf) }))
+    );
+  }, [showAvgPerfLine, timelineSeries, viewDomain.minMs, viewSpanMs]);
+
+  const personalInGroupStepPath = useMemo(() => {
+    if (isPersonal || !showPersonalInGroupLine || personalInGroupSeries.length === 0) {
+      return '';
+    }
+    const coords = personalInGroupSeries.map((pt) => ({
+      x: toX(pt.eventMs),
+      y: toY(pt.avgPerf),
+    }));
+    const lastTimelineMs =
+      timelineSeries.length > 0
+        ? timelineSeries[timelineSeries.length - 1].eventMs
+        : null;
+    const lastPersonal = personalInGroupSeries[personalInGroupSeries.length - 1];
+    if (lastTimelineMs !== null && lastTimelineMs > lastPersonal.eventMs) {
+      coords.push({
+        x: toX(lastTimelineMs),
+        y: toY(lastPersonal.avgPerf),
+      });
+    }
+    if (coords.length < 2) return '';
+    return buildStepPath(coords);
+  }, [
+    isPersonal,
+    showPersonalInGroupLine,
+    personalInGroupSeries,
+    timelineSeries,
+    viewDomain.minMs,
+    viewSpanMs,
+  ]);
+
+  const latestSeriesPoint =
+    timelineSeries.length > 0 ? timelineSeries[timelineSeries.length - 1] : null;
+  const latestWr = latestSeriesPoint ? latestSeriesPoint.winRate : null;
+
+  const seriesAtCrosshair = useMemo(() => {
+    if (!crosshair || timelineSeries.length === 0) return null;
+    let active: TimelineSeriesPoint | null = null;
+    for (const pt of timelineSeries) {
+      if (pt.eventMs <= crosshair.ms) {
+        active = pt;
+      } else {
+        break;
+      }
+    }
+    return active ?? timelineSeries[0];
+  }, [crosshair, timelineSeries]);
+
+  const personalPerfAtCrosshair = useMemo(() => {
+    if (
+      isPersonal ||
+      !showPersonalInGroupLine ||
+      !crosshair ||
+      personalInGroupSeries.length === 0
+    ) {
+      return null;
+    }
+    let active: PersonalInGroupSeriesPoint | null = null;
+    for (const pt of personalInGroupSeries) {
+      if (pt.eventMs <= crosshair.ms) {
+        active = pt;
+      } else {
+        break;
+      }
+    }
+    return active;
+  }, [isPersonal, showPersonalInGroupLine, crosshair, personalInGroupSeries]);
 
   const crosshairX = crosshair ? toX(crosshair.ms) : null;
-  const crosshairLabelX =
+  const showPersonalHud =
+    !isPersonal && showPersonalInGroupLine && personalPerfAtCrosshair !== null;
+  const topHudW = showPersonalHud ? TOP_HUD_W_EXPANDED : TOP_HUD_W;
+  const topHudX =
     crosshairX !== null
       ? Math.min(
-          SVG_W - PAD_R - CROSSHAIR_LABEL_W / 2,
-          Math.max(PAD_L + CROSSHAIR_LABEL_W / 2, crosshairX)
+          SVG_W - PAD_R - topHudW / 2,
+          Math.max(PAD_L + topHudW / 2, crosshairX)
+        )
+      : 0;
+  const hudLeft = topHudX - topHudW / 2;
+  const bottomTimeX =
+    crosshairX !== null
+      ? Math.min(
+          SVG_W - PAD_R - BOTTOM_TIME_W / 2,
+          Math.max(PAD_L + BOTTOM_TIME_W / 2, crosshairX)
         )
       : 0;
 
@@ -539,50 +766,102 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-1.5 text-sm">
             <Activity className="w-4 h-4 text-primary" strokeWidth={1.75} />
-            <span>Performance del Grupo</span>
+            <span>{isPersonal ? 'Performance Personal' : 'Performance del Grupo'}</span>
             <Badge variant="secondary" className="font-mono text-[10px]">
               {inViewPoints.length}/{visiblePoints.length}G
             </Badge>
-            {avgGroupPerfInView !== null && (
+            {avgPerfInView !== null && (
               <Badge
                 variant="outline"
-                className="font-mono text-[10px] border-primary/45 bg-primary/10 text-primary"
-                title="Performance promedio del grupo en las partidas visibles"
+                className="font-mono text-[10px] border-cyan-400/50 bg-cyan-500/15 text-cyan-300"
+                title={
+                  isPersonal
+                    ? 'Performance promedio personal en las partidas visibles'
+                    : 'Performance promedio del grupo en las partidas visibles'
+                }
               >
-                Prom {avgGroupPerfInView}
+                Prom {avgPerfInView}
               </Badge>
             )}
-            {latestGroupWr !== null && showGroupWrLine && (
+            {latestWr !== null && showWrLine && (
               <Badge
                 variant="outline"
                 className="font-mono text-[10px] border-indigo-400/50 bg-indigo-500/15 text-indigo-300"
               >
                 <TrendingUp className="w-3 h-3" strokeWidth={1.75} />
-                WR {latestGroupWr}%
+                {wrLabel} {latestWr}%
               </Badge>
             )}
             <LolInfoTip
               acronym="Perf"
-              title="Performance del Grupo vs Día y Hora"
-              description="Cada punto es una partida. Eje Y izq.: performance promedio (0-100) de los integrantes del grupo en ese game. Eje Y der.: WR acumulado del grupo (≥2). Rueda: zoom · Arrastrar: desplazar."
+              title={
+                isPersonal
+                  ? 'Performance Personal vs Día y Hora'
+                  : 'Performance del Grupo vs Día y Hora'
+              }
+              description={
+                isPersonal
+                  ? 'Puntos: BG-PERF por partida (sin remakes). Línea cyan escalonada: performance promedio acumulada. Línea índigo escalonada: WR Personal acumulado (%). Rueda: zoom · Arrastrar: desplazar.'
+                  : 'Puntos: BG-PERF promedio grupal por partida (≥2). Línea cyan escalonada: performance promedio acumulada del grupo. Línea índigo escalonada: WR Grupo acumulado (%). Rueda: zoom · Arrastrar: desplazar.'
+              }
             />
           </CardTitle>
 
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setShowGroupWrLine((prev) => !prev)}
+              onClick={() => setShowAvgPerfLine((prev) => !prev)}
               className={cn(
                 'px-2 py-0.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
-                showGroupWrLine
+                showAvgPerfLine
+                  ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-300 font-semibold'
+                  : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
+              )}
+              title={
+                isPersonal
+                  ? 'Mostrar/ocultar línea de performance promedio personal'
+                  : 'Mostrar/ocultar línea de performance promedio del grupo'
+              }
+            >
+              <Activity className="w-3 h-3" strokeWidth={1.75} />
+              <span>{avgPerfLabel}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowWrLine((prev) => !prev)}
+              className={cn(
+                'px-2 py-0.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
+                showWrLine
                   ? 'bg-indigo-500/20 border-indigo-400/60 text-indigo-300 font-semibold'
                   : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
               )}
-              title="Mostrar/ocultar línea de Winrate del grupo"
+              title={
+                isPersonal
+                  ? 'Mostrar/ocultar línea de Winrate personal'
+                  : 'Mostrar/ocultar línea de Winrate del grupo'
+              }
             >
               <TrendingUp className="w-3 h-3" strokeWidth={1.75} />
-              <span>WR Grupo</span>
+              <span>{wrLabel}</span>
             </button>
+
+            {!isPersonal && personalInGroupSeries.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowPersonalInGroupLine((prev) => !prev)}
+                className={cn(
+                  'px-2 py-0.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
+                  showPersonalInGroupLine
+                    ? 'bg-amber-500/20 border-amber-400/60 text-amber-300 font-semibold'
+                    : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
+                )}
+                title="Mostrar/ocultar mi performance personal promedio en partidas del grupo"
+              >
+                <User className="w-3 h-3" strokeWidth={1.75} />
+                <span>Mi Perf</span>
+              </button>
+            )}
 
             <div className="inline-flex items-center rounded-md border border-border bg-background/55 p-0.5 text-[11px] gap-0.5">
               {(
@@ -646,7 +925,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 variant="outline"
                 disabled={!isZoomed}
                 className="h-6 px-1.5 text-[10px]"
-                title="Restablecer al filtro de tiempo"
+                title="Ajustar a todas las partidas"
                 aria-label="Restablecer zoom"
                 onClick={() => setViewDomain(fullDomain)}
               >
@@ -673,14 +952,22 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 <span className="w-2.5 h-2.5 rounded-full bg-[#881337] border border-[#FB7185]" />
                 FF
               </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-full border-2 border-primary" />
-                Grupo ≥2
-              </span>
-              {showGroupWrLine && (
+              {showAvgPerfLine && (
+                <span className="inline-flex items-center gap-1 text-cyan-300">
+                  <span className="w-3.5 h-0.5 bg-cyan-400 inline-block rounded-full" />
+                  {avgPerfLabel} (Prom)
+                </span>
+              )}
+              {showWrLine && (
                 <span className="inline-flex items-center gap-1 text-indigo-300">
                   <span className="w-3.5 h-0.5 bg-indigo-400 inline-block rounded-full" />
-                  WR Grupo (%)
+                  {wrLabel} (%)
+                </span>
+              )}
+              {!isPersonal && showPersonalInGroupLine && personalInGroupSeries.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-amber-300">
+                  <span className="w-3.5 h-0.5 bg-amber-400 inline-block rounded-full" />
+                  Mi Perf (Grupo)
                 </span>
               )}
             </div>
@@ -692,28 +979,35 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
             onPointerLeave={() => {
-              if (!dragStateRef.current.active) setCrosshair(null);
+              if (!dragStateRef.current.dragging) {
+                setCrosshair(null);
+                setHoveredState(null);
+              }
             }}
-            className={cn(
-              'relative w-full select-none touch-none',
-              isDragging ? 'cursor-grabbing' : 'cursor-crosshair'
-            )}
+            className="relative w-full select-none touch-none cursor-crosshair"
           >
             <svg
               viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-              className="w-full h-auto block overflow-visible"
+              className="w-full h-auto block overflow-visible cursor-crosshair"
               role="img"
-              aria-label="Performance promedio del grupo por partida vs día y hora"
+              aria-label={
+                isPersonal
+                  ? 'Performance personal por partida vs día y hora'
+                  : 'Performance promedio del grupo por partida vs día y hora'
+              }
             >
               <defs>
                 <clipPath id="lol-timeline-plot-clip">
                   <rect x={PAD_L} y={PAD_T - 6} width={PLOT_W} height={PLOT_H + 12} />
                 </clipPath>
+                <clipPath id="lol-timeline-dots-clip">
+                  <rect x={PAD_L - 8} y={PAD_T - 8} width={PLOT_W + 16} height={PLOT_H + 16} />
+                </clipPath>
                 <linearGradient id="lol-wr-area-grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#818CF8" stopOpacity="0.18" />
-                  <stop offset="100%" stopColor="#818CF8" stopOpacity="0.01" />
+                  <stop offset="0%" stopColor="#818CF8" stopOpacity="0.11" />
+                  <stop offset="100%" stopColor="#818CF8" stopOpacity="0.005" />
                 </linearGradient>
               </defs>
 
@@ -740,7 +1034,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                     >
                       {tick}
                     </text>
-                    {showGroupWrLine && (
+                    {showWrLine && (
                       <text
                         x={SVG_W - PAD_R + 7}
                         y={y + 3}
@@ -849,7 +1143,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 stroke="rgba(255,255,255,0.16)"
                 strokeWidth={1}
               />
-              {showGroupWrLine && (
+              {showWrLine && (
                 <line
                   x1={SVG_W - PAD_R}
                   y1={PAD_T}
@@ -877,48 +1171,75 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                   );
                 })}
 
-                {/* Group Winrate area + line */}
-                {showGroupWrLine && groupWrSeries.length >= 2 && (
+                {/* Cumulative Stepped Winrate area + line */}
+                {showWrLine && wrStepPath && (
                   <>
-                    <path d={groupWrAreaPath} fill="url(#lol-wr-area-grad)" />
-                    <polyline
+                    <path d={wrStepAreaPath} fill="url(#lol-wr-area-grad)" />
+                    <path
+                      d={wrStepPath}
                       fill="none"
                       stroke="#818CF8"
-                      strokeOpacity={0.85}
-                      strokeWidth={1.75}
+                      strokeOpacity={0.78}
+                      strokeWidth={1.15}
                       strokeLinejoin="round"
                       strokeLinecap="round"
-                      points={groupWrPolyline}
                     />
                   </>
                 )}
 
-                {/* Hover crosshair line */}
-                {crosshairX !== null && !isDragging && (
-                  <line
-                    x1={crosshairX}
-                    y1={PAD_T}
-                    x2={crosshairX}
-                    y2={PAD_T + PLOT_H}
-                    stroke="rgba(242, 243, 245, 0.55)"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                    pointerEvents="none"
+                {/* Cumulative Stepped Average Performance line */}
+                {showAvgPerfLine && avgPerfStepPath && (
+                  <path
+                    d={avgPerfStepPath}
+                    fill="none"
+                    stroke="#22D3EE"
+                    strokeOpacity={0.85}
+                    strokeWidth={1.2}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
                   />
                 )}
 
-                {/* Game dots: Y = group average performance */}
+                {/* Optional Cumulative Stepped Personal Performance in Group Matches line */}
+                {!isPersonal && showPersonalInGroupLine && personalInGroupStepPath && (
+                  <path
+                    d={personalInGroupStepPath}
+                    fill="none"
+                    stroke="#F59E0B"
+                    strokeOpacity={0.85}
+                    strokeWidth={1.2}
+                    strokeDasharray="4 2"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                )}
+
+                {/* Hover crosshair vertical line */}
+                {crosshairX !== null && !isDragging && (
+                  <g pointerEvents="none">
+                    <line
+                      x1={crosshairX}
+                      y1={PAD_T}
+                      x2={crosshairX}
+                      y2={PAD_T + PLOT_H}
+                      stroke="rgba(242, 243, 245, 0.55)"
+                      strokeWidth={1}
+                      strokeDasharray="3 3"
+                    />
+                  </g>
+                )}
+              </g>
+
+              {/* Game dots: Y = personal or group performance (unclipped at exact start/end edges) */}
+              <g clipPath="url(#lol-timeline-dots-clip)">
                 {visiblePoints.map((pt) => {
                   const cx = toX(pt.eventMs);
-                  if (cx < PAD_L - 14 || cx > SVG_W - PAD_R + 14) return null;
+                  if (cx < PAD_L - 1 || cx > SVG_W - PAD_R + 1) return null;
                   const cy = Math.min(
                     PAD_T + PLOT_H - 4,
-                    Math.max(PAD_T + 4, toY(pt.groupPerf))
+                    Math.max(PAD_T + 4, toY(pt.perf))
                   );
-                  const outcome = pt.participant.outcome;
-                  const isDimmed =
-                    highlightedBucket !== null &&
-                    !bucketMatchesDuration(highlightedBucket, pt.match.gameDuration);
+                  const outcome = pt.outcome;
                   const isHovered = hoveredState?.match.matchId === pt.match.matchId;
 
                   const fillColor =
@@ -931,61 +1252,38 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                   const strokeColor =
                     outcome === 'ff'
                       ? LOL_FF_DOT_STROKE
-                      : outcome === 'win' && pt.participant.enemySurrendered
+                      : outcome === 'win' && pt.enemySurrendered
                         ? '#F59E0B'
-                        : pt.isGroup
-                          ? '#5865F2'
-                          : '#0B0D10';
+                        : '#0B0D10';
 
                   return (
                     <g
                       key={pt.match.matchId}
-                      opacity={isDimmed ? 0.18 : 1}
-                      className="cursor-pointer transition-opacity"
-                      onMouseEnter={(e) => {
-                        if (dragStateRef.current.active) return;
-                        const r = e.currentTarget.getBoundingClientRect();
-                        setHoveredState({
-                          match: pt.match,
-                          participant: pt.participant,
-                          rect: {
-                            left: r.left,
-                            top: r.top,
-                            right: r.right,
-                            bottom: r.bottom,
-                          },
-                        });
-                      }}
-                      onMouseLeave={() => setHoveredState(null)}
-                      onClick={(e) => {
-                        if (dragStateRef.current.movedPx > 4) return;
-                        e.stopPropagation();
-                        onSelectMatch(pt.match.matchId);
-                      }}
+                      className="transition-opacity pointer-events-none"
                     >
-                      <circle cx={cx} cy={cy} r={10} fill="transparent" />
-                      {pt.isGroup && (
+                      {isHovered && (
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={isHovered ? 10 : 8.2}
+                          r={7}
                           fill="none"
-                          stroke="#5865F2"
-                          strokeWidth={1.6}
-                          strokeOpacity={0.85}
+                          stroke="rgba(242, 243, 245, 0.75)"
+                          strokeWidth={1.1}
                         />
                       )}
                       <circle
                         cx={cx}
                         cy={cy}
-                        r={isHovered ? 7 : outcome === 'ff' ? 5.8 : 5.2}
+                        r={isHovered ? 4.4 : outcome === 'ff' ? 3.1 : 2.6}
                         fill={fillColor}
                         stroke={strokeColor}
                         strokeWidth={
-                          outcome === 'ff' ||
-                          (outcome === 'win' && pt.participant.enemySurrendered)
-                            ? 1.9
-                            : 1.3
+                          isHovered
+                            ? 1.4
+                            : outcome === 'ff' ||
+                                (outcome === 'win' && pt.enemySurrendered)
+                              ? 1.1
+                              : 0.75
                         }
                       />
                     </g>
@@ -993,132 +1291,196 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
                 })}
               </g>
 
-              {/* Crosshair date/time label — above the plot, outside the chart area */}
+              {/* Hover Readouts: Prominent WR + Avg Perf HUD ABOVE plot & Exact Date/Time Pill BELOW plot */}
               {crosshair && crosshairX !== null && !isDragging && (
                 <g pointerEvents="none">
+                  {seriesAtCrosshair && (
+                    <g>
+                      <line
+                        x1={crosshairX}
+                        y1={40}
+                        x2={crosshairX}
+                        y2={PAD_T}
+                        stroke="rgba(242, 243, 245, 0.55)"
+                        strokeWidth={1}
+                      />
+                      <rect
+                        x={hudLeft}
+                        y={2}
+                        width={topHudW}
+                        height={38}
+                        rx={6}
+                        fill="#11141A"
+                        stroke="rgba(255,255,255,0.22)"
+                        strokeWidth={1}
+                      />
+                      {/* Left Block: Winrate at selected moment */}
+                      <circle
+                        cx={hudLeft + 13}
+                        cy={13}
+                        r={2.8}
+                        fill="#818CF8"
+                      />
+                      <text
+                        x={hudLeft + 21}
+                        y={15.5}
+                        fill="#A5B4FC"
+                        fontSize="8.5"
+                        fontWeight={700}
+                        letterSpacing="0.06em"
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                      >
+                        {wrLabel.toUpperCase()}
+                      </text>
+                      <text
+                        x={hudLeft + 11}
+                        y={33}
+                        fill="#E0E7FF"
+                        fontSize="13.5"
+                        fontWeight={800}
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                      >
+                        {seriesAtCrosshair.winRate.toFixed(1)}%
+                        <tspan fill="#949BA4" fontSize="9.5" fontWeight={500}>
+                          {` (${seriesAtCrosshair.winsSoFar}V-${seriesAtCrosshair.lossesSoFar}D)`}
+                        </tspan>
+                      </text>
+
+                      {/* Divider 1 */}
+                      <line
+                        x1={hudLeft + 146}
+                        y1={8}
+                        x2={hudLeft + 146}
+                        y2={34}
+                        stroke="rgba(255,255,255,0.14)"
+                        strokeWidth={1}
+                      />
+
+                      {/* Middle / Right Block: Average Performance at selected moment */}
+                      <circle
+                        cx={hudLeft + 159}
+                        cy={13}
+                        r={2.8}
+                        fill="#22D3EE"
+                      />
+                      <text
+                        x={hudLeft + 167}
+                        y={15.5}
+                        fill="#67E8F9"
+                        fontSize="8.5"
+                        fontWeight={700}
+                        letterSpacing="0.06em"
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                      >
+                        PERF PROMEDIO
+                      </text>
+                      <text
+                        x={hudLeft + 157}
+                        y={33}
+                        fill="#CFFAFE"
+                        fontSize="13.5"
+                        fontWeight={800}
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                      >
+                        {seriesAtCrosshair.avgPerf.toFixed(1)}
+                        <tspan fill="#22D3EE" fontSize="10.5" fontWeight={700}>
+                          {` ${getGradeFromScore(seriesAtCrosshair.avgPerf)}`}
+                        </tspan>
+                        <tspan fill="#949BA4" fontSize="9.5" fontWeight={500}>
+                          {` · ${seriesAtCrosshair.totalSoFar}G`}
+                        </tspan>
+                      </text>
+
+                      {/* Optional 3rd Block: Personal Performance in Group Matches */}
+                      {showPersonalHud && personalPerfAtCrosshair && (
+                        <>
+                          <line
+                            x1={hudLeft + 294}
+                            y1={8}
+                            x2={hudLeft + 294}
+                            y2={34}
+                            stroke="rgba(255,255,255,0.14)"
+                            strokeWidth={1}
+                          />
+                          <circle
+                            cx={hudLeft + 307}
+                            cy={13}
+                            r={2.8}
+                            fill="#F59E0B"
+                          />
+                          <text
+                            x={hudLeft + 315}
+                            y={15.5}
+                            fill="#FCD34D"
+                            fontSize="8.5"
+                            fontWeight={700}
+                            letterSpacing="0.06em"
+                            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                          >
+                            MI PERF
+                          </text>
+                          <text
+                            x={hudLeft + 305}
+                            y={33}
+                            fill="#FEF3C7"
+                            fontSize="13.5"
+                            fontWeight={800}
+                            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                          >
+                            {personalPerfAtCrosshair.avgPerf.toFixed(1)}
+                            <tspan fill="#F59E0B" fontSize="10.5" fontWeight={700}>
+                              {` ${getGradeFromScore(personalPerfAtCrosshair.avgPerf)}`}
+                            </tspan>
+                            <tspan fill="#949BA4" fontSize="9.5" fontWeight={500}>
+                              {` · ${personalPerfAtCrosshair.gamesSoFar}G`}
+                            </tspan>
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  )}
+
+                  {/* Bottom Exact Selected Date & Time Pill */}
+                  <line
+                    x1={crosshairX}
+                    y1={PAD_T + PLOT_H}
+                    x2={crosshairX}
+                    y2={PAD_T + PLOT_H + 8}
+                    stroke="rgba(242, 243, 245, 0.65)"
+                    strokeWidth={1}
+                  />
                   <rect
-                    x={crosshairLabelX - CROSSHAIR_LABEL_W / 2}
-                    y={3}
-                    width={CROSSHAIR_LABEL_W}
-                    height={19}
+                    x={bottomTimeX - BOTTOM_TIME_W / 2}
+                    y={PAD_T + PLOT_H + 8}
+                    width={BOTTOM_TIME_W}
+                    height={23}
                     rx={4}
-                    fill="#1E1F22"
-                    stroke="rgba(255,255,255,0.18)"
+                    fill="#181C24"
+                    stroke="rgba(242, 243, 245, 0.34)"
                     strokeWidth={1}
                   />
                   <text
-                    x={crosshairLabelX}
-                    y={16.5}
+                    x={bottomTimeX}
+                    y={PAD_T + PLOT_H + 23}
                     textAnchor="middle"
                     fill="#F2F3F5"
                     fontSize="10.5"
-                    fontWeight={600}
+                    fontWeight={700}
                     fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                   >
                     {formatFullDateTime(crosshair.ms)}
-                    {crosshair.perf !== null && (
-                      <tspan fill="#949BA4" fontWeight={500}>
-                        {`  ·  Perf ${Math.round(crosshair.perf)}`}
-                      </tspan>
-                    )}
                   </text>
-                  <line
-                    x1={crosshairX}
-                    y1={22}
-                    x2={crosshairX}
-                    y2={PAD_T}
-                    stroke="rgba(242, 243, 245, 0.55)"
-                    strokeWidth={1}
-                  />
                 </g>
               )}
             </svg>
 
-            {visiblePoints.length === 0 && groupWrSeries.length === 0 && (
+            {visiblePoints.length === 0 && timelineSeries.length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span className="text-[11px] font-mono text-muted-foreground bg-background/80 px-2.5 py-1 rounded border border-border">
                   Sin partidas en el filtro actual
                 </span>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Minute of Win / Loss / FF — duration buckets */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-              <span>Minuto de Victoria / Derrota / FF</span>
-            </span>
-            {highlightedBucket && (
-              <button
-                type="button"
-                onClick={() => setHighlightedBucket(null)}
-                className="text-[10px] font-mono text-primary hover:underline cursor-pointer"
-              >
-                Limpiar ({highlightedBucket})
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-            {buckets.map((bucket: LolDurationBucketStats) => {
-              const isSelected = highlightedBucket === bucket.key;
-              const total = Math.max(1, bucket.total);
-              const winPct = (bucket.wins / total) * 100;
-              const lossPct = (bucket.losses / total) * 100;
-              const ffPct = (bucket.ffs / total) * 100;
-
-              return (
-                <button
-                  key={bucket.key}
-                  type="button"
-                  onClick={() =>
-                    setHighlightedBucket((prev) => (prev === bucket.key ? null : bucket.key))
-                  }
-                  title="Resaltar partidas de esta duración en el gráfico"
-                  className={cn(
-                    'text-left p-2 rounded-md border transition-colors cursor-pointer space-y-1.5',
-                    isSelected
-                      ? 'bg-primary/15 border-primary'
-                      : 'bg-background/45 border-border hover:bg-muted/60'
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold font-mono text-foreground">
-                      {bucket.label}
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      {bucket.total > 0 ? `${bucket.winRate}% WR` : '—'}
-                    </span>
-                  </div>
-
-                  <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden flex">
-                    {bucket.total > 0 && (
-                      <>
-                        <div className="bg-success h-full" style={{ width: `${winPct}%` }} />
-                        <div className="bg-destructive h-full" style={{ width: `${lossPct}%` }} />
-                        <div className={cn('h-full', LOL_FF_BAR_CLASS)} style={{ width: `${ffPct}%` }} />
-                      </>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-[10px] font-mono">
-                    <div className="flex items-center gap-1">
-                      <span className="text-success font-bold">{bucket.wins}V</span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="text-destructive font-bold">{bucket.losses}D</span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className={cn('text-[9.5px] font-bold', LOL_FF_CHIP_CLASS)}>
-                        {bucket.ffs}FF
-                      </span>
-                    </div>
-                    <span className="text-muted-foreground">{bucket.total}G</span>
-                  </div>
-                </button>
-              );
-            })}
           </div>
         </div>
       </CardContent>
@@ -1131,6 +1493,7 @@ export const LolDurationScatterPanel: React.FC<LolDurationScatterPanelProps> = (
           groupPuuids={groupPuuids}
           accountByPuuid={accountByPuuid}
           ddragonVersion={ddragonVersion}
+          hideGroupInfo={isPersonal}
         />
       )}
     </Card>

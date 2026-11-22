@@ -135,6 +135,7 @@ function mapAccountRow(row: Record<string, unknown>): LolAccount {
   return {
     userId: String(row.user_id),
     puuid: String(row.puuid),
+    isPrimary: row.is_primary !== false,
     gameName: String(row.game_name || ''),
     tagLine: String(row.tag_line || ''),
     platform,
@@ -249,10 +250,9 @@ export async function fetchGroupLolData(memberIds: string[]): Promise<{
 
   const { data: accountRows, error: accountsError } = await supabase
     .from('lol_accounts')
-    .select(
-      'user_id, puuid, game_name, tag_line, platform, regional_cluster, summoner_level, profile_icon_id, ranked_solo, ranked_flex, ddragon_version, last_synced_at'
-    )
-    .in('user_id', memberIds);
+    .select('*')
+    .in('user_id', memberIds)
+    .order('created_at', { ascending: true });
 
   if (accountsError) {
     return {
@@ -262,9 +262,9 @@ export async function fetchGroupLolData(memberIds: string[]): Promise<{
     };
   }
 
-  const accounts = (accountRows || []).map((row) =>
-    mapAccountRow(row as Record<string, unknown>)
-  );
+  const accounts = (accountRows || [])
+    .map((row) => mapAccountRow(row as Record<string, unknown>))
+    .sort((a, b) => Number(b.isPrimary !== false) - Number(a.isPrimary !== false));
 
   const puuids = Array.from(new Set(accounts.map((a) => a.puuid).filter(Boolean)));
   if (puuids.length === 0) {
@@ -278,7 +278,7 @@ export async function fetchGroupLolData(memberIds: string[]): Promise<{
     )
     .overlaps('participant_puuids', puuids)
     .order('game_creation', { ascending: false })
-    .limit(120);
+    .limit(200);
 
   if (matchesError) {
     return {
@@ -381,6 +381,7 @@ export async function linkAndSyncRiotAccount(params: {
   gameName: string;
   tagLine: string;
   platform: LolPlatform;
+  isPrimary?: boolean;
   matchCount?: number;
   riotApiKey?: string;
 }): Promise<{
@@ -398,6 +399,7 @@ export async function linkAndSyncRiotAccount(params: {
     gameName: params.gameName.trim(),
     tagLine: params.tagLine.trim().replace(/^#/, ''),
     platform: params.platform,
+    isPrimary: params.isPrimary,
     matchCount: params.matchCount ?? 25,
     riotApiKey: apiKey,
   });
@@ -502,10 +504,29 @@ export async function syncRiotGroup(params: {
   };
 }
 
-export async function unlinkRiotAccount(userId: string): Promise<{ ok: boolean; error?: string }> {
+export async function unlinkRiotAccount(
+  userId: string,
+  puuid?: string
+): Promise<{ ok: boolean; error?: string }> {
   const res = await callRiotEdgeFunction({
     action: 'unlink_account',
     userId,
+    puuid,
+  });
+  return {
+    ok: res.ok,
+    error: res.error,
+  };
+}
+
+export async function setPrimaryRiotAccount(
+  userId: string,
+  puuid: string
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await callRiotEdgeFunction({
+    action: 'set_primary_account',
+    userId,
+    puuid,
   });
   return {
     ok: res.ok,

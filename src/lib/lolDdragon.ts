@@ -345,6 +345,11 @@ export function getChampionIconUrl(
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${key}.png`;
 }
 
+export function getChampionSplashUrl(championName: string): string {
+  const key = normalizeChampionKey(championName);
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${key}_0.jpg`;
+}
+
 export function getProfileIconUrl(
   iconId: number,
   version: string = DEFAULT_DDRAGON_VERSION

@@ -1,0 +1,67 @@
+# Dependencias y entornos
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# Builds y compilados
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# Control de versiones
+.git/
+
+# Lockfiles
+*-lock.*
+*.lock
+package-lock.json
+skills-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Logs, cachés y temporales
+*.log
+.cache/
+.serena/
+.vite/
+.turbo/
+.eslintcache
+.DS_Store
+Thumbs.db
+scratch_*.txt
+
+# Scripts / dumps SQL
+*.sql
+
+# Multimedia y assets pesados
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.bmp
+*.tiff
+*.svg
+*.mp4
+*.webm
+*.mov
+*.avi
+*.mkv
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.pdf
+*.zip
+*.tar
+*.gz
+*.7z
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.otf

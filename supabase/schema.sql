@@ -564,8 +564,9 @@ ON CONFLICT (id) DO NOTHING;
 -- 10. LEAGUE OF LEGENDS INTEGRATION (Accounts, Match-v5 Cache & Participants)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.lol_accounts (
-  user_id TEXT PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
-  puuid TEXT NOT NULL,
+  puuid TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT TRUE,
   game_name TEXT NOT NULL,
   tag_line TEXT NOT NULL,
   platform TEXT NOT NULL DEFAULT 'la2',
@@ -580,7 +581,10 @@ CREATE TABLE IF NOT EXISTS public.lol_accounts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_lol_accounts_puuid ON public.lol_accounts (puuid);
+CREATE INDEX IF NOT EXISTS idx_lol_accounts_user_id ON public.lol_accounts (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lol_accounts_one_primary_per_user
+  ON public.lol_accounts (user_id)
+  WHERE is_primary = TRUE;
 
 CREATE TABLE IF NOT EXISTS public.lol_matches (
   match_id TEXT PRIMARY KEY,

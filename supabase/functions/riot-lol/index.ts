@@ -51,8 +51,16 @@ interface LinkAndSyncPayload {
   gameName: string;
   tagLine: string;
   platform: string;
+  isPrimary?: boolean;
   matchCount?: number;
   queueId?: number;
+  riotApiKey?: string;
+}
+
+interface SetPrimaryAccountPayload {
+  action: 'set_primary_account';
+  userId: string;
+  puuid: string;
   riotApiKey?: string;
 }
 
@@ -75,6 +83,7 @@ interface SyncGroupPayload {
 interface UnlinkAccountPayload {
   action: 'unlink_account';
   userId: string;
+  puuid?: string;
   riotApiKey?: string;
 }
 
@@ -82,6 +91,7 @@ type RiotLolRequestPayload =
   | StatusPayload
   | SetServerApiKeyPayload
   | LinkAndSyncPayload
+  | SetPrimaryAccountPayload
   | SyncPlayerPayload
   | SyncGroupPayload
   | UnlinkAccountPayload;
@@ -119,6 +129,7 @@ interface RiotLeagueEntryV4Dto {
 interface LolAccountDbRow {
   user_id: string;
   puuid: string;
+  is_primary: boolean;
   game_name: string;
   tag_line: string;
   platform: string;
@@ -488,6 +499,7 @@ async function syncSingleAccount(params: {
   userId: string;
   platform: LolPlatform;
   puuid: string;
+  isPrimary: boolean;
   gameName: string;
   tagLine: string;
   matchCount: number;
@@ -506,6 +518,7 @@ async function syncSingleAccount(params: {
     userId,
     platform,
     puuid,
+    isPrimary,
     gameName,
     tagLine,
     matchCount,
@@ -614,6 +627,7 @@ async function syncSingleAccount(params: {
   const accountRecord: LolAccountDbRow = {
     user_id: userId,
     puuid,
+    is_primary: isPrimary,
     game_name: gameName,
     tag_line: tagLine,
     platform,
@@ -633,7 +647,7 @@ async function syncSingleAccount(params: {
         ...accountRecord,
         updated_at: nowIso,
       },
-      { onConflict: 'user_id' }
+      { onConflict: 'puuid' }
     );
 
   if (accountUpsertError) {
@@ -647,6 +661,7 @@ async function syncSingleAccount(params: {
   const account: LolAccount = {
     userId,
     puuid,
+    isPrimary,
     gameName,
     tagLine,
     platform,
@@ -771,9 +786,10 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 3. UNLINK ACCOUNT
+    // 3. UNLINK ACCOUNT (specific puuid or all accounts for userId)
     if (body.action === 'unlink_account') {
       const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+      const targetPuuid = typeof body.puuid === 'string' ? body.puuid.trim() : '';
       if (!userId) {
         return jsonResponse(
           { ok: false, code: 'INVALID_PAYLOAD', error: 'Falta userId para desvincular.' },
@@ -782,6 +798,54 @@ Deno.serve(async (req: Request) => {
       }
 
       const supabase = createAdminSupabaseClient();
+
+      if (targetPuuid) {
+        const { data: existingRow } = await supabase
+          .from('lol_accounts')
+          .select('puuid, is_primary')
+          .eq('user_id', userId)
+          .eq('puuid', targetPuuid)
+          .maybeSingle();
+
+        const { error } = await supabase
+          .from('lol_accounts')
+          .delete()
+          .eq('user_id', userId)
+          .eq('puuid', targetPuuid);
+
+        if (error) {
+          return jsonResponse(
+            {
+              ok: false,
+              code: 'DB_DELETE_ERROR',
+              error: `Error al desvincular la cuenta de LoL: ${error.message}`,
+            },
+            500
+          );
+        }
+
+        // If we removed the primary account, promote the oldest remaining account to primary
+        if ((existingRow as { is_primary?: boolean } | null)?.is_primary) {
+          const { data: remaining } = await supabase
+            .from('lol_accounts')
+            .select('puuid')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: true })
+            .limit(1);
+
+          const nextPrimary = (remaining?.[0] as { puuid?: string } | undefined)?.puuid;
+          if (nextPrimary) {
+            await supabase
+              .from('lol_accounts')
+              .update({ is_primary: true, updated_at: new Date().toISOString() })
+              .eq('user_id', userId)
+              .eq('puuid', nextPrimary);
+          }
+        }
+
+        return jsonResponse({ ok: true, userId, puuid: targetPuuid }, 200);
+      }
+
       const { error } = await supabase.from('lol_accounts').delete().eq('user_id', userId);
       if (error) {
         return jsonResponse(
@@ -795,6 +859,78 @@ Deno.serve(async (req: Request) => {
       }
 
       return jsonResponse({ ok: true, userId }, 200);
+    }
+
+    // 3b. SET PRIMARY ACCOUNT
+    if (body.action === 'set_primary_account') {
+      const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+      const targetPuuid = typeof body.puuid === 'string' ? body.puuid.trim() : '';
+      if (!userId || !targetPuuid) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'INVALID_PAYLOAD',
+            error: 'Faltan userId o puuid para cambiar la cuenta principal.',
+          },
+          400
+        );
+      }
+
+      const supabase = createAdminSupabaseClient();
+      const { data: targetRow, error: checkErr } = await supabase
+        .from('lol_accounts')
+        .select('puuid')
+        .eq('user_id', userId)
+        .eq('puuid', targetPuuid)
+        .maybeSingle();
+
+      if (checkErr || !targetRow) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'ACCOUNT_NOT_FOUND',
+            error: 'No se encontró esa cuenta vinculada al jugador.',
+          },
+          404
+        );
+      }
+
+      const nowIso = new Date().toISOString();
+      const { error: demoteErr } = await supabase
+        .from('lol_accounts')
+        .update({ is_primary: false, updated_at: nowIso })
+        .eq('user_id', userId)
+        .neq('puuid', targetPuuid);
+
+      if (demoteErr) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'DB_UPDATE_ERROR',
+            error: `Error actualizando cuentas del jugador: ${demoteErr.message}`,
+          },
+          500
+        );
+      }
+
+      const { error: promoteErr } = await supabase
+        .from('lol_accounts')
+        .update({ is_primary: true, updated_at: nowIso })
+        .eq('user_id', userId)
+        .eq('puuid', targetPuuid);
+
+      if (promoteErr) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'DB_UPDATE_ERROR',
+            error: `Error marcando cuenta principal: ${promoteErr.message}`,
+          },
+          500
+        );
+      }
+
+      return jsonResponse({ ok: true, userId, puuid: targetPuuid }, 200);
     }
 
     // Remaining actions require Riot API Key
@@ -836,7 +972,7 @@ Deno.serve(async (req: Request) => {
       const platform: LolPlatform = rawPlatform;
       const cluster = getRegionalClusterForPlatform(platform);
 
-      const [accountDto, ddragonVersion] = await Promise.all([
+      const [accountDto, ddragonVersion, existingUserAccountsRes] = await Promise.all([
         riotFetchJson<RiotAccountV1Dto>(
           `https://${cluster}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(
             gameName
@@ -845,7 +981,50 @@ Deno.serve(async (req: Request) => {
           `No se encontró el Riot ID "${gameName}#${tagLine}" en el cluster ${cluster.toUpperCase()} (${platform.toUpperCase()}). Verificá nombre, tag y servidor.`
         ),
         fetchLatestDdragonVersion(),
+        supabase
+          .from('lol_accounts')
+          .select('puuid, is_primary')
+          .eq('user_id', userId),
       ]);
+
+      // Prevent stealing a Riot account already linked to a different user
+      const { data: existingOwner } = await supabase
+        .from('lol_accounts')
+        .select('user_id, is_primary')
+        .eq('puuid', accountDto.puuid)
+        .maybeSingle();
+
+      const ownerRow = existingOwner as { user_id?: string; is_primary?: boolean } | null;
+      if (ownerRow && ownerRow.user_id && ownerRow.user_id !== userId) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'ACCOUNT_ALREADY_LINKED',
+            error: 'Esa cuenta de Riot ya está vinculada a otro miembro del grupo.',
+          },
+          409
+        );
+      }
+
+      const userAccounts = (existingUserAccountsRes.data ?? []) as Array<{
+        puuid: string;
+        is_primary: boolean;
+      }>;
+      const otherAccounts = userAccounts.filter((a) => a.puuid !== accountDto.puuid);
+      const resolvedIsPrimary =
+        otherAccounts.length === 0
+          ? true
+          : typeof body.isPrimary === 'boolean'
+            ? body.isPrimary
+            : ownerRow?.is_primary ?? false;
+
+      if (resolvedIsPrimary && otherAccounts.length > 0) {
+        await supabase
+          .from('lol_accounts')
+          .update({ is_primary: false, updated_at: new Date().toISOString() })
+          .eq('user_id', userId)
+          .neq('puuid', accountDto.puuid);
+      }
 
       const syncResult = await syncSingleAccount({
         supabase,
@@ -854,6 +1033,7 @@ Deno.serve(async (req: Request) => {
         userId,
         platform,
         puuid: accountDto.puuid,
+        isPrimary: resolvedIsPrimary,
         gameName: accountDto.gameName || gameName,
         tagLine: accountDto.tagLine || tagLine,
         matchCount: body.matchCount ?? 20,
@@ -870,7 +1050,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 4. SYNC PLAYER
+    // 4. SYNC PLAYER (syncs primary + all secondary accounts of userId)
     if (body.action === 'sync_player') {
       const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
       if (!userId) {
@@ -880,40 +1060,48 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: rowData, error: fetchAccountError } = await supabase
+      const { data: rowsData, error: fetchAccountError } = await supabase
         .from('lol_accounts')
         .select('*')
         .eq('user_id', userId)
-        .maybeSingle();
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true });
 
       if (fetchAccountError) {
         return jsonResponse(
           {
             ok: false,
             code: 'DB_READ_ERROR',
-            error: `Error leyendo cuenta de LoL en Supabase: ${fetchAccountError.message}`,
+            error: `Error leyendo cuentas de LoL en Supabase: ${fetchAccountError.message}`,
           },
           500
         );
       }
 
-      const row = rowData as LolAccountDbRow | null;
-      if (!row || !isValidLolPlatform(row.platform)) {
+      const rows = (rowsData ?? []) as LolAccountDbRow[];
+      if (rows.length === 0) {
         return jsonResponse(
           {
             ok: false,
             code: 'ACCOUNT_NOT_LINKED',
-            error: 'El jugador no tiene una cuenta de League of Legends vinculada.',
+            error: 'El jugador no tiene cuentas de League of Legends vinculadas.',
           },
           404
         );
       }
 
-      const platform: LolPlatform = row.platform;
-      const cluster = getRegionalClusterForPlatform(platform);
-      const [ddragonVersion, refreshedAccountDto] = await Promise.all([
-        fetchLatestDdragonVersion(),
-        riotFetchJson<RiotAccountV1Dto>(
+      const ddragonVersion = await fetchLatestDdragonVersion();
+      const sessionFetchedMatchIds = new Set<string>();
+      const syncedAccounts: LolAccount[] = [];
+      let totalNewlyFetched = 0;
+      let totalCached = 0;
+
+      for (const row of rows) {
+        if (!isValidLolPlatform(row.platform)) continue;
+        const platform: LolPlatform = row.platform;
+        const cluster = getRegionalClusterForPlatform(platform);
+
+        const refreshedAccountDto = await riotFetchJson<RiotAccountV1Dto>(
           `https://${cluster}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${encodeURIComponent(
             row.puuid
           )}`,
@@ -924,27 +1112,36 @@ Deno.serve(async (req: Request) => {
             throw err;
           }
           return null;
-        }),
-      ]);
+        });
 
-      const syncResult = await syncSingleAccount({
-        supabase,
-        apiKey,
-        ddragonVersion,
-        userId,
-        platform,
-        puuid: row.puuid,
-        gameName: refreshedAccountDto?.gameName || row.game_name,
-        tagLine: refreshedAccountDto?.tagLine || row.tag_line,
-        matchCount: body.matchCount ?? 20,
-        queueId: body.queueId,
-      });
+        const syncResult = await syncSingleAccount({
+          supabase,
+          apiKey,
+          ddragonVersion,
+          userId,
+          platform,
+          puuid: row.puuid,
+          isPrimary: row.is_primary !== false,
+          gameName: refreshedAccountDto?.gameName || row.game_name,
+          tagLine: refreshedAccountDto?.tagLine || row.tag_line,
+          matchCount: body.matchCount ?? 20,
+          queueId: body.queueId,
+          sessionFetchedMatchIds,
+        });
+
+        syncedAccounts.push(syncResult.account);
+        totalNewlyFetched += syncResult.newlyFetchedCount;
+        totalCached += syncResult.cachedCount;
+      }
 
       return jsonResponse(
         {
           ok: true,
           ddragonVersion,
-          ...syncResult,
+          account: syncedAccounts[0],
+          accounts: syncedAccounts,
+          newlyFetchedCount: totalNewlyFetched,
+          cachedCount: totalCached,
         },
         200
       );
@@ -1022,6 +1219,7 @@ Deno.serve(async (req: Request) => {
             userId: row.user_id,
             platform: row.platform,
             puuid: row.puuid,
+            isPrimary: row.is_primary !== false,
             gameName: row.game_name,
             tagLine: row.tag_line,
             matchCount: body.matchCount ?? 20,

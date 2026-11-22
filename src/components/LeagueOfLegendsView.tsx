@@ -5,12 +5,19 @@ import { DEFAULT_DDRAGON_VERSION, loadDdragonRunesAndSpells } from '@/lib/lolDdr
 import {
   DEFAULT_LOL_QUEUE_FILTERS,
   DEFAULT_LOL_TIME_RANGE,
+  buildPuuidToUserIdMap,
+  computeGroupAggregateStats,
   computeGroupLeaderboard,
   computeGroupLeaderboardByRole,
+  computeGroupPicks,
   computeGroupRecords,
+  computePersonalRecords,
   computePlayerAggregates,
+  computePlayerChampionDetail,
   filterMatchesGlobally,
-  isGroupMatch,
+  getUserAccounts,
+  getUserPuuids,
+  resolveUserPrimaryAccount,
 } from '@/lib/lolPerformanceEngine';
 import {
   fetchGroupLolData,
@@ -18,6 +25,7 @@ import {
   linkAndSyncRiotAccount,
   saveServerRiotApiKey,
   setLocalRiotApiKey,
+  setPrimaryRiotAccount,
   syncRiotGroup,
   syncRiotPlayer,
   unlinkRiotAccount,
@@ -29,8 +37,13 @@ import {
   LolPlatform,
   LolSpecificQueueCategory,
   LolTimeRangeFilter,
+  LolViewMode,
 } from '@/types/lol';
+import { LolChampionDetailModal } from './lol/LolChampionDetailModal';
+import { LolChampionsModal } from './lol/LolChampionsModal';
+import { LolChampionsSummaryPanel } from './lol/LolChampionsSummaryPanel';
 import { LolDurationScatterPanel } from './lol/LolDurationScatterPanel';
+import { LolOutcomeDurationChart } from './lol/LolOutcomeDurationChart';
 import { LolGroupLeaderboard } from './lol/LolGroupLeaderboard';
 import { LolGroupRecordsPanel } from './lol/LolGroupRecordsPanel';
 import { LolHeaderBar } from './lol/LolHeaderBar';
@@ -41,7 +54,7 @@ import {
 } from './lol/LolLoadingScreen';
 import { LolMatchDetailModal } from './lol/LolMatchDetailModal';
 import { LolRecentMatchesList } from './lol/LolRecentMatchesList';
-import { LolStatsComparisonPanel } from './lol/LolStatsComparisonPanel';
+import { LolStatsOverviewPanel } from './lol/LolStatsComparisonPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -64,13 +77,32 @@ export const LeagueOfLegendsView: React.FC = () => {
   }, [activeGroup, players]);
 
   const [isDemoMode, setIsDemoMode] = useState(false);
+  const [viewMode, setViewMode] = useState<LolViewMode>('personal');
   const [selectedQueues, setSelectedQueues] = useState<LolSpecificQueueCategory[]>(
     () => [...DEFAULT_LOL_QUEUE_FILTERS]
   );
   const [timeRange, setTimeRange] = useState<LolTimeRangeFilter>(DEFAULT_LOL_TIME_RANGE);
-  const [recordsScope, setRecordsScope] = useState<'group' | 'all'>('group');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [championsModal, setChampionsModal] = useState<{
+    open: boolean;
+    initialTab?: 'all' | 'best' | 'worst';
+  }>({ open: false });
+  const [championDetailTarget, setChampionDetailTarget] = useState<{
+    userId: string;
+    championName: string;
+    scope: LolViewMode;
+  } | null>(null);
+  const [selectedMatchState, setSelectedMatchState] = useState<{
+    matchId: string;
+    initialPuuid?: string;
+  } | null>(null);
+
+  const handleChangeViewMode = useCallback((mode: LolViewMode) => {
+    setViewMode(mode);
+    setChampionsModal({ open: false });
+    setChampionDetailTarget(null);
+    setSelectedMatchState(null);
+  }, []);
 
   const handleToggleQueue = useCallback((queue: LolSpecificQueueCategory | 'all') => {
     if (queue === 'all') {
@@ -247,10 +279,27 @@ export const LeagueOfLegendsView: React.FC = () => {
 
   const selectedAccount = useMemo(
     () =>
-      activeAccounts.find((a) => a.userId === selectedUserId) ??
+      resolveUserPrimaryAccount(activeAccounts, selectedUserId) ??
       activeAccounts[0] ??
       null,
     [activeAccounts, selectedUserId]
+  );
+
+  const selectedUserAccounts = useMemo(
+    () =>
+      selectedAccount ? getUserAccounts(activeAccounts, selectedAccount.userId) : [],
+    [activeAccounts, selectedAccount]
+  );
+
+  const selectedSecondaryAccounts = useMemo(
+    () => selectedUserAccounts.filter((a) => a.puuid !== selectedAccount?.puuid),
+    [selectedUserAccounts, selectedAccount]
+  );
+
+  const selectedUserPuuids = useMemo(
+    () =>
+      selectedAccount ? getUserPuuids(activeAccounts, selectedAccount.userId) : new Set<string>(),
+    [activeAccounts, selectedAccount]
   );
 
   const selectedMemberProfile = useMemo(
@@ -260,6 +309,11 @@ export const LeagueOfLegendsView: React.FC = () => {
 
   const groupPuuids = useMemo(
     () => new Set(activeAccounts.map((a) => a.puuid)),
+    [activeAccounts]
+  );
+
+  const puuidToUserId = useMemo(
+    () => buildPuuidToUserIdMap(activeAccounts),
     [activeAccounts]
   );
 
@@ -273,15 +327,93 @@ export const LeagueOfLegendsView: React.FC = () => {
     [activeMatches, selectedQueues, timeRange]
   );
 
-  const personalVsGroupStats = useMemo(() => {
-    if (!selectedAccount) return null;
-    return computePlayerAggregates(
-      globallyFilteredMatches,
-      selectedAccount.puuid,
-      groupPuuids,
-      'all'
-    );
-  }, [globallyFilteredMatches, selectedAccount, groupPuuids]);
+  const personalStats = useMemo(
+    () =>
+      !selectedAccount
+        ? null
+        : computePlayerAggregates(
+            globallyFilteredMatches,
+            selectedUserPuuids,
+            groupPuuids,
+            'all',
+            puuidToUserId
+          ).personal,
+    [globallyFilteredMatches, selectedAccount, selectedUserPuuids, groupPuuids, puuidToUserId]
+  );
+
+  const currentUserAccount = useMemo(
+    () =>
+      resolveUserPrimaryAccount(activeAccounts, currentUser.id) ?? selectedAccount,
+    [activeAccounts, currentUser.id, selectedAccount]
+  );
+
+  const currentUserPuuids = useMemo(
+    () =>
+      currentUserAccount
+        ? getUserPuuids(activeAccounts, currentUserAccount.userId)
+        : new Set<string>(),
+    [activeAccounts, currentUserAccount]
+  );
+
+  const currentUserDisplayName = useMemo(
+    () =>
+      activeMembers.find((m) => m.id === currentUserAccount?.userId)?.displayName ??
+      currentUserAccount?.gameName ??
+      currentUser.displayName,
+    [activeMembers, currentUserAccount, currentUser.displayName]
+  );
+
+  const personalInGroupStats = useMemo(
+    () =>
+      !currentUserAccount
+        ? null
+        : computePlayerAggregates(
+            globallyFilteredMatches,
+            currentUserPuuids,
+            groupPuuids,
+            'all',
+            puuidToUserId
+          ).inGroup,
+    [globallyFilteredMatches, currentUserAccount, currentUserPuuids, groupPuuids, puuidToUserId]
+  );
+
+  const personalRecords = useMemo(
+    () =>
+      !selectedAccount
+        ? []
+        : computePersonalRecords({
+            matches: globallyFilteredMatches,
+            account: selectedAccount,
+            puuids: selectedUserPuuids,
+            displayName: selectedMemberProfile.displayName,
+            avatarUrl: selectedMemberProfile.avatarUrl,
+            queueFilter: 'all',
+          }),
+    [globallyFilteredMatches, selectedAccount, selectedUserPuuids, selectedMemberProfile]
+  );
+
+  const groupAggregateStats = useMemo(
+    () =>
+      computeGroupAggregateStats({
+        matches: globallyFilteredMatches,
+        accounts: activeAccounts,
+        queueFilter: 'all',
+      }),
+    [globallyFilteredMatches, activeAccounts]
+  );
+
+  const groupPicks = useMemo(
+    () =>
+      computeGroupPicks({
+        matches: globallyFilteredMatches,
+        accounts: activeAccounts,
+        playerProfiles: activeMembers,
+        queueFilter: 'all',
+        minGames: 3,
+        tableLimit: 5,
+      }),
+    [globallyFilteredMatches, activeAccounts, activeMembers]
+  );
 
   const leaderboardEntries = useMemo(
     () =>
@@ -305,11 +437,6 @@ export const LeagueOfLegendsView: React.FC = () => {
     [globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
-  const hasGroupMatches = useMemo(
-    () => globallyFilteredMatches.some((m) => isGroupMatch(m, groupPuuids)),
-    [globallyFilteredMatches, groupPuuids]
-  );
-
   const groupRecords = useMemo(
     () =>
       computeGroupRecords({
@@ -317,15 +444,43 @@ export const LeagueOfLegendsView: React.FC = () => {
         accounts: activeAccounts,
         playerProfiles: activeMembers,
         queueFilter: 'all',
-        scope: recordsScope,
+        scope: 'group',
       }),
-    [globallyFilteredMatches, activeAccounts, activeMembers, recordsScope]
+    [globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
-  const selectedMatch = useMemo(
-    () => activeMatches.find((m) => m.matchId === selectedMatchId) ?? null,
-    [activeMatches, selectedMatchId]
-  );
+  const championDetailStats = useMemo(() => {
+    if (!championDetailTarget) return null;
+    const account = resolveUserPrimaryAccount(activeAccounts, championDetailTarget.userId);
+    if (!account) return null;
+    const userPuuids = getUserPuuids(activeAccounts, account.userId);
+    const profile = activeMembers.find((m) => m.id === account.userId);
+    return computePlayerChampionDetail({
+      matches: globallyFilteredMatches,
+      account,
+      puuids: userPuuids,
+      displayName: profile?.displayName ?? account.gameName,
+      avatarUrl: profile?.avatarUrl ?? '',
+      championName: championDetailTarget.championName,
+      scope: championDetailTarget.scope,
+      groupMemberPuuids: groupPuuids,
+      puuidToUserId,
+    });
+  }, [
+    championDetailTarget,
+    activeAccounts,
+    activeMembers,
+    globallyFilteredMatches,
+    groupPuuids,
+    puuidToUserId,
+  ]);
+
+  const selectedMatch = useMemo(() => {
+    if (!selectedMatchState) return null;
+    return (
+      activeMatches.find((m) => m.matchId === selectedMatchState.matchId) ?? null
+    );
+  }, [activeMatches, selectedMatchState]);
 
   const showTransientFeedback = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
@@ -339,6 +494,7 @@ export const LeagueOfLegendsView: React.FC = () => {
     gameName: string;
     tagLine: string;
     platform: LolPlatform;
+    isPrimary?: boolean;
   }): Promise<{ ok: boolean; error?: string }> => {
     setIsSyncing(true);
     try {
@@ -346,9 +502,10 @@ export const LeagueOfLegendsView: React.FC = () => {
       if (res.ok) {
         await loadLiveData();
         setSelectedUserId(params.userId);
+        const roleLabel = params.isPrimary === false ? 'secundaria' : 'principal';
         showTransientFeedback(
           'success',
-          `Vinculado ${params.gameName}#${params.tagLine} (${res.fetchedMatches ?? 0} nuevas, ${res.cachedMatches ?? 0} en caché).`
+          `Vinculada cuenta ${roleLabel} ${params.gameName}#${params.tagLine} (${res.fetchedMatches ?? 0} nuevas, ${res.cachedMatches ?? 0} en caché).`
         );
         return { ok: true };
       }
@@ -377,7 +534,7 @@ export const LeagueOfLegendsView: React.FC = () => {
   };
 
   const handleSyncGroup = async () => {
-    const ids = activeAccounts.map((a) => a.userId);
+    const ids = Array.from(new Set(activeAccounts.map((a) => a.userId)));
     if (ids.length === 0) return;
     setIsSyncing(true);
     try {
@@ -386,7 +543,7 @@ export const LeagueOfLegendsView: React.FC = () => {
         await loadLiveData();
         showTransientFeedback(
           'success',
-          `Grupo sincronizado: ${res.syncedCount ?? ids.length} cuentas, ${res.fetchedMatches ?? 0} partidas nuevas.`
+          `Grupo sincronizado: ${res.syncedCount ?? activeAccounts.length} cuentas, ${res.fetchedMatches ?? 0} partidas nuevas.`
         );
       } else {
         showTransientFeedback('error', res.error || 'Error al sincronizar el grupo.');
@@ -396,15 +553,30 @@ export const LeagueOfLegendsView: React.FC = () => {
     }
   };
 
-  const handleUnlinkAccount = async (userId: string) => {
+  const handleUnlinkAccount = async (userId: string, puuid?: string) => {
     setIsSyncing(true);
     try {
-      const res = await unlinkRiotAccount(userId);
+      const res = await unlinkRiotAccount(userId, puuid);
       if (res.ok) {
         await loadLiveData();
         showTransientFeedback('success', 'Cuenta de Riot desvinculada.');
       } else {
         showTransientFeedback('error', res.error || 'No se pudo desvincular.');
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSetPrimaryAccount = async (userId: string, puuid: string) => {
+    setIsSyncing(true);
+    try {
+      const res = await setPrimaryRiotAccount(userId, puuid);
+      if (res.ok) {
+        await loadLiveData();
+        showTransientFeedback('success', 'Cuenta principal actualizada.');
+      } else {
+        showTransientFeedback('error', res.error || 'No se pudo cambiar la cuenta principal.');
       }
     } finally {
       setIsSyncing(false);
@@ -429,21 +601,32 @@ export const LeagueOfLegendsView: React.FC = () => {
     return <LolLoadingScreen />;
   }
 
-  const filterAnimKey = `${revealGen}-${selectedAccount?.userId ?? 'none'}-${selectedQueues.join(',')}-${timeRange}`;
+  const filterAnimKey = `${revealGen}-${viewMode}-${viewMode === 'personal' ? (selectedAccount?.userId ?? 'none') : (activeGroup?.id ?? 'group')}-${selectedQueues.join(',')}-${timeRange}`;
+
+  const showEmptyState =
+    activeAccounts.length === 0 ||
+    (viewMode === 'personal' && (!selectedAccount || !personalStats));
 
   return (
     <div key={`lol-ready-${revealGen}`} className="space-y-4">
       <div className="animate-lol-reveal" style={{ animationDelay: '0ms' }}>
         <LolHeaderBar
+          viewMode={viewMode}
+          onChangeViewMode={handleChangeViewMode}
           userGroups={userGroups}
           activeGroup={activeGroup}
-          onSelectGroup={setActiveGroupId}
+          onSelectGroup={(groupId) => {
+            setActiveGroupId(groupId);
+            setChampionsModal({ open: false });
+            setChampionDetailTarget(null);
+            setSelectedMatchState(null);
+          }}
           groupMembers={activeMembers}
           accounts={activeAccounts}
           selectedUserId={selectedAccount?.userId ?? selectedUserId}
           onSelectUser={(uid) => {
             setSelectedUserId(uid);
-            setSelectedMatchId(null);
+            setSelectedMatchState(null);
           }}
           selectedQueues={selectedQueues}
           onToggleQueue={handleToggleQueue}
@@ -452,7 +635,9 @@ export const LeagueOfLegendsView: React.FC = () => {
           isDemoMode={isDemoMode}
           onToggleDemoMode={(demo) => {
             setIsDemoMode(demo);
-            setSelectedMatchId(null);
+            setChampionsModal({ open: false });
+            setChampionDetailTarget(null);
+            setSelectedMatchState(null);
           }}
           isSyncing={isSyncing}
           hasServerRiotKey={hasServerRiotKey}
@@ -462,6 +647,7 @@ export const LeagueOfLegendsView: React.FC = () => {
           onSyncPlayer={handleSyncPlayer}
           onSyncGroup={handleSyncGroup}
           onUnlinkAccount={handleUnlinkAccount}
+          onSetPrimaryAccount={handleSetPrimaryAccount}
           onSaveServerRiotKey={handleSaveServerRiotKey}
         />
       </div>
@@ -484,7 +670,7 @@ export const LeagueOfLegendsView: React.FC = () => {
         </div>
       )}
 
-      {!selectedAccount || !personalVsGroupStats ? (
+      {showEmptyState ? (
         <div className="animate-lol-reveal" style={{ animationDelay: '70ms' }}>
           <Card>
             <CardContent className="py-10 px-4 flex flex-col items-center justify-center text-center gap-3">
@@ -511,43 +697,90 @@ export const LeagueOfLegendsView: React.FC = () => {
             </CardContent>
           </Card>
         </div>
-      ) : (
+      ) : viewMode === 'personal' && selectedAccount && personalStats ? (
         <div key={filterAnimKey} className="space-y-4">
+          {/* Fila 2: Overview Personal */}
           <div className="animate-lol-reveal" style={{ animationDelay: '65ms' }}>
-            <LolStatsComparisonPanel
+            <LolStatsOverviewPanel
+              mode="personal"
               account={selectedAccount}
+              secondaryAccounts={selectedSecondaryAccounts}
               displayName={selectedMemberProfile.displayName}
-              stats={personalVsGroupStats}
+              stats={personalStats}
               ddragonVersion={ddragonVersion}
+              onSelectChampion={(champ) =>
+                setChampionDetailTarget({
+                  userId: selectedAccount.userId,
+                  championName: champ,
+                  scope: 'personal',
+                })
+              }
+              onOpenChampionsModal={() => setChampionsModal({ open: true })}
             />
           </div>
 
-          {/* Bento Row 3 (Full Width): Panoramic Zoomable/Pannable Timeline + Group WR */}
+          {/* Fila 3 (Full Width): Panoramic Zoomable/Pannable Timeline */}
           <div className="animate-lol-reveal" style={{ animationDelay: '130ms' }}>
             <LolDurationScatterPanel
+              mode="personal"
               matches={globallyFilteredMatches}
               targetPuuid={selectedAccount.puuid}
+              targetPuuids={selectedUserPuuids}
               groupPuuids={groupPuuids}
+              puuidToUserId={puuidToUserId}
               accountByPuuid={accountByPuuid}
               timeRange={timeRange}
               ddragonVersion={ddragonVersion}
-              onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+              onSelectMatch={(matchId, puuid) =>
+                setSelectedMatchState({
+                  matchId,
+                  initialPuuid: puuid ?? selectedAccount.puuid,
+                })
+              }
             />
           </div>
 
-          {/* Bento Row 4: Compact Recent Matches (left) + Group Leaderboard / Role Leaders (right) */}
+          {/* Fila 4 (Full Width): Stacked Area Chart — Victorias / Derrotas / FF */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '165ms' }}>
+            <LolOutcomeDurationChart
+              mode="personal"
+              matches={globallyFilteredMatches}
+              targetPuuid={selectedAccount.puuid}
+              targetPuuids={selectedUserPuuids}
+              groupPuuids={groupPuuids}
+              puuidToUserId={puuidToUserId}
+              accountByPuuid={accountByPuuid}
+              ddragonVersion={ddragonVersion}
+              onSelectMatch={(matchId, puuid) =>
+                setSelectedMatchState({
+                  matchId,
+                  initialPuuid: puuid ?? selectedAccount.puuid,
+                })
+              }
+            />
+          </div>
+
+          {/* Fila 4: Partidas Recientes (izq) + Campeones Más Jugados (der) */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
             <div
               className="xl:col-span-7 min-w-0 animate-lol-reveal"
               style={{ animationDelay: '195ms' }}
             >
               <LolRecentMatchesList
+                mode="personal"
                 matches={globallyFilteredMatches}
                 targetPuuid={selectedAccount.puuid}
+                targetPuuids={selectedUserPuuids}
                 groupPuuids={groupPuuids}
+                puuidToUserId={puuidToUserId}
                 accountByPuuid={accountByPuuid}
                 ddragonVersion={ddragonVersion}
-                onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+                onSelectMatch={(matchId, puuid) =>
+                  setSelectedMatchState({
+                    matchId,
+                    initialPuuid: puuid ?? selectedAccount.puuid,
+                  })
+                }
               />
             </div>
 
@@ -555,41 +788,245 @@ export const LeagueOfLegendsView: React.FC = () => {
               className="xl:col-span-5 min-w-0 animate-lol-reveal"
               style={{ animationDelay: '260ms' }}
             >
-              <LolGroupLeaderboard
-                entries={leaderboardEntries}
-                roleLeaderboard={roleLeaderboard}
-                selectedUserId={selectedAccount.userId}
-                queueFilter={selectedQueues.length === 0 ? 'all' : selectedQueues[0]}
+              <LolChampionsSummaryPanel
+                mode="personal"
+                champions={personalStats.topChampions}
                 ddragonVersion={ddragonVersion}
-                onSelectPlayer={(uid) => setSelectedUserId(uid)}
+                onSelectChampion={(champ) =>
+                  setChampionDetailTarget({
+                    userId: selectedAccount.userId,
+                    championName: champ,
+                    scope: 'personal',
+                  })
+                }
+                onOpenModal={() => setChampionsModal({ open: true })}
               />
             </div>
           </div>
 
-          {/* Bento Row 5 (Full Width): Group Records Bento Grid */}
+          {/* Fila 5 (Full Width): Récords Personales */}
           <div className="animate-lol-reveal" style={{ animationDelay: '325ms' }}>
             <LolGroupRecordsPanel
-              records={groupRecords}
-              scope={recordsScope}
-              onChangeScope={setRecordsScope}
-              hasGroupMatches={hasGroupMatches}
-              selectedUserId={selectedAccount.userId}
+              mode="personal"
+              records={personalRecords}
               ddragonVersion={ddragonVersion}
-              onSelectPlayer={(uid) => setSelectedUserId(uid)}
-              onSelectMatch={(matchId) => setSelectedMatchId(matchId)}
+              onSelectMatch={(matchId) => {
+                const matched = activeMatches.find((m) => m.matchId === matchId);
+                const userPart = matched?.participants.find((p) =>
+                  selectedUserPuuids.has(p.puuid)
+                );
+                setSelectedMatchState({
+                  matchId,
+                  initialPuuid: userPart?.puuid ?? selectedAccount.puuid,
+                });
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div key={filterAnimKey} className="space-y-4">
+          {/* Fila 2: Overview Grupal + Estadísticas Personales en Games del Grupo */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '65ms' }}>
+            <LolStatsOverviewPanel
+              mode="group"
+              groupName={activeGroup?.name || 'Grupo'}
+              accounts={activeAccounts}
+              members={activeMembers}
+              groupStats={groupAggregateStats}
+              personalInGroupStats={personalInGroupStats}
+              personalDisplayName={currentUserDisplayName}
+              ddragonVersion={ddragonVersion}
+            />
+          </div>
+
+          {/* Fila 3 (Full Width): Timeline Grupal */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '130ms' }}>
+            <LolDurationScatterPanel
+              mode="group"
+              matches={globallyFilteredMatches}
+              targetPuuid={currentUserAccount?.puuid ?? ''}
+              targetPuuids={currentUserPuuids}
+              groupPuuids={groupPuuids}
+              puuidToUserId={puuidToUserId}
+              accountByPuuid={accountByPuuid}
+              timeRange={timeRange}
+              ddragonVersion={ddragonVersion}
+              onSelectMatch={(matchId, puuid) =>
+                setSelectedMatchState({ matchId, initialPuuid: puuid })
+              }
+            />
+          </div>
+
+          {/* Fila 4 (Full Width): Stacked Area Chart — Victorias / Derrotas / FF */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '165ms' }}>
+            <LolOutcomeDurationChart
+              mode="group"
+              matches={globallyFilteredMatches}
+              targetPuuid={currentUserAccount?.puuid ?? ''}
+              targetPuuids={currentUserPuuids}
+              groupPuuids={groupPuuids}
+              puuidToUserId={puuidToUserId}
+              accountByPuuid={accountByPuuid}
+              ddragonVersion={ddragonVersion}
+              onSelectMatch={(matchId, puuid) =>
+                setSelectedMatchState({ matchId, initialPuuid: puuid })
+              }
+            />
+          </div>
+
+          {/* Fila 4 (Full Width): Picks del Grupo */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '195ms' }}>
+            <LolChampionsSummaryPanel
+              mode="group"
+              picksResult={groupPicks}
+              ddragonVersion={ddragonVersion}
+              onSelectPick={(userId, champ) =>
+                setChampionDetailTarget({
+                  userId,
+                  championName: champ,
+                  scope: 'group',
+                })
+              }
+              onOpenModal={(initialTab) =>
+                setChampionsModal({ open: true, initialTab })
+              }
+            />
+          </div>
+
+          {/* Fila 5: Partidas del Grupo (izq) + Leaderboard / Roles (der) */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+            <div
+              className="xl:col-span-7 min-w-0 animate-lol-reveal"
+              style={{ animationDelay: '260ms' }}
+            >
+              <LolRecentMatchesList
+                mode="group"
+                matches={globallyFilteredMatches}
+                targetPuuid={currentUserAccount?.puuid ?? ''}
+                targetPuuids={currentUserPuuids}
+                groupPuuids={groupPuuids}
+                puuidToUserId={puuidToUserId}
+                accountByPuuid={accountByPuuid}
+                ddragonVersion={ddragonVersion}
+                onSelectMatch={(matchId, puuid) =>
+                  setSelectedMatchState({ matchId, initialPuuid: puuid })
+                }
+                onSelectChampion={(userId, champ) =>
+                  setChampionDetailTarget({
+                    userId,
+                    championName: champ,
+                    scope: 'group',
+                  })
+                }
+              />
+            </div>
+
+            <div
+              className="xl:col-span-5 min-w-0 animate-lol-reveal"
+              style={{ animationDelay: '325ms' }}
+            >
+              <LolGroupLeaderboard
+                entries={leaderboardEntries}
+                roleLeaderboard={roleLeaderboard}
+                selectedUserId={currentUser.id}
+                currentUserId={currentUser.id}
+                queueFilter={selectedQueues.length === 0 ? 'all' : selectedQueues[0]}
+                ddragonVersion={ddragonVersion}
+                onSelectPlayer={() => {}}
+                onSelectChampion={(userId, champ) =>
+                  setChampionDetailTarget({
+                    userId,
+                    championName: champ,
+                    scope: 'group',
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Fila 6 (Full Width): Récords del Grupo */}
+          <div className="animate-lol-reveal" style={{ animationDelay: '390ms' }}>
+            <LolGroupRecordsPanel
+              mode="group"
+              records={groupRecords}
+              selectedUserId={currentUser.id}
+              ddragonVersion={ddragonVersion}
+              onSelectPlayer={() => {}}
+              onSelectMatch={(matchId) => setSelectedMatchState({ matchId })}
             />
           </div>
         </div>
       )}
 
-      {selectedMatch && selectedAccount && (
+      {championsModal.open &&
+        viewMode === 'personal' &&
+        selectedAccount &&
+        personalStats && (
+          <LolChampionsModal
+            mode="personal"
+            account={selectedAccount}
+            displayName={selectedMemberProfile.displayName}
+            champions={personalStats.topChampions}
+            ddragonVersion={selectedAccount.ddragonVersion || ddragonVersion}
+            isSuppressed={Boolean(championDetailTarget || selectedMatchState)}
+            onSelectChampion={(userId, champ) =>
+              setChampionDetailTarget({
+                userId,
+                championName: champ,
+                scope: 'personal',
+              })
+            }
+            onClose={() => setChampionsModal({ open: false })}
+          />
+        )}
+
+      {championsModal.open && viewMode === 'group' && (
+        <LolChampionsModal
+          mode="group"
+          groupName={activeGroup?.name || 'Grupo'}
+          picksResult={groupPicks}
+          initialTab={championsModal.initialTab}
+          ddragonVersion={ddragonVersion}
+          isSuppressed={Boolean(championDetailTarget || selectedMatchState)}
+          onSelectChampion={(userId, champ) =>
+            setChampionDetailTarget({
+              userId,
+              championName: champ,
+              scope: 'group',
+            })
+          }
+          onClose={() => setChampionsModal({ open: false })}
+        />
+      )}
+
+      {championDetailStats && (
+        <LolChampionDetailModal
+          detail={championDetailStats}
+          ddragonVersion={
+            championDetailStats.account.ddragonVersion || ddragonVersion
+          }
+          isSuppressed={Boolean(selectedMatchState)}
+          onClose={() => setChampionDetailTarget(null)}
+          onSelectMatch={(matchId, puuid) =>
+            setSelectedMatchState({ matchId, initialPuuid: puuid })
+          }
+        />
+      )}
+
+      {selectedMatch && (
         <LolMatchDetailModal
           match={selectedMatch}
-          initialParticipantPuuid={selectedAccount.puuid}
+          initialParticipantPuuid={
+            selectedMatchState?.initialPuuid ||
+            selectedAccount?.puuid ||
+            selectedMatch.participants[0]?.puuid ||
+            ''
+          }
           groupPuuids={groupPuuids}
           accountByPuuid={accountByPuuid}
-          ddragonVersion={selectedAccount.ddragonVersion || ddragonVersion}
-          onClose={() => setSelectedMatchId(null)}
+          hideGroupInfo={viewMode === 'personal'}
+          ddragonVersion={selectedAccount?.ddragonVersion || ddragonVersion}
+          onClose={() => setSelectedMatchState(null)}
         />
       )}
     </div>

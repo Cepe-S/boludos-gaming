@@ -63,6 +63,7 @@ export interface LolMatchDetailModalProps {
   groupPuuids: Set<string>;
   accountByPuuid: Map<string, LolAccount>;
   ddragonVersion?: string;
+  hideGroupInfo?: boolean;
   onClose: () => void;
 }
 
@@ -105,6 +106,7 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
   groupPuuids,
   accountByPuuid,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
+  hideGroupInfo = false,
   onClose,
 }) => {
   const [rawMatch, setRawMatch] = useState<RiotMatchV5 | null>(match.rawMatch ?? null);
@@ -348,8 +350,8 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
           <TableBody>
             {parts.map((p, pIdx) => {
               const isInspected = p.puuid === inspectedSummary?.puuid;
-              const isGroup = groupPuuids.has(p.puuid);
-              const groupAcc = accountByPuuid.get(p.puuid);
+              const isGroup = !hideGroupInfo && groupPuuids.has(p.puuid);
+              const groupAcc = !hideGroupInfo ? accountByPuuid.get(p.puuid) : undefined;
               const dmgWidth = Math.round((p.damageToChampions / maxDamage) * 100);
 
               return (
@@ -484,7 +486,7 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -526,7 +528,7 @@ export const LolMatchDetailModal: React.FC<LolMatchDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {groupMembersInMatch.length >= 2 && (
+            {!hideGroupInfo && groupMembersInMatch.length >= 2 && (
               <Badge variant="default" className="font-mono text-[10px]">
                 <Users className="w-3 h-3" strokeWidth={1.75} />
                 Grupo ({groupMembersInMatch.length})

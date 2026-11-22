@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   LolAccount,
+  LolMatchOutcome,
   LolMatchParticipantSummary,
   LolMatchSummary,
+  LolViewMode,
 } from '@/types/lol';
 import {
   DEFAULT_DDRAGON_VERSION,
@@ -15,7 +17,11 @@ import {
   getRuneMeta,
   getRuneStyleMeta,
 } from '@/lib/lolDdragon';
-import { countGroupMembersInMatch } from '@/lib/lolPerformanceEngine';
+import {
+  countGroupMembersInMatch,
+  getGradeFromScore,
+  resolveGroupMatchOutcome,
+} from '@/lib/lolPerformanceEngine';
 import { LolMatchHoverCard } from './LolMatchHoverCard';
 import {
   LolChampionAvatar,
@@ -30,12 +36,16 @@ import { cn } from '@/lib/utils';
 import { Eye, Swords, Users } from 'lucide-react';
 
 export interface LolRecentMatchesListProps {
+  mode: LolViewMode;
   matches: LolMatchSummary[];
   targetPuuid: string;
+  targetPuuids?: ReadonlySet<string>;
   groupPuuids: Set<string>;
+  puuidToUserId?: ReadonlyMap<string, string>;
   accountByPuuid: Map<string, LolAccount>;
   ddragonVersion?: string;
-  onSelectMatch: (matchId: string) => void;
+  onSelectMatch: (matchId: string, initialPuuid?: string) => void;
+  onSelectChampion?: (userId: string, championName: string) => void;
 }
 
 type OutcomeFilter = 'all' | 'win' | 'loss' | 'ff';
@@ -46,12 +56,31 @@ interface HoveredParticipantInfo {
   rect: { left: number; top: number; right: number; bottom: number };
 }
 
+interface MatchListRow {
+  match: LolMatchSummary;
+  outcome: LolMatchOutcome;
+  enemySurrendered: boolean;
+  groupCount: number;
+  userPart: LolMatchParticipantSummary | null;
+  groupParticipants: LolMatchParticipantSummary[];
+  representative: LolMatchParticipantSummary | null;
+  avgPerformance: number;
+  selectPuuid: string | undefined;
+}
+
 const ParticipantHoverPortal: React.FC<{
   info: HoveredParticipantInfo;
   isInspectedUser: boolean;
   groupAccount: LolAccount | undefined;
   ddragonVersion: string;
-}> = ({ info, isInspectedUser, groupAccount, ddragonVersion }) => {
+  hideGroupInfo?: boolean;
+}> = ({
+  info,
+  isInspectedUser,
+  groupAccount,
+  ddragonVersion,
+  hideGroupInfo = false,
+}) => {
   const { participant, match, rect } = info;
   const mins = Math.max(1, match.gameDuration / 60);
   const width = 310;
@@ -93,7 +122,7 @@ const ParticipantHoverPortal: React.FC<{
             ring={
               isInspectedUser
                 ? 'user'
-                : groupAccount
+                : !hideGroupInfo && groupAccount
                   ? 'group'
                   : participant.teamId === 100
                     ? 'team100'
@@ -110,7 +139,7 @@ const ParticipantHoverPortal: React.FC<{
                   #{participant.riotIdTagLine}
                 </span>
               )}
-              {groupAccount && (
+              {!hideGroupInfo && groupAccount && (
                 <Badge variant="default" className="px-1 py-0 text-[9px]">
                   Grupo
                 </Badge>
@@ -212,15 +241,28 @@ const ParticipantHoverPortal: React.FC<{
 };
 
 export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
+  mode,
   matches,
   targetPuuid,
+  targetPuuids,
   groupPuuids,
+  puuidToUserId,
   accountByPuuid,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
   onSelectMatch,
+  onSelectChampion,
 }) => {
+  const isPersonal = mode === 'personal';
+  const effectiveTargetPuuids = useMemo(
+    () =>
+      targetPuuids && targetPuuids.size > 0
+        ? targetPuuids
+        : targetPuuid
+          ? new Set([targetPuuid])
+          : new Set<string>(),
+    [targetPuuids, targetPuuid]
+  );
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
-  const [onlyGroup, setOnlyGroup] = useState(false);
 
   const [hoveredParticipant, setHoveredParticipant] =
     useState<HoveredParticipantInfo | null>(null);
@@ -230,35 +272,65 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
     rect: { left: number; top: number; right: number; bottom: number };
   } | null>(null);
 
-  const filteredRows = useMemo(() => {
-    const out: Array<{
-      match: LolMatchSummary;
-      userPart: LolMatchParticipantSummary;
-      groupCount: number;
-    }> = [];
+  useEffect(() => {
+    setHoveredParticipant(null);
+    setHoveredMatchSummary(null);
+  }, [mode, targetPuuid]);
+
+  const matchesOutcomeFilter = (outcome: LolMatchOutcome): boolean => {
+    if (outcomeFilter === 'win') return outcome === 'win';
+    if (outcomeFilter === 'loss') return outcome === 'loss';
+    if (outcomeFilter === 'ff') return outcome === 'ff' || outcome === 'remake';
+    return true;
+  };
+
+  const filteredRows = useMemo<MatchListRow[]>(() => {
+    const out: MatchListRow[] = [];
 
     for (const match of matches) {
-      const userPart = match.participants.find((p) => p.puuid === targetPuuid);
-      if (!userPart) continue;
+      if (mode === 'personal') {
+        const userPart = match.participants.find((p) => effectiveTargetPuuids.has(p.puuid));
+        if (!userPart) continue;
+        if (!matchesOutcomeFilter(userPart.outcome)) continue;
 
-      const groupCount = countGroupMembersInMatch(match, groupPuuids);
-      if (onlyGroup && groupCount < 2) continue;
+        out.push({
+          match,
+          outcome: userPart.outcome,
+          enemySurrendered: userPart.enemySurrendered,
+          groupCount: 0,
+          userPart,
+          groupParticipants: [],
+          representative: userPart,
+          avgPerformance: userPart.performanceScore,
+          selectPuuid: userPart.puuid,
+        });
+      } else {
+        const groupCount = countGroupMembersInMatch(match, groupPuuids, puuidToUserId);
+        if (groupCount < 2) continue;
 
-      if (outcomeFilter === 'win' && userPart.outcome !== 'win') continue;
-      if (outcomeFilter === 'loss' && userPart.outcome !== 'loss') continue;
-      if (
-        outcomeFilter === 'ff' &&
-        userPart.outcome !== 'ff' &&
-        userPart.outcome !== 'remake'
-      ) {
-        continue;
+        const resolved = resolveGroupMatchOutcome(match, groupPuuids);
+        if (!matchesOutcomeFilter(resolved.outcome)) continue;
+
+        const sortedGroupParticipants = [...resolved.groupParticipants].sort(
+          (a, b) => b.performanceScore - a.performanceScore || b.kda - a.kda
+        );
+
+        out.push({
+          match,
+          outcome: resolved.outcome,
+          enemySurrendered: resolved.enemySurrendered,
+          groupCount,
+          userPart: null,
+          groupParticipants: sortedGroupParticipants,
+          representative: resolved.representative,
+          avgPerformance: resolved.avgPerformance,
+          selectPuuid: resolved.representative?.puuid,
+        });
       }
-
-      out.push({ match, userPart, groupCount });
     }
 
     return out;
-  }, [matches, targetPuuid, groupPuuids, outcomeFilter, onlyGroup]);
+  }, [mode, matches, effectiveTargetPuuids, groupPuuids, puuidToUserId, outcomeFilter]);
 
   return (
     <Card className="h-full flex flex-col">
@@ -266,7 +338,7 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Swords className="w-4 h-4 text-primary" strokeWidth={1.75} />
-            <span>Partidas Recientes</span>
+            <span>{isPersonal ? 'Partidas Recientes' : 'Partidas del Grupo'}</span>
             <Badge variant="secondary" className="font-mono text-[10px]">
               {filteredRows.length}
             </Badge>
@@ -297,21 +369,6 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                 {opt.label}
               </button>
             ))}
-
-            <button
-              type="button"
-              onClick={() => setOnlyGroup((prev) => !prev)}
-              className={cn(
-                'px-2 py-0.5 rounded border text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1',
-                onlyGroup
-                  ? 'bg-primary/20 border-primary text-primary font-semibold'
-                  : 'bg-background/45 border-border text-muted-foreground hover:text-foreground'
-              )}
-              title="Filtrar solo partidas con al menos 2 miembros del grupo"
-            >
-              <Users className="w-3 h-3" strokeWidth={1.75} />
-              <span>Grupo</span>
-            </button>
           </div>
         </div>
       </CardHeader>
@@ -323,20 +380,22 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
           </div>
         ) : (
           <div
-            key={`${targetPuuid}-${outcomeFilter}-${onlyGroup}`}
+            key={`${mode}-${isPersonal ? targetPuuid : 'group'}-${outcomeFilter}`}
             className="max-h-[396px] overflow-y-auto scroller-thin pr-1 space-y-2"
           >
-            {filteredRows.map(({ match, userPart, groupCount }, idx) => {
+            {filteredRows.map((row, idx) => {
+              const {
+                match,
+                outcome,
+                enemySurrendered,
+                groupCount,
+                userPart,
+                groupParticipants,
+                representative,
+                avgPerformance,
+                selectPuuid,
+              } = row;
               const mins = Math.max(1, match.gameDuration / 60);
-              const team = match.teams.find((t) => t.teamId === userPart.teamId);
-              const teamTotalDmg = Math.max(1, team?.totalDamageToChampions ?? 1);
-              const dmgPct = Math.round((userPart.damageToChampions / teamTotalDmg) * 100);
-              const runeMeta = userPart.primaryRuneId
-                ? getRuneMeta(userPart.primaryRuneId)
-                : null;
-              const subStyleMeta = userPart.subStyleId
-                ? getRuneStyleMeta(userPart.subStyleId)
-                : null;
 
               const team100 = match.participants
                 .filter((p) => p.teamId === 100)
@@ -346,20 +405,20 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                 .slice(0, 5);
 
               const leftBorderClass =
-                userPart.outcome === 'win'
+                outcome === 'win'
                   ? 'border-l-success'
-                  : userPart.outcome === 'ff'
+                  : outcome === 'ff'
                     ? 'border-l-[#881337] border-[#9F1239]/55'
-                    : userPart.outcome === 'remake'
+                    : outcome === 'remake'
                       ? 'border-l-muted-foreground'
                       : 'border-l-destructive';
 
               const bgTintClass =
-                userPart.outcome === 'win'
+                outcome === 'win'
                   ? 'bg-success/[0.04] hover:bg-success/[0.09]'
-                  : userPart.outcome === 'ff'
+                  : outcome === 'ff'
                     ? 'bg-[#4C0519]/40 hover:bg-[#4C0519]/60'
-                    : userPart.outcome === 'remake'
+                    : outcome === 'remake'
                       ? 'bg-muted/30 hover:bg-muted/50'
                       : 'bg-destructive/[0.04] hover:bg-destructive/[0.09]';
 
@@ -369,11 +428,12 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                   role="button"
                   tabIndex={0}
                   style={{ animationDelay: `${Math.min(idx, 12) * 35}ms` }}
-                  onClick={() => onSelectMatch(match.matchId)}
+                  onClick={() => onSelectMatch(match.matchId, selectPuuid)}
                   onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      onSelectMatch(match.matchId);
+                      onSelectMatch(match.matchId, selectPuuid);
                     }
                   }}
                   className={cn(
@@ -386,8 +446,8 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 mb-1.5 border-b border-border/50">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                       <LolOutcomeBadge
-                        outcome={userPart.outcome}
-                        enemySurrendered={userPart.enemySurrendered}
+                        outcome={outcome}
+                        enemySurrendered={enemySurrendered}
                         compact
                       />
                       <span className="text-[11px] font-semibold text-foreground truncate">
@@ -396,135 +456,247 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                       <span className="text-[10px] font-mono text-muted-foreground">
                         {formatDuration(match.gameDuration)} · {formatRelativeTime(match.gameCreation)}
                       </span>
-                      {groupCount >= 2 && (
+                      {!isPersonal && groupCount >= 2 && (
                         <Badge
                           variant="default"
-                          className="px-1 py-0 text-[9px] font-mono"
+                          className="px-1.5 py-0 text-[9px] font-mono"
                           title={`${groupCount} jugadores del grupo`}
                         >
                           <Users className="w-2.5 h-2.5" strokeWidth={1.75} />
-                          {groupCount}
+                          Grupo ({groupCount})
                         </Badge>
                       )}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <LolPerformanceBadge
-                        score={userPart.performanceScore}
-                        grade={userPart.performanceGrade}
-                        isMvp={userPart.isMvp}
-                        isAce={userPart.isAce}
-                        matchRank={userPart.matchRank}
-                        isRemake={userPart.performanceBreakdown.isRemake}
-                        compact
-                      />
-                      <button
-                        type="button"
-                        title="Vista rápida"
-                        aria-label="Vista rápida de la partida"
-                        onMouseEnter={(e) => {
-                          const r = e.currentTarget.getBoundingClientRect();
-                          setHoveredMatchSummary({
-                            match,
-                            participant: userPart,
-                            rect: {
-                              left: r.left,
-                              top: r.top,
-                              right: r.right,
-                              bottom: r.bottom,
-                            },
-                          });
-                        }}
-                        onMouseLeave={() => setHoveredMatchSummary(null)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectMatch(match.matchId);
-                        }}
-                        className="p-1 rounded border border-border bg-background/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3 h-3" strokeWidth={1.75} />
-                      </button>
+                      {isPersonal && userPart ? (
+                        <LolPerformanceBadge
+                          score={userPart.performanceScore}
+                          grade={userPart.performanceGrade}
+                          isMvp={userPart.isMvp}
+                          isAce={userPart.isAce}
+                          matchRank={userPart.matchRank}
+                          isRemake={userPart.performanceBreakdown.isRemake}
+                          compact
+                        />
+                      ) : (
+                        <LolPerformanceBadge
+                          score={avgPerformance}
+                          grade={getGradeFromScore(avgPerformance)}
+                          isRemake={outcome === 'remake'}
+                          compact
+                        />
+                      )}
+                      {representative && (
+                        <button
+                          type="button"
+                          title="Vista rápida"
+                          aria-label="Vista rápida de la partida"
+                          onMouseEnter={(e) => {
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setHoveredMatchSummary({
+                              match,
+                              participant: representative,
+                              rect: {
+                                left: r.left,
+                                top: r.top,
+                                right: r.right,
+                                bottom: r.bottom,
+                              },
+                            });
+                          }}
+                          onMouseLeave={() => setHoveredMatchSummary(null)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectMatch(match.matchId, selectPuuid);
+                          }}
+                          className="p-1 rounded border border-border bg-background/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3 h-3" strokeWidth={1.75} />
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Main Body: Left (User Champ + Spells/Runes + Items + KDA/Stats) | Right (2x5 Grid) */}
+                  {/* Main Body: Left (Personal detail or Group members list) | Right (2x5 Grid) */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <LolChampionAvatar
-                        championName={userPart.championName}
-                        level={userPart.champLevel}
-                        version={ddragonVersion}
-                        size="lg"
-                        ring="user"
-                      />
+                    {isPersonal && userPart ? (
+                      (() => {
+                        const team = match.teams.find((t) => t.teamId === userPart.teamId);
+                        const teamTotalDmg = Math.max(1, team?.totalDamageToChampions ?? 1);
+                        const dmgPct = Math.round((userPart.damageToChampions / teamTotalDmg) * 100);
+                        const runeMeta = userPart.primaryRuneId
+                          ? getRuneMeta(userPart.primaryRuneId)
+                          : null;
+                        const subStyleMeta = userPart.subStyleId
+                          ? getRuneStyleMeta(userPart.subStyleId)
+                          : null;
 
-                      <LolSpellsRunesBadge
-                        summoner1Id={userPart.summoner1Id}
-                        summoner2Id={userPart.summoner2Id}
-                        primaryRuneId={userPart.primaryRuneId}
-                        subStyleId={userPart.subStyleId}
-                        version={ddragonVersion}
-                        size="sm"
-                        layout="grid"
-                      />
+                        return (
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <LolChampionAvatar
+                              championName={userPart.championName}
+                              level={userPart.champLevel}
+                              version={ddragonVersion}
+                              size="lg"
+                              ring="user"
+                            />
 
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-xs font-bold text-foreground truncate">
-                              {userPart.championName}
-                            </span>
-                            <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
-                              {formatRoleLabel(userPart.performanceBreakdown.role)}
-                            </Badge>
+                            <LolSpellsRunesBadge
+                              summoner1Id={userPart.summoner1Id}
+                              summoner2Id={userPart.summoner2Id}
+                              primaryRuneId={userPart.primaryRuneId}
+                              subStyleId={userPart.subStyleId}
+                              version={ddragonVersion}
+                              size="sm"
+                              layout="grid"
+                            />
+
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-xs font-bold text-foreground truncate">
+                                    {userPart.championName}
+                                  </span>
+                                  <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
+                                    {formatRoleLabel(userPart.performanceBreakdown.role)}
+                                  </Badge>
+                                </div>
+
+                                <div className="font-mono text-xs shrink-0">
+                                  <span className="font-bold text-foreground">
+                                    {userPart.kills}
+                                    <span className="text-muted-foreground">/</span>
+                                    <span className="text-destructive">{userPart.deaths}</span>
+                                    <span className="text-muted-foreground">/</span>
+                                    {userPart.assists}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground ml-1">
+                                    ({userPart.kda.toFixed(1)})
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <LolItemRow
+                                  items={userPart.items}
+                                  version={ddragonVersion}
+                                  size="xs"
+                                />
+                                {userPart.highlights.slice(0, 2).map((tag) => (
+                                  <Badge
+                                    key={tag}
+                                    variant="outline"
+                                    className="px-1 py-0 text-[9px] font-mono bg-background/50"
+                                  >
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
+                                <span>KP {Math.round(userPart.killParticipation * 100)}%</span>
+                                <span>{userPart.csPerMin.toFixed(1)} CS/m</span>
+                                <span>
+                                  {formatCompactNumber(userPart.damageToChampions)} DMG ({dmgPct}%)
+                                </span>
+                                <span>{(userPart.visionScore / mins).toFixed(1)} Vis/m</span>
+                                {(runeMeta?.name || subStyleMeta?.name) && (
+                                  <span className="truncate opacity-80">
+                                    {runeMeta?.name || subStyleMeta?.name}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
+                        );
+                      })()
+                    ) : (
+                      <div className="flex-1 min-w-0 space-y-1">
+                        {groupParticipants.map((p) => {
+                          const acc = accountByPuuid.get(p.puuid);
+                          const playerName =
+                            acc?.gameName || p.riotIdGameName || p.summonerName || 'Jugador';
+                          const pickUserId = acc?.userId;
+                          const canSelectChamp = Boolean(onSelectChampion && pickUserId);
 
-                          <div className="font-mono text-xs shrink-0">
-                            <span className="font-bold text-foreground">
-                              {userPart.kills}
-                              <span className="text-muted-foreground">/</span>
-                              <span className="text-destructive">{userPart.deaths}</span>
-                              <span className="text-muted-foreground">/</span>
-                              {userPart.assists}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground ml-1">
-                              ({userPart.kda.toFixed(1)})
-                            </span>
-                          </div>
-                        </div>
+                          const rowBody = (
+                            <>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <LolChampionAvatar
+                                  championName={p.championName}
+                                  level={p.champLevel}
+                                  version={ddragonVersion}
+                                  size="xs"
+                                  ring="group"
+                                />
+                                <span className="text-[11px] font-semibold text-foreground truncate max-w-[92px]">
+                                  {playerName}
+                                </span>
+                                <span
+                                  className={cn(
+                                    'text-[10.5px] text-muted-foreground truncate',
+                                    canSelectChamp && 'group-hover/pick:text-primary'
+                                  )}
+                                >
+                                  {p.championName}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className="text-[8.5px] font-mono px-1 py-0 shrink-0"
+                                >
+                                  {formatRoleLabel(p.performanceBreakdown.role)}
+                                </Badge>
+                              </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <LolItemRow
-                            items={userPart.items}
-                            version={ddragonVersion}
-                            size="xs"
-                          />
-                          {userPart.highlights.slice(0, 2).map((tag) => (
-                            <Badge
-                              key={tag}
-                              variant="outline"
-                              className="px-1 py-0 text-[9px] font-mono bg-background/50"
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="font-mono text-[10.5px] font-bold text-foreground">
+                                  {p.kills}
+                                  <span className="text-muted-foreground">/</span>
+                                  <span className="text-destructive">{p.deaths}</span>
+                                  <span className="text-muted-foreground">/</span>
+                                  {p.assists}
+                                </span>
+                                <LolPerformanceBadge
+                                  score={p.performanceScore}
+                                  grade={p.performanceGrade}
+                                  isMvp={p.isMvp}
+                                  isAce={p.isAce}
+                                  isRemake={p.performanceBreakdown.isRemake}
+                                  compact
+                                />
+                              </div>
+                            </>
+                          );
+
+                          if (canSelectChamp && pickUserId) {
+                            return (
+                              <button
+                                key={`${p.puuid}-${p.participantId}`}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSelectChampion?.(pickUserId, p.championName);
+                                }}
+                                title={`Ver análisis de ${playerName} con ${p.championName}`}
+                                className="w-full flex items-center justify-between gap-2 px-1.5 py-1 rounded border border-border/70 bg-background/45 hover:bg-primary/10 hover:border-primary/45 transition-colors text-left cursor-pointer group/pick"
+                              >
+                                {rowBody}
+                              </button>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={`${p.puuid}-${p.participantId}`}
+                              className="w-full flex items-center justify-between gap-2 px-1.5 py-1 rounded border border-border/70 bg-background/45 text-left"
                             >
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
-                          <span>KP {Math.round(userPart.killParticipation * 100)}%</span>
-                          <span>{userPart.csPerMin.toFixed(1)} CS/m</span>
-                          <span>
-                            {formatCompactNumber(userPart.damageToChampions)} DMG ({dmgPct}%)
-                          </span>
-                          <span>{(userPart.visionScore / mins).toFixed(1)} Vis/m</span>
-                          {(runeMeta?.name || subStyleMeta?.name) && (
-                            <span className="truncate opacity-80">
-                              {runeMeta?.name || subStyleMeta?.name}
-                            </span>
-                          )}
-                        </div>
+                              {rowBody}
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
+                    )}
 
                     {/* Right: Compact 2x5 Champion Grid */}
                     <div className="sm:w-[196px] shrink-0 space-y-1">
@@ -537,8 +709,8 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                           )}
                         >
                           {teamRoster.map((p) => {
-                            const isUser = p.puuid === targetPuuid;
-                            const isGroup = !isUser && groupPuuids.has(p.puuid);
+                            const isUser = isPersonal && p.puuid === targetPuuid;
+                            const isGroup = !isPersonal && groupPuuids.has(p.puuid);
                             return (
                               <div
                                 key={`${p.puuid}-${p.participantId}`}
@@ -594,9 +766,12 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
       {hoveredParticipant && (
         <ParticipantHoverPortal
           info={hoveredParticipant}
-          isInspectedUser={hoveredParticipant.participant.puuid === targetPuuid}
+          isInspectedUser={
+            isPersonal && hoveredParticipant.participant.puuid === targetPuuid
+          }
           groupAccount={accountByPuuid.get(hoveredParticipant.participant.puuid)}
           ddragonVersion={ddragonVersion}
+          hideGroupInfo={isPersonal}
         />
       )}
 
@@ -608,6 +783,7 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
           groupPuuids={groupPuuids}
           accountByPuuid={accountByPuuid}
           ddragonVersion={ddragonVersion}
+          hideGroupInfo={isPersonal}
         />
       )}
     </Card>

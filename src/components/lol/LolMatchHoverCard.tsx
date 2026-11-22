@@ -32,6 +32,15 @@ export interface LolMatchHoverCardProps {
   groupPuuids: Set<string>;
   accountByPuuid: Map<string, LolAccount>;
   ddragonVersion?: string;
+  hideGroupInfo?: boolean;
+  showOutcomeDiffs?: boolean;
+}
+
+function formatSignedDiff(val: number, compact = false): string {
+  if (val === 0) return '0';
+  const sign = val > 0 ? '+' : '-';
+  const abs = Math.abs(val);
+  return `${sign}${compact ? formatCompactNumber(abs) : abs}`;
 }
 
 export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
@@ -41,9 +50,11 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
   groupPuuids,
   accountByPuuid,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
+  hideGroupInfo = false,
+  showOutcomeDiffs = false,
 }) => {
   const cardWidth = 370;
-  const estimatedHeight = 365;
+  const estimatedHeight = showOutcomeDiffs ? 420 : 365;
 
   const position = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -75,6 +86,53 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
   const team100Summary = match.teams.find((t) => t.teamId === 100);
   const team200Summary = match.teams.find((t) => t.teamId === 200);
 
+  const outcomeTeamDiffs = useMemo(() => {
+    const allyParts = match.participants.filter((p) => p.teamId === participant.teamId);
+    const enemyParts = match.participants.filter(
+      (p) => p.teamId !== participant.teamId && (p.teamId === 100 || p.teamId === 200)
+    );
+    const allySummary = match.teams.find((t) => t.teamId === participant.teamId);
+    const enemySummary = match.teams.find(
+      (t) => t.teamId !== participant.teamId && (t.teamId === 100 || t.teamId === 200)
+    );
+
+    const allyGold =
+      allySummary?.totalGold ?? allyParts.reduce((s, p) => s + p.goldEarned, 0);
+    const enemyGold =
+      enemySummary?.totalGold ?? enemyParts.reduce((s, p) => s + p.goldEarned, 0);
+    const allyKills =
+      allySummary?.totalKills ?? allyParts.reduce((s, p) => s + p.kills, 0);
+    const enemyKills =
+      enemySummary?.totalKills ?? enemyParts.reduce((s, p) => s + p.kills, 0);
+    const allyTowers =
+      allySummary?.objectives?.tower?.kills ??
+      allyParts.reduce((s, p) => s + (p.rawParticipant?.turretKills ?? 0), 0);
+    const enemyTowers =
+      enemySummary?.objectives?.tower?.kills ??
+      enemyParts.reduce((s, p) => s + (p.rawParticipant?.turretKills ?? 0), 0);
+
+    return {
+      allyGold,
+      enemyGold,
+      goldDiff: allyGold - enemyGold,
+      allyKills,
+      enemyKills,
+      killsDiff: allyKills - enemyKills,
+      allyTowers,
+      enemyTowers,
+      towersDiff: allyTowers - enemyTowers,
+    };
+  }, [match, participant.teamId]);
+
+  const outcomeMomentLabel =
+    participant.outcome === 'win'
+      ? participant.enemySurrendered
+        ? 'AL MOMENTO DEL WIN (FF RIVAL)'
+        : 'AL MOMENTO DEL WIN'
+      : participant.outcome === 'ff'
+        ? 'AL MOMENTO DEL FF'
+        : 'AL MOMENTO DE LA DERROTA';
+
   const eventMs =
     match.gameEndTimestamp && match.gameEndTimestamp > 0
       ? match.gameEndTimestamp
@@ -92,7 +150,9 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
         })()
       : '';
 
-  const groupMates = match.participants.filter((p) => groupPuuids.has(p.puuid));
+  const groupMates = hideGroupInfo
+    ? []
+    : match.participants.filter((p) => groupPuuids.has(p.puuid));
 
   const content = (
     <div
@@ -213,6 +273,75 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
       {/* 6 Pillars */}
       <LolPillarBars pillars={participant.performanceBreakdown.pillars} compact showInfo={false} />
 
+      {/* Team Diffs at Moment of Win / FF / Loss */}
+      {showOutcomeDiffs && (
+        <div className="rounded bg-background/70 border border-white/10 p-1.5 space-y-1 font-mono">
+          <div className="flex items-center justify-between text-[9px] text-muted-foreground tracking-wider">
+            <span className="font-bold text-foreground/90">{outcomeMomentLabel}</span>
+            <span>EQUIPO VS RIVAL</span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+            <div className="rounded bg-background/60 border border-border/70 py-1 px-1">
+              <span className="text-[9px] text-muted-foreground block">Δ ORO</span>
+              <strong
+                className={cn(
+                  'text-[11px] font-bold block',
+                  outcomeTeamDiffs.goldDiff > 0
+                    ? 'text-emerald-400'
+                    : outcomeTeamDiffs.goldDiff < 0
+                      ? 'text-rose-400'
+                      : 'text-foreground'
+                )}
+              >
+                {formatSignedDiff(outcomeTeamDiffs.goldDiff, true)}
+              </strong>
+              <span className="text-[8.5px] text-muted-foreground block">
+                {formatCompactNumber(outcomeTeamDiffs.allyGold)} vs{' '}
+                {formatCompactNumber(outcomeTeamDiffs.enemyGold)}
+              </span>
+            </div>
+
+            <div className="rounded bg-background/60 border border-border/70 py-1 px-1">
+              <span className="text-[9px] text-muted-foreground block">Δ KILLS</span>
+              <strong
+                className={cn(
+                  'text-[11px] font-bold block',
+                  outcomeTeamDiffs.killsDiff > 0
+                    ? 'text-emerald-400'
+                    : outcomeTeamDiffs.killsDiff < 0
+                      ? 'text-rose-400'
+                      : 'text-foreground'
+                )}
+              >
+                {formatSignedDiff(outcomeTeamDiffs.killsDiff)}
+              </strong>
+              <span className="text-[8.5px] text-muted-foreground block">
+                {outcomeTeamDiffs.allyKills} vs {outcomeTeamDiffs.enemyKills}
+              </span>
+            </div>
+
+            <div className="rounded bg-background/60 border border-border/70 py-1 px-1">
+              <span className="text-[9px] text-muted-foreground block">Δ TORRES</span>
+              <strong
+                className={cn(
+                  'text-[11px] font-bold block',
+                  outcomeTeamDiffs.towersDiff > 0
+                    ? 'text-emerald-400'
+                    : outcomeTeamDiffs.towersDiff < 0
+                      ? 'text-rose-400'
+                      : 'text-foreground'
+                )}
+              >
+                {formatSignedDiff(outcomeTeamDiffs.towersDiff)}
+              </strong>
+              <span className="text-[8.5px] text-muted-foreground block">
+                {outcomeTeamDiffs.allyTowers} vs {outcomeTeamDiffs.enemyTowers}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Team Score + Objectives + Group Mates */}
       <div className="pt-1.5 border-t border-border/70 space-y-1.5">
         <div className="flex items-center justify-between text-[10px] font-mono">
@@ -234,7 +363,7 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
         <div className="grid grid-cols-5 gap-1">
           {[...team100, ...team200].map((p) => {
             const isTarget = p.puuid === participant.puuid;
-            const isGroup = groupPuuids.has(p.puuid);
+            const isGroup = !hideGroupInfo && groupPuuids.has(p.puuid);
             return (
               <div
                 key={`${p.puuid}-${p.participantId}`}
@@ -261,7 +390,7 @@ export const LolMatchHoverCard: React.FC<LolMatchHoverCardProps> = ({
           })}
         </div>
 
-        {groupMates.length >= 2 && (
+        {!hideGroupInfo && groupMates.length >= 2 && (
           <div className="flex flex-wrap items-center gap-1 text-[10px]">
             <Badge variant="default" className="px-1.5 py-0 text-[9px]">
               <Users className="w-2.5 h-2.5" strokeWidth={1.75} />

@@ -41,6 +41,7 @@ export interface LolRankedEntry {
 export interface LolAccount {
   userId: string;
   puuid: string;
+  isPrimary?: boolean;
   gameName: string;
   tagLine: string;
   platform: LolPlatform;

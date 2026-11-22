@@ -13,7 +13,6 @@ import {
 } from '@/lib/lolDdragon';
 import { getGradeFromScore, RIFT_ROLE_KEYS } from '@/lib/lolPerformanceEngine';
 import {
-  LOL_FF_CHIP_CLASS,
   LOL_STAT_GLOSSARY,
   LolAnimatedNumber,
   LolChampionAvatar,
@@ -45,10 +44,49 @@ export interface LolGroupLeaderboardProps {
   entries: LolGroupLeaderboardEntry[];
   roleLeaderboard: LolRoleLeaderboardByLane;
   selectedUserId: string | null;
+  currentUserId?: string | null;
   queueFilter: LolQueueCategory;
   ddragonVersion?: string;
   onSelectPlayer: (userId: string) => void;
+  onSelectChampion?: (userId: string, championName: string) => void;
 }
+
+const ChampionChipButton: React.FC<{
+  userId: string;
+  championName: string;
+  version: string;
+  onSelectChampion?: (userId: string, championName: string) => void;
+}> = ({ userId, championName, version, onSelectChampion }) => {
+  const inner = (
+    <>
+      <LolChampionAvatar
+        championName={championName}
+        version={version}
+        size="xs"
+        className="w-3.5 h-3.5 rounded-sm"
+      />
+      <span className="truncate">{championName}</span>
+    </>
+  );
+
+  if (!onSelectChampion) {
+    return <span className="inline-flex items-center gap-1 min-w-0">{inner}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelectChampion(userId, championName);
+      }}
+      title="Ver análisis con campeón"
+      className="inline-flex items-center gap-1 min-w-0 text-left hover:text-primary transition-colors cursor-pointer"
+    >
+      {inner}
+    </button>
+  );
+};
 
 type LeaderboardViewMode = 'general' | 'role';
 type LeaderboardSortKey = 'rankScore' | 'performance' | 'games' | 'winRate';
@@ -66,13 +104,16 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
   entries,
   roleLeaderboard,
   selectedUserId,
+  currentUserId,
   queueFilter,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
   onSelectPlayer,
+  onSelectChampion,
 }) => {
   const [viewMode, setViewMode] = useState<LeaderboardViewMode>('general');
   const [sortBy, setSortBy] = useState<LeaderboardSortKey>('rankScore');
   const [selectedLane, setSelectedLane] = useState<LaneFilterSelection>('ALL');
+  const yoUserId = currentUserId !== undefined ? currentUserId : selectedUserId;
 
   const sortedEntries = useMemo(() => {
     return [...entries].sort((a, b) => {
@@ -254,6 +295,7 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
               <TableBody key={`general-${sortBy}`}>
                 {sortedEntries.map((entry, idx) => {
                   const isSelected = selectedUserId === entry.userId;
+                  const isSelf = Boolean(yoUserId && yoUserId === entry.userId);
                   const grade = getGradeFromScore(entry.groupPerformanceAvg);
                   const version = entry.account.ddragonVersion || ddragonVersion;
 
@@ -287,7 +329,7 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                               <span className="text-xs font-semibold text-foreground truncate max-w-[110px]">
                                 {entry.displayName}
                               </span>
-                              {isSelected && (
+                              {isSelf && (
                                 <Badge variant="default" className="text-[9px] px-1 py-0">
                                   Yo
                                 </Badge>
@@ -295,17 +337,12 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                             </div>
                             <div className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground truncate max-w-[155px]">
                               {entry.topGroupChampion ? (
-                                <>
-                                  <LolChampionAvatar
-                                    championName={entry.topGroupChampion.championName}
-                                    version={version}
-                                    size="xs"
-                                    className="w-3.5 h-3.5 rounded-sm"
-                                  />
-                                  <span className="truncate">
-                                    {entry.topGroupChampion.championName}
-                                  </span>
-                                </>
+                                <ChampionChipButton
+                                  userId={entry.userId}
+                                  championName={entry.topGroupChampion.championName}
+                                  version={version}
+                                  onSelectChampion={onSelectChampion}
+                                />
                               ) : (
                                 <span>
                                   {queueFilter === 'all' ? 'Sin partidas' : 'Sin en cola'}
@@ -351,8 +388,11 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                             </div>
                           </div>
                         ) : (
-                          <span className="text-[10px] text-muted-foreground">
-                            Solo: {entry.personalPerformanceAvg.toFixed(1)}
+                          <span
+                            className="text-[10px] text-muted-foreground"
+                            title="0G en grupo"
+                          >
+                            Sin en grupo
                           </span>
                         )}
                       </TableCell>
@@ -363,9 +403,8 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                         </div>
                         <div className="flex items-center gap-1 text-[9.5px]">
                           <span className="text-success">{entry.groupWins}V</span>
-                          <span className="text-destructive">{entry.groupLosses}D</span>
-                          <span className={cn('font-bold', LOL_FF_CHIP_CLASS)}>
-                            {entry.groupFfs}FF
+                          <span className="text-destructive">
+                            {entry.groupLosses + entry.groupFfs}D
                           </span>
                         </div>
                       </TableCell>
@@ -429,11 +468,18 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                     </p>
                   ) : (
                     <div className="space-y-1.5">
-                      <button
-                        type="button"
+                      <div
+                        role="button"
+                        tabIndex={0}
                         onClick={() => onSelectPlayer(leader.userId)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onSelectPlayer(leader.userId);
+                          }
+                        }}
                         className={cn(
-                          'w-full flex items-center justify-between gap-2 p-1.5 rounded border text-left transition-colors cursor-pointer',
+                          'w-full flex items-center justify-between gap-2 p-1.5 rounded border text-left transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring',
                           selectedUserId === leader.userId
                             ? 'bg-primary/15 border-primary'
                             : 'bg-background/60 border-border/80 hover:bg-muted/60'
@@ -446,22 +492,32 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                             alt={leader.displayName}
                             className="w-6 h-6 rounded-full object-cover border border-border shrink-0"
                           />
-                          {leader.topChampion && (
-                            <LolChampionAvatar
-                              championName={leader.topChampion.championName}
-                              version={leader.account.ddragonVersion || ddragonVersion}
-                              size="xs"
-                              className="w-5 h-5"
-                            />
-                          )}
                           <div className="min-w-0">
-                            <span className="text-xs font-semibold text-foreground block truncate">
-                              {leader.displayName}
-                            </span>
-                            <span className="text-[10px] font-mono text-muted-foreground block truncate">
-                              {leader.topChampion?.championName || leader.account.gameName} ·{' '}
-                              {leader.games}G · {leader.avgKda.toFixed(1)} KDA
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-semibold text-foreground truncate">
+                                {leader.displayName}
+                              </span>
+                              {yoUserId === leader.userId && (
+                                <Badge variant="default" className="text-[9px] px-1 py-0">
+                                  Yo
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground min-w-0">
+                              {leader.topChampion ? (
+                                <ChampionChipButton
+                                  userId={leader.userId}
+                                  championName={leader.topChampion.championName}
+                                  version={leader.account.ddragonVersion || ddragonVersion}
+                                  onSelectChampion={onSelectChampion}
+                                />
+                              ) : (
+                                <span className="truncate">{leader.account.gameName}</span>
+                              )}
+                              <span className="shrink-0">
+                                · {leader.games}G · {leader.avgKda.toFixed(1)} KDA
+                              </span>
+                            </div>
                           </div>
                         </div>
 
@@ -481,7 +537,7 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                             {leader.winRate}% WR
                           </div>
                         </div>
-                      </button>
+                      </div>
 
                       {laneList.length > 1 && (
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -524,6 +580,7 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                   {activeLaneEntries.map((entry, idx) => {
                     const grade = getGradeFromScore(entry.avgPerformance);
                     const isSelected = selectedUserId === entry.userId;
+                    const isSelf = Boolean(yoUserId && yoUserId === entry.userId);
                     return (
                       <TableRow
                         key={entry.userId}
@@ -548,21 +605,29 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                               alt={entry.displayName}
                               className="w-6 h-6 rounded-full object-cover border border-border shrink-0"
                             />
-                            {entry.topChampion && (
-                              <LolChampionAvatar
-                                championName={entry.topChampion.championName}
-                                version={entry.account.ddragonVersion || ddragonVersion}
-                                size="xs"
-                                className="w-5 h-5"
-                              />
-                            )}
                             <div className="min-w-0">
-                              <span className="text-xs font-semibold text-foreground block truncate">
-                                {entry.displayName}
-                              </span>
-                              <span className="text-[10px] font-mono text-muted-foreground block truncate">
-                                {entry.topChampion?.championName || entry.account.gameName}
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs font-semibold text-foreground truncate">
+                                  {entry.displayName}
+                                </span>
+                                {isSelf && (
+                                  <Badge variant="default" className="text-[9px] px-1 py-0">
+                                    Yo
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground min-w-0">
+                                {entry.topChampion ? (
+                                  <ChampionChipButton
+                                    userId={entry.userId}
+                                    championName={entry.topChampion.championName}
+                                    version={entry.account.ddragonVersion || ddragonVersion}
+                                    onSelectChampion={onSelectChampion}
+                                  />
+                                ) : (
+                                  <span className="truncate">{entry.account.gameName}</span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </TableCell>
@@ -587,10 +652,7 @@ export const LolGroupLeaderboard: React.FC<LolGroupLeaderboardProps> = ({
                           </div>
                           <div className="inline-flex items-center gap-1 text-[9.5px]">
                             <span className="text-success">{entry.wins}V</span>
-                            <span className="text-destructive">{entry.losses}D</span>
-                            <span className={cn('font-bold', LOL_FF_CHIP_CLASS)}>
-                              {entry.ffs}FF
-                            </span>
+                            <span className="text-destructive">{entry.losses + entry.ffs}D</span>
                           </div>
                         </TableCell>
                       </TableRow>

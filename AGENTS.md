@@ -1,20 +1,34 @@
-# Boludos Gaming — Project Guidelines & Architecture (`AGENTS.md`)
+# Boludos Gaming — AGENTS.md
 
-## Stack Overview
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS + Lucide Icons
-- **Backend / BaaS (100% Free)**: Supabase (PostgreSQL, Realtime, Discord OAuth, Edge Functions) + Dual Mode Local/Demo Store (`localStorage` + `BroadcastChannel` for instant multi-tab & offline operation)
-- **Integrations**:
-  - **Discord Channel Bot & Webhook**: Real-time Rich Embeds, `<@discord_id>` user mentions, and interactive buttons (`supabase/functions/discord-bot/index.ts` + `src/lib/discordService.ts`).
-  - **Mobile Web Push (PWA)**: `public/manifest.webmanifest` + `public/sw.js` Service Worker + `supabase/functions/send-push/index.ts`.
-- **Hosting**: GitHub Pages (`vite.config.ts` with `base: './'` and `.github/workflows/deploy.yml`).
+## Reglas de Navegación y Eficiencia
+1. **Serena MCP primero:** Priorizar las herramientas de símbolos de Serena MCP (`find_symbol`, `find_referencing_symbols`, `replace_symbol_body`) antes de leer archivos enteros.
+2. **Sin búsquedas por terminal:** Prohibido usar la terminal (`grep`, `find`, `ls -R` o equivalentes) para buscar en el código.
+3. **Respetar `.antigravityignore`:** No leer ni indexar dependencias, builds, lockfiles, cachés, SQL ni assets multimedia.
+4. **UI & Diseño:** Consultar `DESIGN.md` antes de tocar o crear componentes de UI.
 
-## Workspace Skills
-Always consult the relevant skill in `.agents/skills/` before implementing its domain:
-- `.agents/skills/matchmaking-karma-engine/SKILL.md`
-- `.agents/skills/supabase-discord-pwa/SKILL.md`
-- `.agents/skills/gaming-ui-ghpages/SKILL.md`
+## Stack y Scripts (`package.json`)
+- **Frontend:** React 19, TypeScript 5.7, Vite 6 (`base: './'`), Tailwind CSS 4, Radix UI, Lucide Icons, React Hook Form + Zod.
+- **Backend / BaaS:** Supabase (`@supabase/supabase-js`, Edge Functions) + Dual Mode Local/Demo (`localStorage` + `BroadcastChannel`).
+- **Integraciones:** Discord Webhook/Bot (Rich Embeds, `<@discord_id>`) y PWA Web Push (`public/sw.js`).
+- **Scripts:** `npm run dev` | `npm run build` (`tsc -b && vite build`) | `npm run preview` | `npm test` (`vitest run`).
 
-## Code Quality Rules
-1. Strict TypeScript: Do not use `any` where a typed interface from `src/types/domain.ts` applies.
-2. Every action in the UI (creating a session, joining with `±15m` precision, spinning the random roulette, checking in, voting a sanction in the Tribunal del Humo, pinging a late friend, sending a chat message) must update state immediately, trigger the Discord Channel notification (both in the live Discord Feed mirror and to the configured Discord Webhook/Bot), and trigger Web Push notifications when appropriate.
-3. **UI Concisa & Icon-First (Audiencia con Conocimiento Medio/Alto)**: La aplicación está dirigida a usuarios gamers con conocimiento medio/alto de aplicaciones e interfaces. Evitar descripciones largas, subtítulos explicativos y texto redundante; no repetir la misma intención entre título, subtítulo y etiqueta de botón. Priorizar controles solo-ícono con atributo `title`/`aria-label` (o `Tooltip`) para acciones estándar, etiquetas breves de 1–3 palabras y densidad visual enfocada en datos y estado.
+## Mapa del Proyecto (Niveles 1–2)
+- `src/` — Entrada (`main.tsx`, `App.tsx`, `index.css`, `vite-env.d.ts`)
+  - `src/components/` — Componentes de UI y vistas
+  - `src/context/` — Estado global y sincronización
+  - `src/hooks/` — Custom hooks
+  - `src/lib/` — Servicios (Supabase, Discord, matchmaking, karma)
+  - `src/types/` — Interfaces de dominio (`domain.ts`)
+- `public/` — PWA (`manifest.webmanifest`, `sw.js`, `icon.svg`)
+- `supabase/` — `functions/` (Edge Functions) y `schema.sql`
+- `.agents/skills/` — Skills de dominio (consultar antes de implementar):
+  - `matchmaking-karma-engine/SKILL.md`
+  - `supabase-discord-pwa/SKILL.md`
+  - `gaming-ui-ghpages/SKILL.md`
+- `.github/workflows/` — Deploy a GitHub Pages
+- Raíz — `DESIGN.md`, `index.html`, `vite.config.ts`, `tsconfig.json`, `.antigravityignore`, `Lol*.tsx`
+
+## Reglas de Código y UI
+1. **TypeScript estricto:** No usar `any` cuando aplique una interfaz tipada de `src/types/domain.ts`.
+2. **Acciones en tiempo real:** Toda acción de UI (sesiones, precisión `±15m`, ruleta, check-in, Tribunal del Humo, pings, chat) debe actualizar estado inmediatamente y disparar Discord Feed/Webhook y Web Push cuando corresponda.
+3. **UI Concisa & Icon-First:** Audiencia gamer con nivel medio/alto. Evitar textos largos o subtítulos redundantes; priorizar controles solo-ícono con `title`/`aria-label`/`Tooltip` y etiquetas breves (1–3 palabras) enfocadas en datos y estado.
