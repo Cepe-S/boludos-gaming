@@ -35,6 +35,7 @@ import {
   ChevronRight,
   Crown,
   Flame,
+  Plus,
   User,
   Users,
 } from 'lucide-react';
@@ -49,6 +50,7 @@ export type LolStatsOverviewPanelProps =
       ddragonVersion?: string;
       onSelectChampion: (championName: string) => void;
       onOpenChampionsModal: () => void;
+      onManageAccounts?: () => void;
     }
   | {
       mode: 'group';
@@ -328,6 +330,7 @@ export const LolStatsOverviewPanel: React.FC<LolStatsOverviewPanelProps> = (prop
       stats,
       onSelectChampion,
       onOpenChampionsModal,
+      onManageAccounts,
     } = props;
     const version = account.ddragonVersion || baseVersion;
     const topChampions = stats.topChampions.slice(0, 4);
@@ -373,6 +376,20 @@ export const LolStatsOverviewPanel: React.FC<LolStatsOverviewPanelProps> = (prop
                       +{sec.gameName}#{sec.tagLine}
                     </Badge>
                   ))}
+                  {onManageAccounts && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={onManageAccounts}
+                      title="Agregar cuenta secundaria o gestionar cuentas vinculadas"
+                      aria-label="Agregar cuenta secundaria"
+                      className="h-5 px-1.5 gap-1 text-[10px] font-medium border-primary/40 text-primary hover:bg-primary/15"
+                    >
+                      <Plus className="w-3 h-3" strokeWidth={2} />
+                      <span>Cuenta</span>
+                    </Button>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono text-muted-foreground">

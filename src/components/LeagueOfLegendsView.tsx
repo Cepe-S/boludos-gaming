@@ -96,6 +96,10 @@ export const LeagueOfLegendsView: React.FC = () => {
     matchId: string;
     initialPuuid?: string;
   } | null>(null);
+  const [accountsDialogRequest, setAccountsDialogRequest] = useState<{
+    userId: string;
+    nonce: number;
+  } | null>(null);
 
   const handleChangeViewMode = useCallback((mode: LolViewMode) => {
     setViewMode(mode);
@@ -649,6 +653,7 @@ export const LeagueOfLegendsView: React.FC = () => {
           onUnlinkAccount={handleUnlinkAccount}
           onSetPrimaryAccount={handleSetPrimaryAccount}
           onSaveServerRiotKey={handleSaveServerRiotKey}
+          openAccountsRequest={accountsDialogRequest}
         />
       </div>
 
@@ -716,6 +721,15 @@ export const LeagueOfLegendsView: React.FC = () => {
                 })
               }
               onOpenChampionsModal={() => setChampionsModal({ open: true })}
+              onManageAccounts={
+                !isDemoMode
+                  ? () =>
+                      setAccountsDialogRequest({
+                        userId: selectedAccount.userId,
+                        nonce: Date.now(),
+                      })
+                  : undefined
+              }
             />
           </div>
 

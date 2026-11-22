@@ -138,6 +138,7 @@ export interface LolHeaderBarProps {
   onUnlinkAccount: (userId: string, puuid?: string) => Promise<void>;
   onSetPrimaryAccount: (userId: string, puuid: string) => Promise<void>;
   onSaveServerRiotKey: (apiKey: string) => Promise<{ ok: boolean; error?: string }>;
+  openAccountsRequest?: { userId: string; nonce: number } | null;
 }
 
 function formatKeyUpdatedAt(iso?: string | null): string | null {
@@ -178,6 +179,7 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
   onUnlinkAccount,
   onSetPrimaryAccount,
   onSaveServerRiotKey,
+  openAccountsRequest,
 }) => {
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [isKeyDialogOpen, setIsKeyDialogOpen] = useState(false);
@@ -241,6 +243,12 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
     setLinkError(null);
     setIsLinkDialogOpen(true);
   };
+
+  useEffect(() => {
+    if (openAccountsRequest) {
+      handleOpenLinkForMember(openAccountsRequest.userId);
+    }
+  }, [openAccountsRequest?.nonce]);
 
   const handleSubmitLink = linkForm.handleSubmit(async (values) => {
     setLinkError(null);
@@ -551,11 +559,11 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                   size="sm"
                   variant="secondary"
                   onClick={() => handleOpenLinkForMember()}
-                  title="Vincular Riot ID"
-                  aria-label="Vincular Riot ID"
+                  title="Agregar o gestionar cuentas de Riot (principal y secundarias)"
+                  aria-label="Agregar cuenta de Riot"
                 >
-                  <Link2 className="w-4 h-4 text-primary" strokeWidth={1.75} />
-                  <span>Riot ID</span>
+                  <Plus className="w-4 h-4 text-primary" strokeWidth={2} />
+                  <span>Cuentas</span>
                 </Button>
 
                 {viewMode === 'personal' &&
