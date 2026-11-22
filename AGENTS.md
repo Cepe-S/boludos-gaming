@@ -32,3 +32,4 @@
 1. **TypeScript estricto:** No usar `any` cuando aplique una interfaz tipada de `src/types/domain.ts`.
 2. **Acciones en tiempo real:** Toda acción de UI (sesiones, precisión `±15m`, ruleta, check-in, Tribunal del Humo, pings, chat) debe actualizar estado inmediatamente y disparar Discord Feed/Webhook y Web Push cuando corresponda.
 3. **UI Concisa & Icon-First:** Audiencia gamer con nivel medio/alto. Evitar textos largos o subtítulos redundantes; priorizar controles solo-ícono con `title`/`aria-label`/`Tooltip` y etiquetas breves (1–3 palabras) enfocadas en datos y estado.
+4. **Modularidad y tamaño de archivos:** Evitar archivos demasiado largos; dividir responsabilidades en módulos, hooks o subcomponentes pequeños. Siempre que un agente detecte un archivo demasiado grande (ej. >500 líneas o con múltiples responsabilidades), debe reportárselo explícitamente al usuario indicando el archivo y cómo conviene refactorizarlo.
