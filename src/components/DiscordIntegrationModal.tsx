@@ -507,8 +507,8 @@ export const DiscordIntegrationModal: React.FC<DiscordIntegrationModalProps> = (
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/55 backdrop-blur-md overflow-y-auto animate-in fade-in duration-150">
-      <div className="relative w-full max-w-6xl max-h-[92vh] overflow-y-auto bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] rounded-lg p-4 sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/55 backdrop-blur-md overflow-y-auto">
+      <div className="relative w-full max-w-6xl max-h-[92vh] overflow-y-auto bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] rounded-lg p-4 sm:p-6 animate-lol-modal-in">
         {content}
       </div>
     </div>

@@ -165,9 +165,9 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
   return (
     <div
       className={cn(
-        'group rounded-md border transition-all duration-150 flex flex-col overflow-hidden',
+        'group rounded-md border transition-all duration-200 hover:-translate-y-0.5 flex flex-col overflow-hidden animate-lol-card-pop',
         isSelected
-          ? 'ring-2 ring-success border-success bg-success/10'
+          ? 'ring-2 ring-success border-success bg-success/10 animate-tile-selected'
           : muted
             ? 'border-border/70 bg-background/40 opacity-85 hover:opacity-100'
             : 'border-border bg-card/55 hover:border-primary/50'

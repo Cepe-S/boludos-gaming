@@ -623,8 +623,8 @@ export const WeeklyScheduleModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-6xl bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 rounded-lg shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] flex flex-col max-h-[94vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
+      <div className="relative w-full max-w-6xl bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 rounded-lg shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] flex flex-col max-h-[94vh] overflow-hidden animate-lol-modal-in">
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-border/70 flex items-center justify-between shrink-0 bg-card">
           <div className="flex items-center gap-3">

@@ -164,7 +164,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
       .filter((item): item is GameSynchronyResult => Boolean(item));
 
     return (
-      <Card className="cv-section flex flex-col">
+      <Card className="cv-section flex flex-col animate-adn-bento-in" style={{ animationDelay: '70ms' }}>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-md bg-success/15 border border-success/40 flex items-center justify-center text-success shrink-0">
@@ -295,7 +295,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
   }
 
   return (
-    <Card className="cv-section flex flex-col">
+    <Card className="cv-section flex flex-col animate-adn-bento-in">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary shrink-0">

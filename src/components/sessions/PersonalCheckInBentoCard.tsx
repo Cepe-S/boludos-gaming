@@ -61,7 +61,7 @@ export const PersonalCheckInBentoCard: React.FC<PersonalCheckInBentoCardProps> =
   onConfirmAttendance,
 }) => {
   return (
-    <Card className="xl:col-span-5 flex flex-col">
+    <Card className="xl:col-span-5 flex flex-col animate-adn-bento-in" style={{ animationDelay: '90ms' }}>
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-md bg-success/15 border border-success/40 flex items-center justify-center text-success shrink-0">

@@ -115,7 +115,7 @@ export const InstantSessionRsvpCard: React.FC<InstantSessionRsvpCardProps> = ({
   };
 
   return (
-    <Card className="xl:col-span-5 cv-section">
+    <Card className="xl:col-span-5 cv-section animate-adn-bento-in" style={{ animationDelay: '90ms' }}>
       <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-md bg-warning/15 border border-warning/40 flex items-center justify-center text-warning shrink-0">

@@ -86,7 +86,7 @@ export const ParticipantsTribunalBentoCard: React.FC<ParticipantsTribunalBentoCa
   });
 
   return (
-    <Card className="xl:col-span-5 cv-section flex flex-col">
+    <Card className="xl:col-span-5 cv-section flex flex-col animate-adn-bento-in" style={{ animationDelay: '135ms' }}>
       <CardHeader className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -155,7 +155,7 @@ export const ParticipantsTribunalBentoCard: React.FC<ParticipantsTribunalBentoCa
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedParticipants.map((part) => {
+                {sortedParticipants.map((part, idx) => {
                   const player = playerMap.get(part.userId);
                   if (!player) return null;
 
@@ -173,7 +173,11 @@ export const ParticipantsTribunalBentoCard: React.FC<ParticipantsTribunalBentoCa
                   const noShowCount = targetVotes.filter((v) => v.vote === 'no_show').length;
 
                   return (
-                    <TableRow key={part.userId}>
+                    <TableRow
+                      key={part.userId}
+                      style={{ animationDelay: `${idx * 40}ms` }}
+                      className="animate-lol-row-slide"
+                    >
                       {/* Player Identity */}
                       <TableCell className="align-top">
                         <div className="flex items-start gap-2.5">

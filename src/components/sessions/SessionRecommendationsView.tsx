@@ -526,9 +526,9 @@ export const SessionRecommendationsView: React.FC<
       <div
         key={`${options?.isReadyContext ? 'ready' : 'rec'}-${rec.id}`}
         className={cn(
-          'group rounded-lg border bg-background/45 transition-colors overflow-hidden flex flex-col',
+          'group rounded-lg border bg-background/45 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden flex flex-col animate-lol-card-pop',
           isChosenOrLocked
-            ? 'ring-2 ring-success border-success bg-success/5'
+            ? 'ring-2 ring-success border-success bg-success/5 animate-tile-selected'
             : isMajorityAccepted
               ? 'border-success/60 hover:border-success'
               : 'border-border hover:border-primary/45'

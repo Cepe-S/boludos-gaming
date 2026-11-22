@@ -172,7 +172,7 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-lol-reveal">
       <Card>
         <CardHeader className="space-y-3 pb-3 border-b border-border">
           <div className="flex items-center justify-between gap-3">
@@ -295,7 +295,7 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
                 </TableHeader>
 
                 <TableBody>
-                  {filteredCatalogGames.map((item) => {
+                  {filteredCatalogGames.map((item, idx) => {
                     const { game, playsCount, totalPlayers, averageRating, synchronyScore, dislikeCount, playerRatings } =
                       item;
                     const myPref = prefMap.get(`${currentUser.id}_${game.id}`);
@@ -307,7 +307,11 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
                     const playingPlayers = playerRatings.filter((pr) => pr.plays);
 
                     return (
-                      <TableRow key={game.id}>
+                      <TableRow
+                        key={game.id}
+                        style={{ animationDelay: `${Math.min(idx * 25, 350)}ms` }}
+                        className="animate-lol-row-slide"
+                      >
                         {/* Compact Game info + Hover Info Button */}
                         <TableCell className="py-1.5 px-2.5">
                           <div className="flex items-center gap-2 min-w-0">
@@ -403,7 +407,7 @@ export const ClubMatrixTableView: React.FC<ClubMatrixTableViewProps> = ({
                                 <div className="h-1.5 flex-1 min-w-[36px] rounded-full bg-secondary overflow-hidden">
                                   <div
                                     className={cn(
-                                      'h-full rounded-full',
+                                      'h-full rounded-full animate-lol-bar-grow',
                                       synchronyScore >= 75
                                         ? 'bg-success'
                                         : synchronyScore >= 55

@@ -39,7 +39,7 @@ export const ScheduleOverlapBentoCard: React.FC<ScheduleOverlapBentoCardProps> =
   }, []);
   return (
     <TooltipProvider delayDuration={80}>
-      <Card className="xl:col-span-7 cv-section flex flex-col">
+      <Card className="xl:col-span-7 cv-section flex flex-col animate-adn-bento-in">
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary shrink-0">
@@ -281,7 +281,7 @@ export const ScheduleOverlapBentoCard: React.FC<ScheduleOverlapBentoCardProps> =
                       <div className="w-24 shrink-0" />
                     </div>
 
-                    {timelines.map((p) => {
+                    {timelines.map((p, idx) => {
                       const coreLeft = Math.max(
                         0,
                         Math.min(100, ((p.startMinutesFromBase - baseMin) / totalSpan) * 100)
@@ -327,7 +327,8 @@ export const ScheduleOverlapBentoCard: React.FC<ScheduleOverlapBentoCardProps> =
                       return (
                         <div
                           key={p.userId}
-                          className="pointer-events-none relative z-10 flex items-center gap-3 pt-4 pb-1.5 px-2 rounded-md"
+                          style={{ animationDelay: `${idx * 45}ms` }}
+                          className="pointer-events-none relative z-10 flex items-center gap-3 pt-4 pb-1.5 px-2 rounded-md animate-lol-row-slide"
                         >
                           {/* Player Label */}
                           <Tooltip>
@@ -390,7 +391,7 @@ export const ScheduleOverlapBentoCard: React.FC<ScheduleOverlapBentoCardProps> =
                               <TooltipTrigger asChild>
                                 {isConfirmed ? (
                                   <div
-                                    className="pointer-events-auto absolute top-1 bottom-1 rounded-sm bg-success/85 hover:bg-success/95 transition-colors border border-success/60 flex items-center justify-between gap-1.5 px-2 text-[11px] font-mono font-bold text-white overflow-hidden"
+                                    className="pointer-events-auto absolute top-1 bottom-1 rounded-sm bg-success/85 hover:bg-success/95 transition-colors border border-success/60 flex items-center justify-between gap-1.5 px-2 text-[11px] font-mono font-bold text-white overflow-hidden animate-lol-bar-grow"
                                     style={{ left: `${coreLeft}%`, width: `${coreWidth}%` }}
                                   >
                                     <span className="truncate">{p.availableFrom}</span>
@@ -400,7 +401,7 @@ export const ScheduleOverlapBentoCard: React.FC<ScheduleOverlapBentoCardProps> =
                                   </div>
                                 ) : (
                                   <div
-                                    className="pointer-events-auto absolute top-1 bottom-1 rounded-sm bg-[repeating-linear-gradient(45deg,hsl(var(--primary)/0.35),hsl(var(--primary)/0.35)_6px,hsl(var(--warning)/0.25)_6px,hsl(var(--warning)/0.25)_12px)] hover:brightness-110 transition-all border border-dashed border-warning/70 flex items-center justify-between gap-1.5 px-2 text-[11px] font-mono font-bold text-warning overflow-hidden"
+                                    className="pointer-events-auto absolute top-1 bottom-1 rounded-sm bg-[repeating-linear-gradient(45deg,hsl(var(--primary)/0.35),hsl(var(--primary)/0.35)_6px,hsl(var(--warning)/0.25)_6px,hsl(var(--warning)/0.25)_12px)] hover:brightness-110 transition-all border border-dashed border-warning/70 flex items-center justify-between gap-1.5 px-2 text-[11px] font-mono font-bold text-warning overflow-hidden animate-lol-bar-grow"
                                     style={{ left: `${coreLeft}%`, width: `${coreWidth}%` }}
                                   >
                                     <span className="truncate">{p.availableFrom}</span>

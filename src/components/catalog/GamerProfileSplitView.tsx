@@ -13,7 +13,6 @@ import {
   TasteDimensionKey,
   UnifiedSelectorGame,
 } from '@/types/domain';
-import { TASTE_DIMENSION_MAP } from '@/lib/tasteProfileEngine';
 import { PvjArchetypeDashboard } from '@/components/PvjArchetypeDashboard';
 import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
 import { GameCompactTile } from './GameCompactTile';
@@ -174,7 +173,7 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
   isProfileRevealed,
   setProfileRevealed,
   selectedGamesCount,
-  hasTasteSignal,
+  hasTasteSignal: _hasTasteSignal,
   topDimensions,
   activeFeatureVector,
   steamUrlInput,
@@ -213,7 +212,6 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
   onAddManualCustomGame,
 }) => {
   const [section, setSection] = useState<ProfileSectionKey>('dna');
-  const [showAllDimensions, setShowAllDimensions] = useState(false);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [orderTick, setOrderTick] = useState(0);
   const hoveredKeyRef = useRef<string | null>(null);
@@ -628,15 +626,15 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
   );
 
   return (
-    <div className="flex flex-col lg:flex-row gap-5 items-start">
-      {/* Left GitHub Settings Navigation Rail (hidden during tour) */}
+    <div className="space-y-4">
+      {/* Top Compact Bento Navigation Strip (hidden during tour) */}
       {!embeddedInTour && (
-        <aside className="w-full lg:w-60 shrink-0 lg:sticky lg:top-20 space-y-1.5">
-          <div className="p-3 rounded-md bg-[#11141A] border border-border mb-2 flex items-center gap-2.5">
+        <div className="p-2.5 rounded-md bg-[#11141A]/90 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 animate-lol-reveal">
+          <div className="flex items-center gap-2.5 min-w-0">
             <img
               src={currentUser.avatarUrl}
               alt={currentUser.displayName}
-              className="w-9 h-9 rounded-full border border-border object-cover shrink-0"
+              className="w-8 h-8 rounded-full border border-border object-cover shrink-0"
             />
             <div className="min-w-0">
               <span className="text-xs font-bold text-foreground block truncate">
@@ -661,7 +659,7 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
             </div>
           </div>
 
-          <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1">
+          <nav className="flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:pb-0">
             {navItems.map((item) => {
               const isActive = section === item.key;
               return (
@@ -670,23 +668,21 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
                   type="button"
                   onClick={() => setSection(item.key)}
                   className={cn(
-                    'relative flex items-center justify-between gap-2 px-3 py-2 rounded-md text-xs font-medium transition-colors shrink-0 lg:w-full text-left cursor-pointer border',
+                    'relative flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 shrink-0 cursor-pointer border active:scale-95',
                     isActive
-                      ? 'bg-[#181C24] border-border text-foreground'
-                      : 'bg-transparent border-transparent text-muted-foreground hover:bg-[#11141A] hover:text-foreground'
+                      ? 'bg-primary/20 border-primary text-foreground shadow-sm shadow-primary/20'
+                      : 'bg-[#0B0D10]/70 border-border/80 text-muted-foreground hover:bg-[#181C24] hover:text-foreground'
                   )}
                 >
-                  {isActive && (
-                    <span className="hidden lg:block absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-primary" />
-                  )}
-                  <span className="flex items-center gap-2">
-                    <span className={cn(isActive ? 'text-primary' : 'text-muted-foreground')}>
-                      {item.icon}
-                    </span>
-                    <span>{item.label}</span>
+                  <span className={cn(isActive ? 'text-[#99A5FF]' : 'text-muted-foreground')}>
+                    {item.icon}
                   </span>
+                  <span>{item.label}</span>
                   {item.badge && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono">
+                    <Badge
+                      variant={isActive ? 'default' : 'outline'}
+                      className="text-[10px] px-1.5 py-0 font-mono"
+                    >
                       {item.badge}
                     </Badge>
                   )}
@@ -694,23 +690,26 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
               );
             })}
           </nav>
-        </aside>
+        </div>
       )}
 
-      {/* Right Focused Panel */}
-      <div className="flex-1 min-w-0 space-y-4 w-full">
+      {/* Full-Width Bento Workspace */}
+      <div className="min-w-0 space-y-4 w-full">
         {embeddedInTour ? (
           isProfileRevealed ? (
             <PvjArchetypeDashboard
               player={currentUser}
               pvjProfile={pvjProfile}
+              topDimensions={topDimensions}
+              activeFeatureVector={activeFeatureVector}
+              unifiedGames={filteredUnifiedGames}
               onJumpToPendingHours={() => {
                 setProfileRevealed(false);
                 setSelectorTab('active');
               }}
             />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 animate-step-in">
               <StickyTopPodiumBar
                 mpGames={topMultiplayerGames}
                 spGames={topSingleplayerGames}
@@ -768,81 +767,24 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
           )
         ) : (
           <>
-        {/* SECTION 1: ADN GAMER & PVJ-6D */}
+        {/* SECTION 1: ADN GAMER BENTO GRID (PVJ-6D + TOP INFLUYENTES + VECTOR 32D + MATRIZ 6x6) */}
         {section === 'dna' && (
-          <div className="space-y-4">
-            <PvjArchetypeDashboard
-              player={currentUser}
-              pvjProfile={pvjProfile}
-              onJumpToPendingHours={() => {
-                setSection('library');
-                setSelectorTab('active');
-              }}
-            />
-
-            {/* 32D Taste Vector Breakdown */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3 border-b border-border">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-[#99A5FF]" strokeWidth={1.75} />
-                  <span>Vector 32D</span>
-                </CardTitle>
-                {hasTasteSignal && topDimensions.length > 6 && (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => setShowAllDimensions((p) => !p)}
-                  >
-                    {showAllDimensions ? 'Top 6' : `Todas (${topDimensions.length})`}
-                  </Button>
-                )}
-              </CardHeader>
-
-              <CardContent className="p-4">
-                {!hasTasteSignal ? (
-                  <p className="text-xs text-muted-foreground">
-                    Sincronizá Steam o marcá juegos en Biblioteca para generar tu vector.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                    {(showAllDimensions ? topDimensions : topDimensions.slice(0, 6)).map(
-                      (dim) => {
-                        const meta = TASTE_DIMENSION_MAP.get(dim.key);
-                        const pct = Math.min(100, Math.max(5, Math.round(dim.score * 100)));
-                        const rawVal = activeFeatureVector[dim.key] ?? dim.score;
-                        return (
-                          <div
-                            key={dim.key}
-                            className="p-2.5 rounded-md bg-[#0B0D10] border border-border space-y-1.5"
-                          >
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-semibold text-foreground truncate">
-                                {meta?.label ?? dim.label}
-                              </span>
-                              <span className="font-mono text-[#99A5FF] text-[11px]">
-                                {Math.round(rawVal * 100)}%
-                              </span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-[#181C24] overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-primary"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      }
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <PvjArchetypeDashboard
+            player={currentUser}
+            pvjProfile={pvjProfile}
+            topDimensions={topDimensions}
+            activeFeatureVector={activeFeatureVector}
+            unifiedGames={filteredUnifiedGames}
+            onJumpToPendingHours={() => {
+              setSection('library');
+              setSelectorTab('active');
+            }}
+          />
         )}
 
         {/* SECTION 2: STEAM */}
         {section === 'steam' && (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-lol-reveal">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between gap-2">
@@ -956,7 +898,7 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
 
         {/* SECTION 3: PODIUMS TOP 3 */}
         {section === 'podiums' && (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-lol-reveal">
             <StickyTopPodiumBar
               mpGames={topMultiplayerGames}
               spGames={topSingleplayerGames}
@@ -995,7 +937,7 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
 
         {/* SECTION 4: CATEGORIES PREFERENCES */}
         {section === 'categories' && (
-          <Card>
+          <Card className="animate-lol-reveal">
             <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3 border-b border-border">
               <CardTitle className="flex items-center gap-2">
                 <Heart className="w-4 h-4 text-rose-400" strokeWidth={1.75} />
@@ -1060,7 +1002,7 @@ export const GamerProfileSplitView: React.FC<GamerProfileSplitViewProps> = ({
 
         {/* SECTION 5: UNIFIED LIBRARY & EXTERNAL GAMES */}
         {section === 'library' && (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-lol-reveal">
             <StickyTopPodiumBar
               mpGames={topMultiplayerGames}
               spGames={topSingleplayerGames}

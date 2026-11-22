@@ -240,7 +240,7 @@ export const LeaderboardSanctionsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-lol-reveal">
       {/* Group Scope Switcher */}
       {userGroups.length > 0 && (
         <div className="p-3 rounded-md bg-card/50 border border-border flex flex-wrap items-center gap-2">
@@ -284,7 +284,7 @@ export const LeaderboardSanctionsView: React.FC = () => {
       {/* Top 3 KPI Podium Strip */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Card 1: Punctual Leader */}
-        <Card>
+        <Card className="animate-adn-bento-in" style={{ animationDelay: '30ms' }}>
           <CardContent className="p-4 flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-md bg-success/15 border border-success/40 flex items-center justify-center text-success shrink-0">
               <Trophy className="w-5 h-5" strokeWidth={1.75} />
@@ -315,7 +315,7 @@ export const LeaderboardSanctionsView: React.FC = () => {
         </Card>
 
         {/* Card 2: Hours Leader */}
-        <Card>
+        <Card className="animate-adn-bento-in" style={{ animationDelay: '75ms' }}>
           <CardContent className="p-4 flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-md bg-primary/15 border border-primary/40 flex items-center justify-center text-primary shrink-0">
               <Flame className="w-5 h-5" strokeWidth={1.75} />
@@ -346,7 +346,7 @@ export const LeaderboardSanctionsView: React.FC = () => {
         </Card>
 
         {/* Card 3: Rey del Humo */}
-        <Card>
+        <Card className="animate-adn-bento-in" style={{ animationDelay: '120ms' }}>
           <CardContent className="p-4 flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-md bg-destructive/15 border border-destructive/40 flex items-center justify-center text-destructive shrink-0">
               <Ghost className="w-5 h-5" strokeWidth={1.75} />
@@ -447,7 +447,11 @@ export const LeaderboardSanctionsView: React.FC = () => {
                     games
                   );
                   return (
-                    <TableRow key={player.id}>
+                    <TableRow
+                      key={player.id}
+                      style={{ animationDelay: `${index * 35}ms` }}
+                      className="animate-lol-row-slide"
+                    >
                       <TableCell className="font-mono font-bold text-muted-foreground">
                         #{index + 1}
                       </TableCell>
@@ -500,7 +504,7 @@ export const LeaderboardSanctionsView: React.FC = () => {
                           <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
                             <div
                               className={cn(
-                                'h-full rounded-full',
+                                'h-full rounded-full animate-lol-bar-grow',
                                 getKarmaBarClass(player.karmaScore)
                               )}
                               style={{
@@ -720,7 +724,7 @@ export const LeaderboardSanctionsView: React.FC = () => {
                   return (
                     <div
                       key={san.id}
-                      className="p-2.5 rounded-md bg-background/45 border border-border space-y-1 text-xs"
+                      className="p-2.5 rounded-md bg-background/45 border border-border space-y-1 text-xs animate-lol-row-slide"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-foreground truncate">

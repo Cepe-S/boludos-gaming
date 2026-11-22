@@ -41,7 +41,7 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
   const avatars = syncResult ? buildPlayerAvatarsFromBreakdown(syncResult) : [];
 
   return (
-    <Card className="overflow-hidden border-success/40 bg-card/65">
+    <Card className="overflow-hidden border-success/40 bg-card/65 animate-adn-bento-in" style={{ animationDelay: '45ms' }}>
       {/* Selected Game Header */}
       <div className="px-3.5 py-2 border-b border-border/60 bg-success/10 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">

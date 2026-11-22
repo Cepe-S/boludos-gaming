@@ -1077,7 +1077,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-lol-reveal">
       {/* Top Toolbar: Quick Join + New Group */}
       <div className="p-3.5 rounded-md bg-card/50 border border-border flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <form
@@ -1110,7 +1110,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       {joinBanner && (
         <div
           className={cn(
-            'px-3.5 py-2.5 rounded-md border text-xs font-medium',
+            'px-3.5 py-2.5 rounded-md border text-xs font-medium animate-ui-toast-in',
             joinBanner.type === 'success'
               ? 'bg-success/10 border-success/40 text-success'
               : 'bg-destructive/10 border-destructive/40 text-destructive'
@@ -1211,7 +1211,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           ) : (
             <>
               {/* Active Group Header Card */}
-              <Card>
+              <Card className="animate-adn-bento-in">
                 <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3.5 min-w-0">
                     <GroupAvatarBadge

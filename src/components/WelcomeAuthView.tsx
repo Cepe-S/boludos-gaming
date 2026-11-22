@@ -144,7 +144,7 @@ export const WelcomeAuthView: React.FC = () => {
 
   return (
     <div className="relative min-h-screen text-foreground flex flex-col justify-center px-4 py-8 sm:px-6 lg:px-8">
-      <div className="max-w-2xl w-full mx-auto space-y-6">
+      <div className="max-w-2xl w-full mx-auto space-y-6 animate-lol-reveal">
         {/* Top Hero Strip */}
         <div className="flex items-center justify-between gap-4 pb-4 border-b border-border">
           <div className="flex items-center gap-3">
@@ -203,7 +203,7 @@ export const WelcomeAuthView: React.FC = () => {
         )}
 
         {/* Single Centered Auth & Registration Card */}
-        <Card>
+        <Card className="animate-adn-bento-in">
           <CardHeader className="pb-3 border-b border-border">
             <CardTitle className="flex items-center gap-2 text-base">
               <UserPlus className="w-4 h-4 text-primary" strokeWidth={1.75} />

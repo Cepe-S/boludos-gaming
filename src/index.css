@@ -381,6 +381,169 @@
   }
 }
 
+/* ============================================================================
+   Epic ADN Gamer Bento Grid & Global Tactical Micro-Animations
+   ============================================================================ */
+
+@keyframes adnSuspensePulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes adnScanLine {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  45% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes adnBentoAssemble {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 26px, 0) scale(0.93);
+    filter: blur(5px);
+  }
+  65% {
+    opacity: 1;
+    transform: translate3d(0, -3px, 0) scale(1.012);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes adnRadarExpand {
+  0% {
+    opacity: 0;
+    transform: scale(0.15) rotate(-14deg);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.045) rotate(2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes adnHeroGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 24px -6px hsl(var(--primary) / 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 38px -4px hsl(var(--primary) / 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  }
+}
+
+@keyframes adnFloatSlow {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes uiSheetSlideRight {
+  0% {
+    opacity: 0;
+    transform: translate3d(24px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes uiSheetSlideLeft {
+  0% {
+    opacity: 0;
+    transform: translate3d(-24px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes uiToastBounceIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.95);
+  }
+  70% {
+    opacity: 1;
+    transform: translate3d(0, -2px, 0) scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.animate-adn-bento-in {
+  animation: adnBentoAssemble 540ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity, filter;
+}
+
+.animate-adn-radar-expand {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: adnRadarExpand 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-adn-hero-glow {
+  animation: adnHeroGlow 4.2s ease-in-out infinite;
+}
+
+.animate-adn-float {
+  animation: adnFloatSlow 3.4s ease-in-out infinite;
+}
+
+.animate-adn-suspense-pulse {
+  animation: adnSuspensePulse 1.4s ease-in-out infinite;
+}
+
+.animate-adn-scanline {
+  animation: adnScanLine 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-ui-sheet-right {
+  animation: uiSheetSlideRight 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-ui-sheet-left {
+  animation: uiSheetSlideLeft 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.animate-ui-toast-in {
+  animation: uiToastBounceIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
 .animate-lol-reveal {
   animation: lolRevealUp 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
   will-change: transform, opacity;
@@ -448,7 +611,16 @@
   .animate-lol-modal-in,
   .animate-lol-orbit,
   .animate-lol-orbit-reverse,
-  .animate-lol-shimmer {
+  .animate-lol-shimmer,
+  .animate-adn-bento-in,
+  .animate-adn-radar-expand,
+  .animate-adn-hero-glow,
+  .animate-adn-float,
+  .animate-adn-suspense-pulse,
+  .animate-adn-scanline,
+  .animate-ui-sheet-right,
+  .animate-ui-sheet-left,
+  .animate-ui-toast-in {
     animation: none !important;
   }
 }

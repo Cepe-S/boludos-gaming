@@ -106,12 +106,12 @@ export const StickyTopPodiumBar: React.FC<StickyTopPodiumBarProps> = ({
               onDragLeave={() => handleDragLeave(slotKey)}
               onDrop={(e) => handleDrop(type, rank, e)}
               className={cn(
-                'rounded-md border transition-all duration-150 min-w-0',
+                'rounded-md border transition-all duration-200 min-w-0',
                 isOver
-                  ? 'scale-[1.02] ring-2 ring-primary border-primary bg-primary/15'
+                  ? 'scale-[1.03] ring-2 ring-primary border-primary bg-primary/15 animate-drop-target'
                   : entry
-                    ? 'border-border bg-background'
-                    : 'border-dashed border-border bg-background/50'
+                    ? 'border-border bg-background hover:border-primary/45 animate-lol-card-pop'
+                    : 'border-dashed border-border bg-background/50 hover:border-border'
               )}
             >
               {entry ? (

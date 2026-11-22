@@ -71,11 +71,11 @@ export const GameCompactTile: React.FC<GameCompactTileProps> = ({
       draggable={draggable}
       onDragStart={handleDragStart}
       className={cn(
-        'group rounded-md border transition-all duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]',
+        'group rounded-md border transition-all duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98] animate-lol-card-pop',
         draggable && 'cursor-grab active:cursor-grabbing',
         isPlayed
-          ? 'ring-2 ring-success border-success bg-success/15 shadow-lg shadow-success/25'
-          : 'border-border bg-card/55 backdrop-blur-sm hover:border-border'
+          ? 'ring-2 ring-success border-success bg-success/15 shadow-lg shadow-success/25 animate-tile-selected'
+          : 'border-border bg-card/55 backdrop-blur-sm hover:border-primary/45'
       )}
     >
       {/* Two-layer Steam 460x215 Cover Composition */}

@@ -373,7 +373,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 animate-lol-reveal">
       {/* Compact Session Selector Bar + New Session CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
@@ -491,7 +491,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-5 right-5 z-50 max-w-md px-3.5 py-2.5 rounded-md bg-card/95 backdrop-blur-md border border-success/40 shadow-lg text-success text-xs flex items-center justify-between gap-2.5"
+          className="fixed bottom-5 right-5 z-50 max-w-md px-3.5 py-2.5 rounded-md bg-card/95 backdrop-blur-md border border-success/40 shadow-lg text-success text-xs flex items-center justify-between gap-2.5 animate-ui-toast-in"
         >
           <span className="inline-flex items-center gap-2 font-medium">
             <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />

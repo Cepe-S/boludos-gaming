@@ -194,7 +194,7 @@ export const GlobalChatDrawer: React.FC<GlobalChatDrawerProps> = ({
                 <div
                   key={msg.id}
                   className={cn(
-                    'flex flex-col space-y-1 text-xs group',
+                    'flex flex-col space-y-1 text-xs group animate-lol-row-slide',
                     isMe ? 'items-end' : 'items-start'
                   )}
                 >

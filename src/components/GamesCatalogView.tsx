@@ -1047,7 +1047,7 @@ export function GamesCatalogView({
     return (
       <div ref={topContainerRef} className="space-y-4">
         {toastMessage && (
-          <div className="px-3.5 py-2.5 rounded-md bg-success/10 border border-success/40 text-success text-xs flex items-center justify-between gap-2">
+          <div className="px-3.5 py-2.5 rounded-md bg-success/10 border border-success/40 text-success text-xs flex items-center justify-between gap-2 animate-ui-toast-in">
             <span className="inline-flex items-center gap-2 font-medium">
               <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
               {toastMessage}
@@ -1097,7 +1097,7 @@ export function GamesCatalogView({
     <div ref={topContainerRef} className="space-y-4">
       {/* Shared Toast Banner */}
       {toastMessage && (
-        <div className="px-3.5 py-2.5 rounded-md bg-success/10 border border-success/40 text-success text-xs flex items-center justify-between gap-2">
+        <div className="px-3.5 py-2.5 rounded-md bg-success/10 border border-success/40 text-success text-xs flex items-center justify-between gap-2 animate-ui-toast-in">
           <span className="inline-flex items-center gap-2 font-medium">
             <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
             {toastMessage}

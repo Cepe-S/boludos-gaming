@@ -294,8 +294,8 @@ export const OnboardingTourModal: React.FC = () => {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
-      <div className="w-full max-w-5xl max-h-[94vh] bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 rounded-lg shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md">
+      <div className="w-full max-w-5xl max-h-[94vh] bg-background/78 backdrop-blur-xl border border-white/12 ring-1 ring-inset ring-white/5 rounded-lg shadow-[0_28px_80px_-16px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden animate-lol-modal-in">
         {/* Top Header & 3-Step Stepper */}
         <div className="px-4 py-3 sm:px-6 sm:py-3.5 bg-card/55 backdrop-blur-md border-b border-border/70 shrink-0">
           <div className="flex items-center justify-between gap-3 mb-3">
