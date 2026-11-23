@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -93,8 +94,48 @@ export const LeaderboardSanctionsView: React.FC = () => {
     );
   }, [activeGroup, sanctions, scopedSessions]);
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'karma' | 'hours' | 'punctuality'>('karma');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const searchQuery = searchParams.get('q') ?? '';
+  const setSearchQuery = useCallback(
+    (value: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value.trim()) {
+            next.set('q', value);
+          } else {
+            next.delete('q');
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const rawSort = searchParams.get('sort');
+  const sortBy: 'karma' | 'hours' | 'punctuality' =
+    rawSort === 'hours' || rawSort === 'punctuality' ? rawSort : 'karma';
+  const setSortBy = useCallback(
+    (nextSort: 'karma' | 'hours' | 'punctuality') => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (nextSort === 'karma') {
+            next.delete('sort');
+          } else {
+            next.set('sort', nextSort);
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pingStatusMessage, setPingStatusMessage] = useState<string | null>(null);
 

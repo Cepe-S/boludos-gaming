@@ -30,21 +30,21 @@
       "name": "Nueva Sesión de Vicio",
       "short_name": "Nueva Sesión",
       "description": "Armar una nueva sesión nocturna de vicio con los pibes",
-      "url": "./#new-session",
+      "url": "./#/sessions?modal=create",
       "icons": [{ "src": "./icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
     },
     {
       "name": "Tirar la Ruleta",
       "short_name": "Ruleta",
       "description": "Sortear qué juego sale hoy según la sincronía del grupo",
-      "url": "./#roulette",
+      "url": "./#/sessions",
       "icons": [{ "src": "./icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
     },
     {
       "name": "Tribunal del Humo",
       "short_name": "Tribunal",
       "description": "Ver el ranking de fantasmas y multas de karma",
-      "url": "./#tribunal",
+      "url": "./#/tribunal",
       "icons": [{ "src": "./icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
     }
   ]

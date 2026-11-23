@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { useLolRouteState } from '@/hooks/useLolRouteState';
 import { buildDemoLolDataset } from '@/lib/lolDemoData';
 import { DEFAULT_DDRAGON_VERSION, loadDdragonRunesAndSpells } from '@/lib/lolDdragon';
 import {
@@ -77,36 +78,33 @@ export const LeagueOfLegendsView: React.FC = () => {
   }, [activeGroup, players]);
 
   const [isDemoMode, setIsDemoMode] = useState(false);
-  const [viewMode, setViewMode] = useState<LolViewMode>('personal');
+  const {
+    viewMode,
+    selectedUserId,
+    championsModal,
+    championDetailTarget,
+    selectedMatchState,
+    setViewMode,
+    setSelectedUserId,
+    setChampionsModal,
+    setChampionDetailTarget,
+    setSelectedMatchState,
+  } = useLolRouteState(currentUser.id);
   const [selectedQueues, setSelectedQueues] = useState<LolSpecificQueueCategory[]>(
     () => [...DEFAULT_LOL_QUEUE_FILTERS]
   );
   const [timeRange, setTimeRange] = useState<LolTimeRangeFilter>(DEFAULT_LOL_TIME_RANGE);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
-  const [championsModal, setChampionsModal] = useState<{
-    open: boolean;
-    initialTab?: 'all' | 'best' | 'worst';
-  }>({ open: false });
-  const [championDetailTarget, setChampionDetailTarget] = useState<{
-    userId: string;
-    championName: string;
-    scope: LolViewMode;
-  } | null>(null);
-  const [selectedMatchState, setSelectedMatchState] = useState<{
-    matchId: string;
-    initialPuuid?: string;
-  } | null>(null);
   const [accountsDialogRequest, setAccountsDialogRequest] = useState<{
     userId: string;
     nonce: number;
   } | null>(null);
 
-  const handleChangeViewMode = useCallback((mode: LolViewMode) => {
-    setViewMode(mode);
-    setChampionsModal({ open: false });
-    setChampionDetailTarget(null);
-    setSelectedMatchState(null);
-  }, []);
+  const handleChangeViewMode = useCallback(
+    (mode: LolViewMode) => {
+      setViewMode(mode);
+    },
+    [setViewMode]
+  );
 
   const handleToggleQueue = useCallback((queue: LolSpecificQueueCategory | 'all') => {
     if (queue === 'all') {
@@ -268,6 +266,7 @@ export const LeagueOfLegendsView: React.FC = () => {
   const activeMatches = isDemoMode ? demoData.matches : liveMatches;
 
   useEffect(() => {
+    if (isLoadingLive && !isDemoMode) return;
     if (activeAccounts.length === 0) {
       setSelectedUserId(currentUser.id);
       return;
@@ -279,7 +278,7 @@ export const LeagueOfLegendsView: React.FC = () => {
       const me = activeAccounts.find((a) => a.userId === currentUser.id);
       setSelectedUserId(me ? me.userId : activeAccounts[0].userId);
     }
-  }, [activeAccounts, selectedUserId, currentUser.id]);
+  }, [isLoadingLive, isDemoMode, activeAccounts, selectedUserId, currentUser.id, setSelectedUserId]);
 
   const selectedAccount = useMemo(
     () =>

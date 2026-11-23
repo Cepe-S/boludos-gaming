@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { getEffectiveScheduleForDate } from '@/lib/matchmakingEngine';
-import { AppTab } from '@/components/layout/AppSidebar';
+import { AppTab, ROUTES, TAB_TITLES } from '@/lib/routes';
+import { Link } from 'react-router-dom';
 import { BrandWordmark } from '@/components/layout/BrandWordmark';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,15 +38,7 @@ export interface AppHeaderProps {
   onOpenDiscordModal: () => void;
 }
 
-const TAB_LABELS: Record<AppTab, string> = {
-  sessions: 'Sesiones & Ruleta',
-  recommendations: 'Recomendaciones',
-  lol: 'League of Legends',
-  games: 'Catálogo & ADN',
-  tribunal: 'Tribunal del Humo',
-  groups: 'Grupos & Discord',
-  discord: 'Discord',
-};
+const TAB_LABELS = TAB_TITLES;
 
 function getTodayDateStr(): string {
   const now = new Date();
@@ -118,9 +111,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <Menu className="w-5 h-5" strokeWidth={1.75} />
         </Button>
 
-        <div className="hidden lg:flex lg:w-60 lg:h-7 lg:px-4 items-center border-r border-border/70 shrink-0">
+        <Link
+          to={ROUTES.SESSIONS}
+          className="hidden lg:flex lg:w-60 lg:h-7 lg:px-4 items-center border-r border-border/70 shrink-0 focus:outline-none"
+          aria-label="Ir a Sesiones"
+        >
           <BrandWordmark />
-        </div>
+        </Link>
 
         <div className="flex items-center gap-2 min-w-0 text-xs lg:pl-4">
           <span className="hidden sm:inline-flex items-center gap-1.5 text-muted-foreground truncate max-w-[160px]">

@@ -84,7 +84,15 @@ function getSafeInitialSchedule(existing?: WeeklySchedule): WeeklySchedule {
   return fallback as WeeklySchedule;
 }
 
-export const OnboardingTourModal: React.FC = () => {
+export interface OnboardingTourModalProps {
+  currentStep?: TourStep;
+  onStepChange?: (step: TourStep) => void;
+}
+
+export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
+  currentStep: controlledStep,
+  onStepChange,
+}) => {
   const {
     currentUser,
     games,
@@ -106,7 +114,12 @@ export const OnboardingTourModal: React.FC = () => {
 
   const step2MinMet = selectedGamesCount >= 10;
 
-  const [currentStep, setCurrentStep] = useState<TourStep>(1);
+  const [internalStep, setInternalStep] = useState<TourStep>(controlledStep ?? 1);
+  const currentStep: TourStep = controlledStep ?? internalStep;
+  const setCurrentStep = (step: TourStep) => {
+    setInternalStep(step);
+    onStepChange?.(step);
+  };
   const [step2ProfileRevealed, setStep2ProfileRevealed] = useState<boolean>(false);
 
   // Step 1: General Account State
@@ -138,7 +151,9 @@ export const OnboardingTourModal: React.FC = () => {
       showOnboardingModal && lastUserIdRef.current !== currentUser.id;
 
     if (justOpened || userSwitchedWhileOpen) {
-      setCurrentStep(1);
+      if (controlledStep === undefined) {
+        setInternalStep(1);
+      }
       setStep2ProfileRevealed(false);
       setDisplayName(currentUser.displayName);
       setBirthDate(currentUser.birthDate ?? '');

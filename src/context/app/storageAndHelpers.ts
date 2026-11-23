@@ -80,17 +80,50 @@ export function saveToStorage<T>(key: string, value: T): void {
   }
 }
 
+function extractInviteCodeFromHash(hash: string): string | null {
+  if (!hash) return null;
+  const cleaned = hash.startsWith('#') ? hash.slice(1) : hash;
+  const [hashPath, hashQuery] = cleaned.split('?');
+
+  const invitePathMatch = hashPath.match(/^\/?invite\/([^/?#\s]+)/i);
+  if (invitePathMatch && invitePathMatch[1]) {
+    try {
+      return decodeURIComponent(invitePathMatch[1]).trim().toUpperCase();
+    } catch {
+      return invitePathMatch[1].trim().toUpperCase();
+    }
+  }
+
+  if (hashQuery) {
+    const hashParams = new URLSearchParams(hashQuery);
+    const fromHashQuery = hashParams.get('invite') || hashParams.get('joinGroup');
+    if (fromHashQuery && fromHashQuery.trim()) {
+      return fromHashQuery.trim().toUpperCase();
+    }
+  }
+
+  return null;
+}
+
 export function extractInviteCodeFromInput(rawInput: string): string {
   const trimmed = rawInput.trim();
   if (!trimmed) return '';
   try {
-    if (trimmed.includes('://') || trimmed.includes('?')) {
+    if (trimmed.includes('://') || trimmed.includes('?') || trimmed.includes('#') || trimmed.startsWith('/invite/')) {
       const url = trimmed.includes('://')
         ? new URL(trimmed)
         : new URL(trimmed, 'https://boludos.local');
       const fromQuery = url.searchParams.get('invite') || url.searchParams.get('joinGroup');
       if (fromQuery) {
         return fromQuery.trim().toUpperCase();
+      }
+      const fromHash = extractInviteCodeFromHash(url.hash);
+      if (fromHash) {
+        return fromHash;
+      }
+      const fromPath = extractInviteCodeFromHash(url.pathname);
+      if (fromPath) {
+        return fromPath;
       }
     }
   } catch {
@@ -99,6 +132,10 @@ export function extractInviteCodeFromInput(rawInput: string): string {
   const match = trimmed.match(/(?:invite|joinGroup)=([^&#\s]+)/i);
   if (match && match[1]) {
     return decodeURIComponent(match[1]).trim().toUpperCase();
+  }
+  const pathMatch = trimmed.match(/\/invite\/([^/?#\s]+)/i);
+  if (pathMatch && pathMatch[1]) {
+    return decodeURIComponent(pathMatch[1]).trim().toUpperCase();
   }
   return trimmed.toUpperCase();
 }
@@ -112,6 +149,12 @@ export function parseInitialInviteCodeFromUrl(): string | null {
       const normalized = urlInvite.trim().toUpperCase();
       saveToStorage(STORAGE_KEYS.PENDING_INVITE_CODE, normalized);
       return normalized;
+    }
+
+    const hashInvite = extractInviteCodeFromHash(window.location.hash || '');
+    if (hashInvite) {
+      saveToStorage(STORAGE_KEYS.PENDING_INVITE_CODE, hashInvite);
+      return hashInvite;
     }
   } catch (error) {
     console.warn('Error parsing URL invite code:', error);

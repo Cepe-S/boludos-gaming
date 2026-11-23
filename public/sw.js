@@ -121,26 +121,27 @@ self.addEventListener('notificationclick', (event) => {
   }
 
   const targetUrl =
-    (event.notification.data && event.notification.data.url) || './';
+    (event.notification.data && event.notification.data.url) || './#/sessions';
+  const resolvedUrl = new URL(targetUrl, self.registration.scope).href;
 
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
-        // If an existing tab is open, focus it
+        // If an existing tab is open, focus it and navigate to the target route
         for (const client of clientList) {
           if ('focus' in client) {
             if (client.url.includes(self.location.origin)) {
               if ('navigate' in client && targetUrl !== './') {
-                client.navigate(targetUrl);
+                return client.navigate(resolvedUrl).then(() => client.focus());
               }
               return client.focus();
             }
           }
         }
-        // Otherwise, open a new window
+        // Otherwise, open a new window at the target route
         if (self.clients.openWindow) {
-          return self.clients.openWindow(targetUrl);
+          return self.clients.openWindow(resolvedUrl);
         }
       })
   );

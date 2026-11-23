@@ -19,11 +19,15 @@ import {
 export interface NotificationCenterModalProps {
   isOpen: boolean;
   onClose: () => void;
+  activeTab?: 'feed' | 'install';
+  onTabChange?: (tab: 'feed' | 'install') => void;
 }
 
 export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = ({
   isOpen,
   onClose,
+  activeTab: controlledTab,
+  onTabChange,
 }) => {
   const {
     pushAlerts,
@@ -32,7 +36,12 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
     sendTestPushNotification,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'feed' | 'install'>('feed');
+  const [internalTab, setInternalTab] = useState<'feed' | 'install'>('feed');
+  const activeTab = controlledTab ?? internalTab;
+  const setActiveTab = (tab: 'feed' | 'install') => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
   const [activeOs, setActiveOs] = useState<'android' | 'ios'>('android');
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testNotificationResult, setTestNotificationResult] = useState<string | null>(null);

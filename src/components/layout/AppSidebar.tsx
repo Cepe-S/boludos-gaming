@@ -1,8 +1,10 @@
 import React, { useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { getPlayerArchetypeBadge } from '@/lib/playerCategorizationEngine';
 import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
 import { BrandWordmark } from '@/components/layout/BrandWordmark';
+import { AppTab, ROUTES, getPathForTab } from '@/lib/routes';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -28,11 +30,11 @@ import {
   Users,
 } from 'lucide-react';
 
-export type AppTab = 'sessions' | 'recommendations' | 'lol' | 'groups' | 'games' | 'tribunal' | 'discord';
+export type { AppTab };
 
 export interface AppSidebarContentProps {
   activeTab: AppTab;
-  setActiveTab: (tab: AppTab) => void;
+  setActiveTab?: (tab: AppTab) => void;
   onOpenDiscordModal: () => void;
   onItemNavigate?: () => void;
   hideBrandHeader?: boolean;
@@ -102,8 +104,14 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
     ).length;
   }, [sanctions, sessions, activeGroup]);
 
+  const routerNavigate = useNavigate();
+
   const navigate = (tab: AppTab) => {
-    setActiveTab(tab);
+    if (setActiveTab) {
+      setActiveTab(tab);
+    } else {
+      routerNavigate(getPathForTab(tab));
+    }
     onItemNavigate?.();
   };
 
@@ -159,14 +167,14 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
       {/* Brand Header */}
       {!hideBrandHeader && (
         <div className="h-14 px-4 border-b border-border flex items-center shrink-0">
-          <button
-            type="button"
-            onClick={() => navigate('sessions')}
+          <Link
+            to={ROUTES.SESSIONS}
+            onClick={() => onItemNavigate?.()}
             className="w-full flex items-center text-left cursor-pointer focus:outline-none"
             aria-label="Ir a Sesiones"
           >
             <BrandWordmark />
-          </button>
+          </Link>
         </div>
       )}
 
@@ -253,10 +261,11 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
             const isActive =
               activeTab === item.id || (item.id === 'groups' && activeTab === 'discord');
             return (
-              <button
+              <Link
                 key={item.id}
-                type="button"
-                onClick={() => navigate(item.id)}
+                to={getPathForTab(item.id)}
+                onClick={() => onItemNavigate?.()}
+                aria-current={isActive ? 'page' : undefined}
                 className={cn(
                   'w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md text-xs font-medium transition-colors cursor-pointer border',
                   isActive
@@ -275,7 +284,7 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
                     {item.badge}
                   </Badge>
                 )}
-              </button>
+              </Link>
             );
           })}
         </div>

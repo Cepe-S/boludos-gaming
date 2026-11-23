@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
+import { CatalogSubTab, isValidCatalogSubTab } from '@/lib/routes';
 import {
   CategoryPreferenceLevel,
   ExternalGamePlatform,
@@ -78,8 +80,35 @@ export function GamesCatalogView({
     !currentUser.steamProfile &&
     !(currentUser.tasteProfile?.topMultiplayerGames?.length);
 
-  const [activeTab, setActiveTab] = useState<'profiler' | 'catalog'>(() =>
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [localActiveTab, setLocalActiveTab] = useState<CatalogSubTab>(() =>
     embeddedInTour || needsTasteSetup ? 'profiler' : 'catalog'
+  );
+
+  const isUrlTabControlled = !embeddedInTour && mode === 'catalog';
+  const rawUrlTab = searchParams.get('tab');
+  const activeTab: CatalogSubTab = isUrlTabControlled
+    ? isValidCatalogSubTab(rawUrlTab)
+      ? rawUrlTab
+      : needsTasteSetup
+        ? 'profiler'
+        : 'catalog'
+    : localActiveTab;
+
+  const setActiveTab = useCallback(
+    (nextTab: CatalogSubTab) => {
+      setLocalActiveTab(nextTab);
+      if (!isUrlTabControlled) return;
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('tab', nextTab);
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [isUrlTabControlled, setSearchParams]
   );
 
   const groupTargetPlayers = useMemo(() => {

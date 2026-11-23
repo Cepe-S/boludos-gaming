@@ -1,6 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import confetti from 'canvas-confetti';
 import { useApp } from '@/context/AppContext';
+import {
+  SessionModalKind,
+  SessionSubTab,
+  buildSessionPath,
+  isValidSessionModal,
+  isValidSessionSubTab,
+} from '@/lib/routes';
 import {
   AttendanceVote,
   Game,
@@ -92,9 +100,27 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     discordConfig,
     userGroups,
     activeGroup,
+    setActiveGroupId,
     createGroup,
     joinGroupByInviteCode,
   } = useApp();
+
+  const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // Sync deep-linked /sessions/:sessionId into activeGroup and activeSessionId
+  useEffect(() => {
+    if (!routeSessionId) return;
+    const matched = sessions.find((s) => s.id === routeSessionId);
+    if (!matched) return;
+    if (matched.groupId && activeGroup?.id !== matched.groupId) {
+      setActiveGroupId(matched.groupId);
+    }
+    if (activeSessionId !== matched.id) {
+      setActiveSessionId(matched.id);
+    }
+  }, [routeSessionId, sessions, activeGroup?.id, activeSessionId, setActiveGroupId, setActiveSessionId]);
 
   // Group sessions scoped to activeGroup
   const groupSessions = useMemo(() => {
@@ -103,12 +129,16 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   }, [sessions, activeGroup]);
 
   const activeSession = useMemo(() => {
+    if (routeSessionId) {
+      const fromRoute = groupSessions.find((s) => s.id === routeSessionId);
+      if (fromRoute) return fromRoute;
+    }
     return (
       groupSessions.find((s) => s.id === activeSessionId) ??
       groupSessions[0] ??
       null
     );
-  }, [groupSessions, activeSessionId]);
+  }, [groupSessions, activeSessionId, routeSessionId]);
 
   const groupMembers = useMemo(() => {
     if (!activeGroup) return players;
@@ -152,15 +182,86 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
     return formatMinutesToTime(startMins + joinPrecision);
   }, [joinFromTime, joinPrecision]);
 
-  // Modals & action UI states
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showInstantModal, setShowInstantModal] = useState(false);
-  const [showManageInvitesModal, setShowManageInvitesModal] = useState(false);
-  const [showCalloutModal, setShowCalloutModal] = useState(false);
+  // URL-synchronized modals & session sub-tab
+  const rawModalParam = searchParams.get('modal');
+  const activeModal: SessionModalKind | null = isValidSessionModal(rawModalParam)
+    ? rawModalParam
+    : null;
+
+  const setActiveModal = useCallback(
+    (modal: SessionModalKind | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (modal) {
+            next.set('modal', modal);
+          } else {
+            next.delete('modal');
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const showCreateModal = activeModal === 'create';
+  const showInstantModal = activeModal === 'instant';
+  const showManageInvitesModal = activeModal === 'invites';
+  const showCalloutModal = activeModal === 'callout';
+
+  const setShowCreateModal = useCallback(
+    (open: boolean) => setActiveModal(open ? 'create' : null),
+    [setActiveModal]
+  );
+  const setShowInstantModal = useCallback(
+    (open: boolean) => setActiveModal(open ? 'instant' : null),
+    [setActiveModal]
+  );
+  const setShowManageInvitesModal = useCallback(
+    (open: boolean) => setActiveModal(open ? 'invites' : null),
+    [setActiveModal]
+  );
+  const setShowCalloutModal = useCallback(
+    (open: boolean) => setActiveModal(open ? 'callout' : null),
+    [setActiveModal]
+  );
+
   const [pingingUserId, setPingingUserId] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
-  const [sessionSubTab, setSessionSubTab] = useState<'session' | 'games' | 'recommendations'>('session');
+
+  const rawSubTab = searchParams.get('tab');
+  const sessionSubTab: SessionSubTab = isValidSessionSubTab(rawSubTab)
+    ? rawSubTab
+    : 'session';
+
+  const setSessionSubTab = useCallback(
+    (tab: SessionSubTab) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (tab === 'session') {
+            next.delete('tab');
+          } else {
+            next.set('tab', tab);
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      setActiveSessionId(sessionId);
+      navigate(buildSessionPath(sessionId, { tab: sessionSubTab }));
+    },
+    [setActiveSessionId, navigate, sessionSubTab]
+  );
 
   const canDeleteActiveSession = useMemo(() => {
     if (!activeSession) return false;
@@ -384,7 +485,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
               <button
                 key={sess.id}
                 type="button"
-                onClick={() => setActiveSessionId(sess.id)}
+                onClick={() => handleSelectSession(sess.id)}
                 className={cn(
                   'px-2.5 py-1 rounded-md border text-left shrink-0 transition-colors cursor-pointer min-w-[140px] max-w-[195px]',
                   isSelected
@@ -424,8 +525,12 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
                   size="sm"
                   variant="destructive"
                   onClick={() => {
-                    deleteSession(activeSession.id);
+                    const deletedId = activeSession.id;
+                    deleteSession(deletedId);
                     setConfirmDeleteSession(false);
+                    if (routeSessionId === deletedId) {
+                      navigate(buildSessionPath(), { replace: true });
+                    }
                     showTempBanner('Sesión eliminada.');
                   }}
                   title="Confirmar eliminación"
@@ -462,7 +567,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
             disabled={Boolean(activeInstantSession)}
             onClick={() => {
               if (activeInstantSession) {
-                setActiveSessionId(activeInstantSession.id);
+                handleSelectSession(activeInstantSession.id);
                 return;
               }
               setShowInstantModal(true);

@@ -297,7 +297,15 @@ function getSlotsForDateCell(
   return { baseSlots, displaySlots, isCancelledMap };
 }
 
-export const WeeklyScheduleModal: React.FC = () => {
+export interface WeeklyScheduleModalProps {
+  activeTab?: 'routine' | 'exceptions';
+  onTabChange?: (tab: 'routine' | 'exceptions') => void;
+}
+
+export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
+  activeTab: controlledTab,
+  onTabChange,
+}) => {
   const {
     showWeeklyScheduleModal,
     setShowWeeklyScheduleModal,
@@ -306,7 +314,12 @@ export const WeeklyScheduleModal: React.FC = () => {
     setDailyOverride,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'routine' | 'exceptions'>('routine');
+  const [internalTab, setInternalTab] = useState<'routine' | 'exceptions'>('routine');
+  const activeTab = controlledTab ?? internalTab;
+  const setActiveTab = (tab: 'routine' | 'exceptions') => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
 
   // Tab 1: Draft Weekly Schedule
   const [draftSchedule, setDraftSchedule] = useState<WeeklySchedule>(() =>

@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useApp } from '@/context/AppContext';
+import { GroupSubTab, buildGroupPath, isValidGroupSubTab } from '@/lib/routes';
 import { InstantSessionModal } from '@/components/sessions/InstantSessionModal';
 import {
   DiscordNotificationLog,
@@ -88,10 +90,10 @@ import {
 } from 'lucide-react';
 
 export interface GroupsViewProps {
-  onNavigateToSessions?: () => void;
+  onNavigateToSessions?: (sessionId?: string) => void;
 }
 
-type DetailSubTab = 'members' | 'games' | 'discord' | 'sessions' | 'settings';
+type DetailSubTab = GroupSubTab;
 
 interface ColorPreset {
   id: string;
@@ -312,8 +314,40 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       useEveryoneMention: false,
     });
 
-  // Detail subtab & actions
-  const [detailTab, setDetailTab] = useState<DetailSubTab>('members');
+  // URL-synchronized active group & detail subtab
+  const { groupId: routeGroupId, subTab: routeSubTab } = useParams<{
+    groupId?: string;
+    subTab?: string;
+  }>();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!routeGroupId) return;
+    const matched = userGroups.find((g) => g.id === routeGroupId);
+    if (matched && activeGroup?.id !== matched.id) {
+      setActiveGroupId(matched.id);
+    }
+  }, [routeGroupId, userGroups, activeGroup?.id, setActiveGroupId]);
+
+  const detailTab: DetailSubTab = isValidGroupSubTab(routeSubTab) ? routeSubTab : 'members';
+
+  const setDetailTab = useCallback(
+    (nextTab: DetailSubTab) => {
+      if (activeGroup) {
+        navigate(buildGroupPath(activeGroup.id, nextTab));
+      }
+    },
+    [activeGroup, navigate]
+  );
+
+  const handleSelectGroup = useCallback(
+    (groupId: string) => {
+      setActiveGroupId(groupId);
+      navigate(buildGroupPath(groupId, detailTab));
+    },
+    [setActiveGroupId, navigate, detailTab]
+  );
+
   const [copiedState, setCopiedState] = useState<'code' | 'link' | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeleteGroupSessionId, setConfirmDeleteGroupSessionId] = useState<string | null>(null);
@@ -939,7 +973,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       discordConfig: showCreateDiscord ? createDiscordConfig : undefined,
     });
     setActiveGroupId(created.id);
-    setDetailTab('members');
+    navigate(buildGroupPath(created.id, 'members'));
     setIsCreateModalOpen(false);
   });
 
@@ -1151,7 +1185,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <button
                     key={group.id}
                     type="button"
-                    onClick={() => setActiveGroupId(group.id)}
+                    onClick={() => handleSelectGroup(group.id)}
                     className={cn(
                       'w-full p-2.5 rounded-md border text-left flex items-center gap-2.5 transition-colors cursor-pointer relative',
                       isSelected
@@ -1275,7 +1309,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     </Button>
 
                     {onNavigateToSessions && (
-                      <Button size="xs" onClick={onNavigateToSessions} title="Ir a sesiones">
+                      <Button size="xs" onClick={() => onNavigateToSessions()} title="Ir a sesiones">
                         <span>Sesiones</span>
                         <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
                       </Button>
@@ -2094,7 +2128,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                           <span>Convocar ahora</span>
                         </Button>
                         {onNavigateToSessions && (
-                          <Button size="xs" onClick={onNavigateToSessions}>
+                          <Button size="xs" onClick={() => onNavigateToSessions()}>
                             <span>Sesiones</span>
                             <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
                           </Button>
@@ -2179,7 +2213,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                                   className="w-7 px-0 shrink-0"
                                   onClick={() => {
                                     setActiveSessionId(sess.id);
-                                    onNavigateToSessions?.();
+                                    onNavigateToSessions?.(sess.id);
                                   }}
                                   title="Ver sesión"
                                   aria-label="Ver sesión"
