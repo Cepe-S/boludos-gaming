@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Navigate,
   Outlet,
@@ -16,6 +16,7 @@ import { NotFoundView } from '@/components/layout/NotFoundView';
 import { SessionsView } from '@/components/SessionsView';
 import { GroupsView } from '@/components/GroupsView';
 import { GamesCatalogView } from '@/components/GamesCatalogView';
+import { RecommendationsView } from '@/components/RecommendationsView';
 import { LeaderboardSanctionsView } from '@/components/LeaderboardSanctionsView';
 import { LeagueOfLegendsView } from '@/components/LeagueOfLegendsView';
 import { DiscordIntegrationModal } from '@/components/DiscordIntegrationModal';
@@ -41,6 +42,14 @@ import {
   sanitizeRedirectPath,
   savePostAuthRedirect,
 } from '@/lib/routes';
+
+const DocumentTitleSync: React.FC = () => {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.title = getDocumentTitleForPath(pathname);
+  }, [pathname]);
+  return null;
+};
 
 const RootRedirect: React.FC = () => {
   const storedRedirect = consumePostAuthRedirect();
@@ -92,8 +101,29 @@ const InviteRoute: React.FC = () => {
   return null;
 };
 
+const SessionsRoute: React.FC = () => {
+  const navigate = useNavigate();
+  const handleNavigateToGroups = useCallback(() => navigate(ROUTES.GROUPS), [navigate]);
+  return <SessionsView onNavigateToGroups={handleNavigateToGroups} />;
+};
+
+const GroupsRoute: React.FC = () => {
+  const navigate = useNavigate();
+  const handleNavigateToSessions = useCallback(
+    (sessionId?: string) => navigate(buildSessionPath(sessionId)),
+    [navigate]
+  );
+  return <GroupsView onNavigateToSessions={handleNavigateToSessions} />;
+};
+
+const DiscordInlineRoute: React.FC = () => {
+  const navigate = useNavigate();
+  const handleClose = useCallback(() => navigate(ROUTES.GROUPS), [navigate]);
+  return <DiscordIntegrationModal isOpen={true} inlineView={true} onClose={handleClose} />;
+};
+
 const ProtectedShell: React.FC = () => {
-  const { isAuthenticated } = useApp();
+  const { isAuthenticated, showOnboardingModal, showWeeklyScheduleModal } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -125,6 +155,17 @@ const ProtectedShell: React.FC = () => {
     setIsMobileSidebarOpen(false);
   }, [location.pathname]);
 
+  const handleSetActiveTab = useCallback(
+    (tab: Parameters<typeof getPathForTab>[0]) => navigate(getPathForTab(tab)),
+    [navigate]
+  );
+  const handleOpenMobileSidebar = useCallback(() => setIsMobileSidebarOpen(true), []);
+  const handleCloseMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
+  const handleOpenChat = useCallback(() => openOverlay('chat'), [openOverlay]);
+  const handleOpenNotifications = useCallback(() => openOverlay('notifications'), [openOverlay]);
+  const handleOpenDiscordModal = useCallback(() => openOverlay('discord'), [openOverlay]);
+  const handleCloseOverlay = useCallback(() => closeOverlay(), [closeOverlay]);
+
   if (!isAuthenticated) {
     return <Navigate to={buildLoginRedirectPath(fromPath)} replace />;
   }
@@ -136,10 +177,10 @@ const ProtectedShell: React.FC = () => {
       {/* Global Full-Width GitHub-Style Top Header */}
       <AppHeader
         activeTab={activeTab}
-        onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
-        onOpenChat={() => openOverlay('chat')}
-        onOpenNotifications={() => openOverlay('notifications')}
-        onOpenDiscordModal={() => openOverlay('discord')}
+        onOpenMobileSidebar={handleOpenMobileSidebar}
+        onOpenChat={handleOpenChat}
+        onOpenNotifications={handleOpenNotifications}
+        onOpenDiscordModal={handleOpenDiscordModal}
       />
 
       {/* Mobile Drawer Sidebar */}
@@ -151,9 +192,9 @@ const ProtectedShell: React.FC = () => {
           <SheetTitle className="sr-only">Navegación Principal</SheetTitle>
           <AppSidebarContent
             activeTab={activeTab}
-            setActiveTab={(tab) => navigate(getPathForTab(tab))}
-            onOpenDiscordModal={() => openOverlay('discord')}
-            onItemNavigate={() => setIsMobileSidebarOpen(false)}
+            setActiveTab={handleSetActiveTab}
+            onOpenDiscordModal={handleOpenDiscordModal}
+            onItemNavigate={handleCloseMobileSidebar}
           />
         </SheetContent>
       </Sheet>
@@ -164,8 +205,8 @@ const ProtectedShell: React.FC = () => {
         <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:shrink-0 lg:sticky lg:top-14 lg:h-[calc(100vh-3.5rem)] border-r border-border/70 bg-card/55 backdrop-blur-md z-20">
           <AppSidebarContent
             activeTab={activeTab}
-            setActiveTab={(tab) => navigate(getPathForTab(tab))}
-            onOpenDiscordModal={() => openOverlay('discord')}
+            setActiveTab={handleSetActiveTab}
+            onOpenDiscordModal={handleOpenDiscordModal}
             hideBrandHeader
           />
         </aside>
@@ -176,96 +217,55 @@ const ProtectedShell: React.FC = () => {
         </main>
       </div>
 
-      {/* Slide-over Sheets & Modals (URL-synchronized via ?overlay=...) */}
-      <GlobalChatDrawer isOpen={isChatOpen} onClose={() => closeOverlay()} />
+      {/* Slide-over Sheets & Modals (mounted only when open, URL-synchronized via ?overlay=...) */}
+      {isChatOpen && <GlobalChatDrawer isOpen={isChatOpen} onClose={handleCloseOverlay} />}
 
-      <NotificationCenterModal
-        isOpen={isNotificationsOpen}
-        onClose={() => closeOverlay()}
-        activeTab={notifTab}
-        onTabChange={setNotifTab}
-      />
+      {isNotificationsOpen && (
+        <NotificationCenterModal
+          isOpen={isNotificationsOpen}
+          onClose={handleCloseOverlay}
+          activeTab={notifTab}
+          onTabChange={setNotifTab}
+        />
+      )}
 
       {isDiscordModalOpen && (
         <DiscordIntegrationModal
           isOpen={isDiscordModalOpen}
           inlineView={false}
-          onClose={() => closeOverlay()}
+          onClose={handleCloseOverlay}
         />
       )}
 
-      <OnboardingTourModal currentStep={tourStep} onStepChange={setTourStep} />
-      <WeeklyScheduleModal activeTab={scheduleTab} onTabChange={setScheduleTab} />
+      {showOnboardingModal && (
+        <OnboardingTourModal currentStep={tourStep} onStepChange={setTourStep} />
+      )}
+
+      {showWeeklyScheduleModal && (
+        <WeeklyScheduleModal activeTab={scheduleTab} onTabChange={setScheduleTab} />
+      )}
     </div>
   );
 };
 
 export function App() {
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    document.title = getDocumentTitleForPath(location.pathname);
-  }, [location.pathname]);
-
   return (
     <TooltipProvider delayDuration={0} skipDelayDuration={0}>
       <MeshBackground />
+      <DocumentTitleSync />
       <Routes>
         <Route path={ROUTES.LOGIN} element={<LoginRoute />} />
         <Route path={ROUTES.INVITE} element={<InviteRoute />} />
 
         <Route element={<ProtectedShell />}>
           <Route path={ROUTES.ROOT} element={<RootRedirect />} />
-          <Route
-            path={ROUTES.SESSIONS}
-            element={<SessionsView onNavigateToGroups={() => navigate(ROUTES.GROUPS)} />}
-          />
-          <Route
-            path={ROUTES.SESSION_DETAIL}
-            element={<SessionsView onNavigateToGroups={() => navigate(ROUTES.GROUPS)} />}
-          />
-          <Route
-            path={ROUTES.RECOMMENDATIONS}
-            element={<GamesCatalogView mode="recommendations-only" />}
-          />
+          <Route path="/sessions/:sessionId?" element={<SessionsRoute />} />
+          <Route path={ROUTES.RECOMMENDATIONS} element={<RecommendationsView />} />
           <Route path={ROUTES.GAMES} element={<GamesCatalogView />} />
           <Route path={ROUTES.LOL} element={<LeagueOfLegendsView />} />
           <Route path={ROUTES.TRIBUNAL} element={<LeaderboardSanctionsView />} />
-          <Route
-            path={ROUTES.GROUPS}
-            element={
-              <GroupsView
-                onNavigateToSessions={(sessionId) => navigate(buildSessionPath(sessionId))}
-              />
-            }
-          />
-          <Route
-            path={ROUTES.GROUP_DETAIL}
-            element={
-              <GroupsView
-                onNavigateToSessions={(sessionId) => navigate(buildSessionPath(sessionId))}
-              />
-            }
-          />
-          <Route
-            path={ROUTES.GROUP_SUBTAB}
-            element={
-              <GroupsView
-                onNavigateToSessions={(sessionId) => navigate(buildSessionPath(sessionId))}
-              />
-            }
-          />
-          <Route
-            path={ROUTES.DISCORD}
-            element={
-              <DiscordIntegrationModal
-                isOpen={true}
-                inlineView={true}
-                onClose={() => navigate(ROUTES.GROUPS)}
-              />
-            }
-          />
+          <Route path="/groups/:groupId?/:subTab?" element={<GroupsRoute />} />
+          <Route path={ROUTES.DISCORD} element={<DiscordInlineRoute />} />
           <Route path="*" element={<NotFoundView />} />
         </Route>
       </Routes>

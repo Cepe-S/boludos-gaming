@@ -131,7 +131,7 @@ export function GamesCatalogView({
   } = useNewRecommendations({
     targetPlayers: groupTargetPlayers,
     catalogGames: groupCatalogGames,
-    enabled: !embeddedInTour,
+    enabled: !embeddedInTour && mode === 'recommendations-only',
     maxResults: 30,
   });
 

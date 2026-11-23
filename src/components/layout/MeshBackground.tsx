@@ -174,7 +174,7 @@ function mountParticles(themeId: ThemePaletteId) {
   });
 }
 
-export const MeshBackground: React.FC = () => {
+export const MeshBackground: React.FC = React.memo(() => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gradientRef = useRef<MeshGradient | null>(null);
 
@@ -261,4 +261,4 @@ export const MeshBackground: React.FC = () => {
       />
     </div>
   );
-};
+});
