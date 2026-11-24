@@ -15,7 +15,6 @@ import {
   LOL_PLATFORM_OPTIONS,
   getProfileIconUrl,
 } from '@/lib/lolDdragon';
-import { getLocalRiotApiKey, setLocalRiotApiKey } from '@/lib/lolService';
 import { getUserAccounts, resolveUserPrimaryAccount } from '@/lib/lolPerformanceEngine';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -123,8 +122,6 @@ export interface LolHeaderBarProps {
   isDemoMode: boolean;
   onToggleDemoMode: (demo: boolean) => void;
   isSyncing: boolean;
-  hasServerRiotKey: boolean | null;
-  serverKeyUpdatedAt?: string | null;
   ddragonVersion: string;
   onLinkAndSync: (params: {
     userId: string;
@@ -137,20 +134,7 @@ export interface LolHeaderBarProps {
   onSyncGroup: () => Promise<void>;
   onUnlinkAccount: (userId: string, puuid?: string) => Promise<void>;
   onSetPrimaryAccount: (userId: string, puuid: string) => Promise<void>;
-  onSaveServerRiotKey: (apiKey: string) => Promise<{ ok: boolean; error?: string }>;
   openAccountsRequest?: { userId: string; nonce: number } | null;
-}
-
-function formatKeyUpdatedAt(iso?: string | null): string | null {
-  if (!iso) return null;
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
@@ -170,25 +154,17 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
   isDemoMode,
   onToggleDemoMode,
   isSyncing,
-  hasServerRiotKey,
-  serverKeyUpdatedAt,
   ddragonVersion = DEFAULT_DDRAGON_VERSION,
   onLinkAndSync,
   onSyncPlayer,
   onSyncGroup,
   onUnlinkAccount,
   onSetPrimaryAccount,
-  onSaveServerRiotKey,
   openAccountsRequest,
 }) => {
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
-  const [isKeyDialogOpen, setIsKeyDialogOpen] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkAsPrimary, setLinkAsPrimary] = useState(true);
-  const [keyInput, setKeyInput] = useState('');
-  const [hasLocalKey, setHasLocalKey] = useState(() => Boolean(getLocalRiotApiKey()));
-  const [isSavingKey, setIsSavingKey] = useState(false);
-  const [keyError, setKeyError] = useState<string | null>(null);
 
   const primaryAccountByUserId = new Map<string, LolAccount>();
   const accountsCountByUserId = new Map<string, number>();
@@ -268,44 +244,6 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
     }
   });
 
-  const handleSaveServerApiKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = keyInput.trim();
-    if (!trimmed) {
-      setKeyError('Ingresá una Riot API Key (RGAPI-...).');
-      return;
-    }
-
-    setKeyError(null);
-    setIsSavingKey(true);
-    try {
-      const res = await onSaveServerRiotKey(trimmed);
-      if (res.ok) {
-        setHasLocalKey(false);
-        setKeyInput('');
-        setIsKeyDialogOpen(false);
-      } else {
-        setKeyError(res.error || 'No se pudo validar ni guardar la Riot API Key.');
-      }
-    } finally {
-      setIsSavingKey(false);
-    }
-  };
-
-  const handleSaveLocalApiKey = () => {
-    const trimmed = keyInput.trim();
-    if (!trimmed) {
-      setKeyError('Ingresá una Riot API Key (RGAPI-...).');
-      return;
-    }
-
-    setLocalRiotApiKey(trimmed);
-    setHasLocalKey(true);
-    setKeyError(null);
-    setIsKeyDialogOpen(false);
-  };
-
-  const formattedUpdatedAt = formatKeyUpdatedAt(serverKeyUpdatedAt);
   const selectedMember =
     groupMembers.find((m) => m.id === selectedUserId) ?? groupMembers[0] ?? null;
   const selectedAcc = selectedMember
@@ -601,31 +539,6 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
                   </Button>
                 )}
 
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const currentLocal = getLocalRiotApiKey();
-                    setHasLocalKey(Boolean(currentLocal));
-                    setKeyInput(hasServerRiotKey ? '' : currentLocal);
-                    setKeyError(null);
-                    setIsKeyDialogOpen(true);
-                  }}
-                  title="Configurar Riot API Key"
-                  aria-label="Configurar Riot API Key"
-                  className="px-2"
-                >
-                  <KeyRound
-                    className={cn(
-                      'w-4 h-4',
-                      hasServerRiotKey || hasLocalKey
-                        ? 'text-success'
-                        : 'text-warning'
-                    )}
-                    strokeWidth={1.75}
-                  />
-                </Button>
               </>
             )}
           </div>
@@ -909,106 +822,7 @@ export const LolHeaderBar: React.FC<LolHeaderBarProps> = ({
         </DialogContent>
       </Dialog>
 
-      {/* Riot API Key Dialog */}
-      <Dialog open={isKeyDialogOpen} onOpenChange={setIsKeyDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-primary" strokeWidth={1.75} />
-              <span>Riot API Key</span>
-            </DialogTitle>
-          </DialogHeader>
 
-          <form onSubmit={handleSaveServerApiKey} className="space-y-3">
-            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border bg-background/50 text-xs">
-              <span className="text-muted-foreground">Servidor (Supabase)</span>
-              <Badge
-                variant={hasServerRiotKey ? 'success' : 'warning'}
-                title={formattedUpdatedAt ? `Actualizada: ${formattedUpdatedAt}` : undefined}
-              >
-                <ShieldCheck className="w-3 h-3" strokeWidth={1.75} />
-                <span>
-                  {hasServerRiotKey ? 'Activa' : 'Sin configurar'}
-                  {hasServerRiotKey && formattedUpdatedAt ? ` · ${formattedUpdatedAt}` : ''}
-                </span>
-              </Badge>
-            </div>
-
-            {hasLocalKey && (
-              <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md border border-warning/40 bg-warning/10 text-xs">
-                <span className="text-warning font-medium">Override local</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={isSavingKey}
-                  className="h-6 px-2 text-[11px]"
-                  onClick={() => {
-                    setLocalRiotApiKey('');
-                    setHasLocalKey(false);
-                    setKeyInput('');
-                    setKeyError(null);
-                  }}
-                >
-                  Limpiar
-                </Button>
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label
-                htmlFor="lol-riot-api-key-input"
-                className="text-xs font-medium text-foreground block"
-              >
-                Rotar Riot API Key (RGAPI-...)
-              </label>
-              <Input
-                id="lol-riot-api-key-input"
-                type="password"
-                value={keyInput}
-                onChange={(e) => {
-                  setKeyInput(e.target.value);
-                  if (keyError) setKeyError(null);
-                }}
-                placeholder="RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                className="font-mono"
-                autoComplete="off"
-              />
-            </div>
-
-            {keyError && (
-              <div className="flex items-start gap-2 text-xs text-destructive font-medium bg-destructive/10 border border-destructive/40 rounded-md px-2.5 py-2">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" strokeWidth={1.75} />
-                <span>{keyError}</span>
-              </div>
-            )}
-
-            <DialogFooter className="gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isSavingKey || !keyInput.trim()}
-                onClick={handleSaveLocalApiKey}
-              >
-                Solo local
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={isSavingKey || !keyInput.trim()}
-              >
-                {isSavingKey ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
-                ) : (
-                  <ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.75} />
-                )}
-                <span>{isSavingKey ? 'Validando...' : 'Guardar en servidor'}</span>
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </>
   );
 };

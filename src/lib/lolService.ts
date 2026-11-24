@@ -15,12 +15,9 @@ import { getQueueCategory, getRegionalClusterForPlatform } from './lolPerformanc
 import { supabase, supabaseAnonKey, supabaseUrl } from './supabaseClient';
 import {
   fetchWithClientCache,
-  invalidateClientCache,
   invalidateClientCachePrefix,
   readClientCache,
 } from './clientCache';
-
-const LOCAL_RIOT_KEY_STORAGE = 'bg_lol_riot_api_key_v1';
 const LOL_GROUP_FRESH_TTL_MS = 3 * 60 * 1000;
 const LOL_GROUP_STALE_TTL_MS = 60 * 60 * 1000;
 const LOL_EDGE_STATUS_TTL_MS = 10 * 60 * 1000;
@@ -75,27 +72,6 @@ export function getCachedRiotEdgeStatus(): RiotEdgeStatusResult | null {
     storage: 'session',
   });
   return hit?.data ?? null;
-}
-
-export function getLocalRiotApiKey(): string {
-  try {
-    return window.localStorage.getItem(LOCAL_RIOT_KEY_STORAGE)?.trim() || '';
-  } catch {
-    return '';
-  }
-}
-
-export function setLocalRiotApiKey(key: string): void {
-  try {
-    const trimmed = key.trim();
-    if (!trimmed) {
-      window.localStorage.removeItem(LOCAL_RIOT_KEY_STORAGE);
-    } else {
-      window.localStorage.setItem(LOCAL_RIOT_KEY_STORAGE, trimmed);
-    }
-  } catch {
-    // Ignore storage quota errors
-  }
 }
 
 export interface RiotEdgeResponse<T = Record<string, unknown>> {
@@ -172,27 +148,6 @@ export async function getRiotEdgeStatus(options?: {
       shouldCache: (value) => value.ok,
     }
   );
-}
-
-export async function saveServerRiotApiKey(riotApiKey: string): Promise<{
-  ok: boolean;
-  hasServerKey?: boolean;
-  updatedAt?: string | null;
-  error?: string;
-}> {
-  const res = await callRiotEdgeFunction({
-    action: 'set_server_api_key',
-    riotApiKey: riotApiKey.trim(),
-  });
-  if (res.ok) {
-    invalidateClientCache(LOL_EDGE_STATUS_KEY);
-  }
-  return {
-    ok: Boolean(res.ok),
-    hasServerKey: Boolean(res.hasServerKey),
-    updatedAt: typeof res.updatedAt === 'string' ? res.updatedAt : null,
-    error: res.error,
-  };
 }
 
 function mapAccountRow(row: Record<string, unknown>): LolAccount {
@@ -487,7 +442,6 @@ export async function linkAndSyncRiotAccount(params: {
   platform: LolPlatform;
   isPrimary?: boolean;
   matchCount?: number;
-  riotApiKey?: string;
 }): Promise<{
   ok: boolean;
   code?: string;
@@ -496,7 +450,6 @@ export async function linkAndSyncRiotAccount(params: {
   fetchedMatches?: number;
   cachedMatches?: number;
 }> {
-  const apiKey = params.riotApiKey?.trim() || getLocalRiotApiKey() || undefined;
   const res = await callRiotEdgeFunction({
     action: 'link_and_sync',
     userId: params.userId,
@@ -505,7 +458,6 @@ export async function linkAndSyncRiotAccount(params: {
     platform: params.platform,
     isPrimary: params.isPrimary,
     matchCount: params.matchCount ?? 25,
-    riotApiKey: apiKey,
   });
 
   if (res.ok) invalidateGroupLolCache();
@@ -533,7 +485,6 @@ export async function linkAndSyncRiotAccount(params: {
 export async function syncRiotPlayer(params: {
   userId: string;
   matchCount?: number;
-  riotApiKey?: string;
 }): Promise<{
   ok: boolean;
   code?: string;
@@ -541,12 +492,10 @@ export async function syncRiotPlayer(params: {
   fetchedMatches?: number;
   cachedMatches?: number;
 }> {
-  const apiKey = params.riotApiKey?.trim() || getLocalRiotApiKey() || undefined;
   const res = await callRiotEdgeFunction({
     action: 'sync_player',
     userId: params.userId,
     matchCount: params.matchCount ?? 25,
-    riotApiKey: apiKey,
   });
 
   if (res.ok) invalidateGroupLolCache();
@@ -573,7 +522,6 @@ export async function syncRiotPlayer(params: {
 export async function syncRiotGroup(params: {
   userIds: string[];
   matchCount?: number;
-  riotApiKey?: string;
 }): Promise<{
   ok: boolean;
   code?: string;
@@ -581,12 +529,10 @@ export async function syncRiotGroup(params: {
   syncedCount?: number;
   fetchedMatches?: number;
 }> {
-  const apiKey = params.riotApiKey?.trim() || getLocalRiotApiKey() || undefined;
   const res = await callRiotEdgeFunction({
     action: 'sync_group',
     userIds: params.userIds,
     matchCount: params.matchCount ?? 20,
-    riotApiKey: apiKey,
   });
 
   if (res.ok) invalidateGroupLolCache();

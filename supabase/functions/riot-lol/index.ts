@@ -29,7 +29,6 @@ const DEFAULT_DDRAGON_VERSION = '15.22.1';
 const MATCH_BATCH_SIZE = 4;
 const MATCH_BATCH_DELAY_MS = 250;
 const MAX_RATE_LIMIT_RETRIES = 2;
-const RIOT_SECRET_KEY_NAME = 'riot_api_key';
 
 // ------------------------------------------------------------------------------
 // PAYLOAD & RIOT DTO TYPES
@@ -37,12 +36,6 @@ const RIOT_SECRET_KEY_NAME = 'riot_api_key';
 
 interface StatusPayload {
   action: 'status';
-  riotApiKey?: string;
-}
-
-interface SetServerApiKeyPayload {
-  action: 'set_server_api_key';
-  riotApiKey?: string;
 }
 
 interface LinkAndSyncPayload {
@@ -54,14 +47,12 @@ interface LinkAndSyncPayload {
   isPrimary?: boolean;
   matchCount?: number;
   queueId?: number;
-  riotApiKey?: string;
 }
 
 interface SetPrimaryAccountPayload {
   action: 'set_primary_account';
   userId: string;
   puuid: string;
-  riotApiKey?: string;
 }
 
 interface SyncPlayerPayload {
@@ -69,7 +60,6 @@ interface SyncPlayerPayload {
   userId: string;
   matchCount?: number;
   queueId?: number;
-  riotApiKey?: string;
 }
 
 interface SyncGroupPayload {
@@ -77,19 +67,16 @@ interface SyncGroupPayload {
   userIds: string[];
   matchCount?: number;
   queueId?: number;
-  riotApiKey?: string;
 }
 
 interface UnlinkAccountPayload {
   action: 'unlink_account';
   userId: string;
   puuid?: string;
-  riotApiKey?: string;
 }
 
 type RiotLolRequestPayload =
   | StatusPayload
-  | SetServerApiKeyPayload
   | LinkAndSyncPayload
   | SetPrimaryAccountPayload
   | SyncPlayerPayload
@@ -169,48 +156,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function getDbServerRiotSecret(
-  supabase: SupabaseClient
-): Promise<{ value: string; updatedAt: string | null }> {
-  try {
-    const { data, error } = await supabase
-      .from('lol_internal_secrets')
-      .select('key_value, updated_at')
-      .eq('key_name', RIOT_SECRET_KEY_NAME)
-      .maybeSingle();
-
-    if (error || !data) {
-      return { value: '', updatedAt: null };
-    }
-
-    const row = data as { key_value?: unknown; updated_at?: unknown };
-    const value = typeof row.key_value === 'string' ? row.key_value.trim() : '';
-    const updatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
-    return { value, updatedAt };
-  } catch {
-    return { value: '', updatedAt: null };
-  }
-}
-
-async function resolveRiotApiKey(
-  supabase: SupabaseClient,
-  payloadKey?: string
-): Promise<string> {
-  const fromBody = typeof payloadKey === 'string' ? payloadKey.trim() : '';
-  if (fromBody) return fromBody;
-
-  const dbSecret = await getDbServerRiotSecret(supabase);
-  if (dbSecret.value) return dbSecret.value;
-
+function resolveRiotApiKey(): string {
   return (Deno.env.get('RIOT_API_KEY') ?? '').trim();
-}
-
-async function validateRiotApiKeyLive(apiKey: string): Promise<void> {
-  await riotFetchJson<Record<string, unknown>>(
-    'https://la2.api.riotgames.com/lol/status/v4/platform-data',
-    apiKey,
-    'No se pudo validar la Riot API Key contra Riot Games.'
-  );
 }
 
 function createAdminSupabaseClient(): SupabaseClient {
@@ -711,76 +658,13 @@ Deno.serve(async (req: Request) => {
   try {
     // 1. STATUS
     if (body.action === 'status') {
-      const envKey = (Deno.env.get('RIOT_API_KEY') ?? '').trim();
-      let dbSecret = { value: '', updatedAt: null as string | null };
-
-      try {
-        const supabase = createAdminSupabaseClient();
-        dbSecret = await getDbServerRiotSecret(supabase);
-      } catch {
-        // Fallback cleanly to envKey if admin env vars are unavailable
-      }
-
-      const keySource = dbSecret.value ? 'db' : envKey ? 'env' : null;
+      const envKey = resolveRiotApiKey();
       return jsonResponse(
         {
           ok: true,
-          hasServerKey: Boolean(dbSecret.value || envKey),
-          keySource,
-          updatedAt: dbSecret.value ? dbSecret.updatedAt : null,
-        },
-        200
-      );
-    }
-
-    // 2. SET SERVER API KEY
-    if (body.action === 'set_server_api_key') {
-      const candidateKey =
-        typeof body.riotApiKey === 'string' ? body.riotApiKey.trim() : '';
-
-      if (!candidateKey.startsWith('RGAPI-') || candidateKey.length < 20) {
-        return jsonResponse(
-          {
-            ok: false,
-            code: 'INVALID_API_KEY_FORMAT',
-            error: 'Formato inválido. La API Key de Riot debe comenzar con RGAPI-.',
-          },
-          400
-        );
-      }
-
-      await validateRiotApiKeyLive(candidateKey);
-
-      const supabase = createAdminSupabaseClient();
-      const nowIso = new Date().toISOString();
-      const { error: upsertError } = await supabase
-        .from('lol_internal_secrets')
-        .upsert(
-          {
-            key_name: RIOT_SECRET_KEY_NAME,
-            key_value: candidateKey,
-            updated_at: nowIso,
-          },
-          { onConflict: 'key_name' }
-        );
-
-      if (upsertError) {
-        return jsonResponse(
-          {
-            ok: false,
-            code: 'DB_SECRET_UPSERT_ERROR',
-            error: `Error guardando la Riot API Key en Supabase: ${upsertError.message}`,
-          },
-          500
-        );
-      }
-
-      return jsonResponse(
-        {
-          ok: true,
-          hasServerKey: true,
-          keySource: 'db',
-          updatedAt: nowIso,
+          hasServerKey: Boolean(envKey),
+          keySource: envKey ? 'env' : null,
+          updatedAt: null,
         },
         200
       );
@@ -935,14 +819,14 @@ Deno.serve(async (req: Request) => {
 
     // Remaining actions require Riot API Key
     const supabase = createAdminSupabaseClient();
-    const apiKey = await resolveRiotApiKey(supabase, body.riotApiKey);
+    const apiKey = resolveRiotApiKey();
     if (!apiKey) {
       return jsonResponse(
         {
           ok: false,
           code: 'MISSING_API_KEY',
           error:
-            'Falta configurar la Riot API Key. Pegá una key válida en la app o configurá RIOT_API_KEY en Supabase.',
+            'Falta configurar el secreto RIOT_API_KEY en las Edge Functions de Supabase.',
         },
         400
       );

@@ -27,8 +27,6 @@ import {
   getRiotEdgeStatus,
   invalidateGroupLolCache,
   linkAndSyncRiotAccount,
-  saveServerRiotApiKey,
-  setLocalRiotApiKey,
   setPrimaryRiotAccount,
   syncRiotGroup,
   syncRiotPlayer,
@@ -143,9 +141,6 @@ export const LeagueOfLegendsView: React.FC = () => {
   const [hasServerRiotKey, setHasServerRiotKey] = useState<boolean | null>(
     () => initialEdgeStatus?.hasServerKey ?? null
   );
-  const [serverKeyUpdatedAt, setServerKeyUpdatedAt] = useState<string | null>(
-    () => initialEdgeStatus?.updatedAt ?? null
-  );
 
   const [liveAccounts, setLiveAccounts] = useState<LolAccount[]>(
     () => initialLolCache?.accounts ?? []
@@ -218,7 +213,6 @@ export const LeagueOfLegendsView: React.FC = () => {
         .then((status) => {
           if (!cancelled) {
             setHasServerRiotKey(status.hasServerKey);
-            setServerKeyUpdatedAt(status.updatedAt ?? null);
           }
         })
         .catch(() => {
@@ -637,20 +631,6 @@ export const LeagueOfLegendsView: React.FC = () => {
     }
   };
 
-  const handleSaveServerRiotKey = async (
-    apiKey: string
-  ): Promise<{ ok: boolean; error?: string }> => {
-    const res = await saveServerRiotApiKey(apiKey);
-    if (res.ok) {
-      setHasServerRiotKey(true);
-      setServerKeyUpdatedAt(res.updatedAt ?? new Date().toISOString());
-      setLocalRiotApiKey('');
-      showTransientFeedback('success', 'Riot API Key validada y guardada en el servidor.');
-      return { ok: true };
-    }
-    return { ok: false, error: res.error };
-  };
-
   if (!isPageReady || (!isDemoMode && isLoadingLive && activeAccounts.length === 0)) {
     return <LolLoadingScreen />;
   }
@@ -694,15 +674,12 @@ export const LeagueOfLegendsView: React.FC = () => {
             setSelectedMatchState(null);
           }}
           isSyncing={isSyncing}
-          hasServerRiotKey={hasServerRiotKey}
-          serverKeyUpdatedAt={serverKeyUpdatedAt}
           ddragonVersion={ddragonVersion}
           onLinkAndSync={handleLinkAndSync}
           onSyncPlayer={handleSyncPlayer}
           onSyncGroup={handleSyncGroup}
           onUnlinkAccount={handleUnlinkAccount}
           onSetPrimaryAccount={handleSetPrimaryAccount}
-          onSaveServerRiotKey={handleSaveServerRiotKey}
           openAccountsRequest={accountsDialogRequest}
         />
       </div>
