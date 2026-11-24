@@ -393,7 +393,7 @@ export const RouletteSynchronyBentoCard: React.FC<RouletteSynchronyBentoCardProp
                   />
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute bottom-1 right-1 inline-flex items-center justify-center w-4 h-4 rounded bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-0 group-hover/cover:opacity-100 transition-opacity"
+                    className="pointer-events-none absolute bottom-1 right-1 inline-flex items-center justify-center w-4 h-4 rounded bg-background/92 border border-border text-muted-foreground opacity-0 group-hover/cover:opacity-100 transition-opacity"
                   >
                     <ExternalLink className="w-2.5 h-2.5" strokeWidth={1.75} />
                   </span>

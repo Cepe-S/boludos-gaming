@@ -1353,7 +1353,88 @@ function mergeTagsUnique(existing: string[], incoming: string[]): string[] {
   return out;
 }
 
+const PVJ_DEFAULT_EMPTY_PREFS: UserGamePreference[] = [];
+const PVJ_DEFAULT_EMPTY_GAMES: Game[] = [];
+
+interface PvjMemoBucket {
+  prefLen: number;
+  gamesLen: number;
+  ownedLen: number;
+  mpLen: number;
+  spLen: number;
+  extLen: number;
+  updatedAt: string;
+  lastSyncedAt: string;
+  result: PvjPlayerCategorizationResult;
+}
+
+const pvjProfileMemoCache = new WeakMap<
+  PlayerProfile,
+  WeakMap<UserGamePreference[], WeakMap<Game[], PvjMemoBucket>>
+>();
+
 export function computePlayerPvj6dProfile(
+  player: PlayerProfile,
+  allPreferences: UserGamePreference[] = PVJ_DEFAULT_EMPTY_PREFS,
+  catalogGames: Game[] = PVJ_DEFAULT_EMPTY_GAMES
+): PvjPlayerCategorizationResult {
+  const prefKey = allPreferences.length === 0 ? PVJ_DEFAULT_EMPTY_PREFS : allPreferences;
+  const gameKey = catalogGames.length === 0 ? PVJ_DEFAULT_EMPTY_GAMES : catalogGames;
+
+  const prefLen = allPreferences.length;
+  const gamesLen = catalogGames.length;
+  const ownedLen = player.steamProfile?.ownedGames?.length ?? 0;
+  const mpLen = player.tasteProfile?.topMultiplayerGames?.length ?? 0;
+  const spLen = player.tasteProfile?.topSingleplayerGames?.length ?? 0;
+  const extLen = player.tasteProfile?.externalGames?.length ?? 0;
+  const updatedAt = player.tasteProfile?.updatedAt ?? '';
+  const lastSyncedAt = player.steamProfile?.lastSyncedAt ?? '';
+
+  const byPrefs = pvjProfileMemoCache.get(player);
+  const byGames = byPrefs?.get(prefKey);
+  const hit = byGames?.get(gameKey);
+  if (
+    hit &&
+    hit.prefLen === prefLen &&
+    hit.gamesLen === gamesLen &&
+    hit.ownedLen === ownedLen &&
+    hit.mpLen === mpLen &&
+    hit.spLen === spLen &&
+    hit.extLen === extLen &&
+    hit.updatedAt === updatedAt &&
+    hit.lastSyncedAt === lastSyncedAt
+  ) {
+    return hit.result;
+  }
+
+  const result = computePlayerPvj6dProfileUncached(player, allPreferences, catalogGames);
+
+  let nextByPrefs = byPrefs;
+  if (!nextByPrefs) {
+    nextByPrefs = new WeakMap();
+    pvjProfileMemoCache.set(player, nextByPrefs);
+  }
+  let nextByGames = nextByPrefs.get(prefKey);
+  if (!nextByGames) {
+    nextByGames = new WeakMap();
+    nextByPrefs.set(prefKey, nextByGames);
+  }
+  nextByGames.set(gameKey, {
+    prefLen,
+    gamesLen,
+    ownedLen,
+    mpLen,
+    spLen,
+    extLen,
+    updatedAt,
+    lastSyncedAt,
+    result,
+  });
+
+  return result;
+}
+
+function computePlayerPvj6dProfileUncached(
   player: PlayerProfile,
   allPreferences: UserGamePreference[] = [],
   catalogGames: Game[] = []

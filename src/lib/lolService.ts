@@ -13,10 +13,69 @@ import {
 } from '../types/lol';
 import { getQueueCategory, getRegionalClusterForPlatform } from './lolPerformanceEngine';
 import { supabase, supabaseAnonKey, supabaseUrl } from './supabaseClient';
+import {
+  fetchWithClientCache,
+  invalidateClientCache,
+  invalidateClientCachePrefix,
+  readClientCache,
+} from './clientCache';
 
 const LOCAL_RIOT_KEY_STORAGE = 'bg_lol_riot_api_key_v1';
+const LOL_GROUP_FRESH_TTL_MS = 3 * 60 * 1000;
+const LOL_GROUP_STALE_TTL_MS = 60 * 60 * 1000;
+const LOL_EDGE_STATUS_TTL_MS = 10 * 60 * 1000;
+const LOL_EDGE_STATUS_KEY = 'lol:edge-status';
 
 const fullMatchCache = new Map<string, RiotMatchV5>();
+const fullMatchInFlight = new Map<string, Promise<RiotMatchV5 | null>>();
+
+export interface GroupLolDataResult {
+  accounts: LolAccount[];
+  matches: LolMatchSummary[];
+  error?: string;
+}
+
+export interface RiotEdgeStatusResult {
+  ok: boolean;
+  hasServerKey: boolean;
+  keySource: 'env' | 'db' | null;
+  updatedAt: string | null;
+  error?: string;
+}
+
+function getLolGroupCacheKey(memberIds: string[]): string {
+  return `lol:group:${Array.from(new Set(memberIds)).sort().join(',')}`;
+}
+
+export function getCachedGroupLolData(
+  memberIds: string[]
+): { accounts: LolAccount[]; matches: LolMatchSummary[]; isFresh: boolean } | null {
+  if (memberIds.length === 0) return null;
+  const hit = readClientCache<GroupLolDataResult>(getLolGroupCacheKey(memberIds), {
+    ttlMs: LOL_GROUP_FRESH_TTL_MS,
+    staleTtlMs: LOL_GROUP_STALE_TTL_MS,
+    storage: 'local',
+  });
+  if (!hit) return null;
+  return {
+    accounts: hit.data.accounts,
+    matches: hit.data.matches,
+    isFresh: hit.isFresh,
+  };
+}
+
+export function invalidateGroupLolCache(): void {
+  invalidateClientCachePrefix('lol:group:');
+}
+
+export function getCachedRiotEdgeStatus(): RiotEdgeStatusResult | null {
+  const hit = readClientCache<RiotEdgeStatusResult>(LOL_EDGE_STATUS_KEY, {
+    ttlMs: LOL_EDGE_STATUS_TTL_MS,
+    staleTtlMs: LOL_EDGE_STATUS_TTL_MS * 3,
+    storage: 'session',
+  });
+  return hit?.data ?? null;
+}
 
 export function getLocalRiotApiKey(): string {
   try {
@@ -89,23 +148,30 @@ async function callRiotEdgeFunction<T = Record<string, unknown>>(
   }
 }
 
-export async function getRiotEdgeStatus(): Promise<{
-  ok: boolean;
-  hasServerKey: boolean;
-  keySource: 'env' | 'db' | null;
-  updatedAt: string | null;
-  error?: string;
-}> {
-  const res = await callRiotEdgeFunction({ action: 'status' });
-  const keySource =
-    res.keySource === 'db' || res.keySource === 'env' ? res.keySource : null;
-  return {
-    ok: Boolean(res.ok),
-    hasServerKey: Boolean(res.hasServerKey),
-    keySource,
-    updatedAt: typeof res.updatedAt === 'string' ? res.updatedAt : null,
-    error: res.error,
-  };
+export async function getRiotEdgeStatus(options?: {
+  forceRefresh?: boolean;
+}): Promise<RiotEdgeStatusResult> {
+  return fetchWithClientCache<RiotEdgeStatusResult>(
+    LOL_EDGE_STATUS_KEY,
+    async () => {
+      const res = await callRiotEdgeFunction({ action: 'status' });
+      const keySource =
+        res.keySource === 'db' || res.keySource === 'env' ? res.keySource : null;
+      return {
+        ok: Boolean(res.ok),
+        hasServerKey: Boolean(res.hasServerKey),
+        keySource,
+        updatedAt: typeof res.updatedAt === 'string' ? res.updatedAt : null,
+        error: res.error,
+      };
+    },
+    {
+      ttlMs: LOL_EDGE_STATUS_TTL_MS,
+      storage: 'session',
+      forceRefresh: options?.forceRefresh,
+      shouldCache: (value) => value.ok,
+    }
+  );
 }
 
 export async function saveServerRiotApiKey(riotApiKey: string): Promise<{
@@ -118,6 +184,9 @@ export async function saveServerRiotApiKey(riotApiKey: string): Promise<{
     action: 'set_server_api_key',
     riotApiKey: riotApiKey.trim(),
   });
+  if (res.ok) {
+    invalidateClientCache(LOL_EDGE_STATUS_KEY);
+  }
   return {
     ok: Boolean(res.ok),
     hasServerKey: Boolean(res.hasServerKey),
@@ -239,11 +308,30 @@ function mapParticipantRow(row: Record<string, unknown>): LolMatchParticipantSum
   };
 }
 
-export async function fetchGroupLolData(memberIds: string[]): Promise<{
-  accounts: LolAccount[];
-  matches: LolMatchSummary[];
-  error?: string;
-}> {
+export async function fetchGroupLolData(
+  memberIds: string[],
+  options?: { forceRefresh?: boolean }
+): Promise<GroupLolDataResult> {
+  if (!supabase || memberIds.length === 0) {
+    return { accounts: [], matches: [] };
+  }
+
+  const cacheKey = getLolGroupCacheKey(memberIds);
+  return fetchWithClientCache<GroupLolDataResult>(
+    cacheKey,
+    () => fetchGroupLolDataUncached(memberIds),
+    {
+      ttlMs: LOL_GROUP_FRESH_TTL_MS,
+      storage: 'local',
+      forceRefresh: options?.forceRefresh,
+      shouldCache: (res) => !res.error,
+    }
+  );
+}
+
+async function fetchGroupLolDataUncached(
+  memberIds: string[]
+): Promise<GroupLolDataResult> {
   if (!supabase || memberIds.length === 0) {
     return { accounts: [], matches: [] };
   }
@@ -361,19 +449,35 @@ export async function fetchFullLolMatch(matchId: string): Promise<RiotMatchV5 | 
   if (cached) return cached;
   if (!supabase) return null;
 
-  const { data, error } = await supabase
-    .from('lol_matches')
-    .select('raw_match')
-    .eq('match_id', matchId)
-    .maybeSingle();
+  const existingPromise = fullMatchInFlight.get(matchId);
+  if (existingPromise) return existingPromise;
 
-  if (error || !data?.raw_match) {
-    return null;
-  }
+  const client = supabase;
+  const promise = (async () => {
+    const { data, error } = await client
+      .from('lol_matches')
+      .select('raw_match')
+      .eq('match_id', matchId)
+      .maybeSingle();
 
-  const rawMatch = data.raw_match as RiotMatchV5;
-  fullMatchCache.set(matchId, rawMatch);
-  return rawMatch;
+    if (error || !data?.raw_match) {
+      return null;
+    }
+
+    const rawMatch = data.raw_match as RiotMatchV5;
+    fullMatchCache.set(matchId, rawMatch);
+    return rawMatch;
+  })().finally(() => {
+    fullMatchInFlight.delete(matchId);
+  });
+
+  fullMatchInFlight.set(matchId, promise);
+  return promise;
+}
+
+export function prefetchFullLolMatch(matchId: string): void {
+  if (!matchId || fullMatchCache.has(matchId) || fullMatchInFlight.has(matchId)) return;
+  void fetchFullLolMatch(matchId);
 }
 
 export async function linkAndSyncRiotAccount(params: {
@@ -403,6 +507,8 @@ export async function linkAndSyncRiotAccount(params: {
     matchCount: params.matchCount ?? 25,
     riotApiKey: apiKey,
   });
+
+  if (res.ok) invalidateGroupLolCache();
 
   return {
     ok: res.ok,
@@ -443,6 +549,8 @@ export async function syncRiotPlayer(params: {
     riotApiKey: apiKey,
   });
 
+  if (res.ok) invalidateGroupLolCache();
+
   return {
     ok: res.ok,
     code: res.code,
@@ -481,6 +589,8 @@ export async function syncRiotGroup(params: {
     riotApiKey: apiKey,
   });
 
+  if (res.ok) invalidateGroupLolCache();
+
   const results = Array.isArray(res.results)
     ? (res.results as Array<{ ok?: boolean }>)
     : null;
@@ -513,6 +623,7 @@ export async function unlinkRiotAccount(
     userId,
     puuid,
   });
+  if (res.ok) invalidateGroupLolCache();
   return {
     ok: res.ok,
     error: res.error,
@@ -528,6 +639,7 @@ export async function setPrimaryRiotAccount(
     userId,
     puuid,
   });
+  if (res.ok) invalidateGroupLolCache();
   return {
     ok: res.ok,
     error: res.error,

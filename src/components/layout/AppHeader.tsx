@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { getEffectiveScheduleForDate } from '@/lib/matchmakingEngine';
 import { AppTab, ROUTES, TAB_TITLES } from '@/lib/routes';
+import { prefetchRouteModule } from '@/lib/routePrefetch';
 import { Link } from 'react-router-dom';
 import { BrandWordmark } from '@/components/layout/BrandWordmark';
 import { Button } from '@/components/ui/button';
@@ -48,7 +49,7 @@ function getTodayDateStr(): string {
   return `${y}-${m}-${d}`;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({
+export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
   activeTab,
   onOpenMobileSidebar,
   onOpenChat,
@@ -96,7 +97,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 w-full h-14 border-b border-border/70 bg-background/75 backdrop-blur-md px-4 lg:pl-0 flex items-center justify-between gap-3">
+    <header className="sticky top-0 z-30 w-full h-14 border-b border-border/70 bg-background/92 px-4 lg:pl-0 flex items-center justify-between gap-3">
       {/* Left: Brand Mark + Mobile Sidebar Toggle + Contextual Breadcrumb */}
       <div className="flex items-center gap-2.5 lg:gap-0 min-w-0">
         <Button
@@ -155,6 +156,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {/* Today's Auto Schedule Pill */}
         <button
           type="button"
+          onMouseEnter={() => prefetchRouteModule('schedule')}
+          onFocus={() => prefetchRouteModule('schedule')}
           onClick={() => setShowWeeklyScheduleModal(true)}
           title="Horario semanal"
           aria-label="Configurar horario semanal"
@@ -178,6 +181,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           type="button"
           variant="secondary"
           size="sm"
+          onMouseEnter={() => prefetchRouteModule('discord')}
+          onFocus={() => prefetchRouteModule('discord')}
           onClick={onOpenDiscordModal}
           title={`Discord #${activeDiscordChannel}`}
           aria-label="Abrir Discord"
@@ -196,6 +201,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           type="button"
           variant="secondary"
           size="sm"
+          onMouseEnter={() => prefetchRouteModule('notifications')}
+          onFocus={() => prefetchRouteModule('notifications')}
           onClick={onOpenNotifications}
           title="Notificaciones"
           aria-label="Abrir notificaciones"
@@ -271,6 +278,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           type="button"
           variant="default"
           size="sm"
+          onMouseEnter={() => prefetchRouteModule('chat')}
+          onFocus={() => prefetchRouteModule('chat')}
           onClick={onOpenChat}
           title="Chat global"
           aria-label="Abrir chat global"
@@ -283,4 +292,4 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </div>
     </header>
   );
-};
+});

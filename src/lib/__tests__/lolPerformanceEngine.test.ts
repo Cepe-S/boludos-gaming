@@ -29,12 +29,16 @@ import {
   getUserPuuids,
   groupAccountsByUser,
   isGroupMatch,
+  LOL_MACRO_DURATION_RANGES,
+  normalizePuuidSet,
   resolveGroupMatchOutcome,
   resolveMacroDurationRange,
   resolveParticipantRole,
   resolveUserPrimaryAccount,
+  RIFT_ROLE_KEYS,
   ROLE_WEIGHT_MATRIX,
   scoreMatchParticipants,
+  TIME_RANGE_DAYS,
 } from '../lolPerformanceEngine';
 import { getChampionSplashUrl } from '../lolDdragon';
 import { buildDemoLolDataset } from '../lolDemoData';
@@ -490,6 +494,66 @@ describe('BG-PERF v2 LoL Performance Engine', () => {
       expect(getGradeFromScore(56)).toBe('B');
       expect(getGradeFromScore(45)).toBe('C');
       expect(getGradeFromScore(44.9)).toBe('D');
+    });
+
+    it('exposes canonical RIFT_ROLE_KEYS, TIME_RANGE_DAYS, LOL_MACRO_DURATION_RANGES and normalizePuuidSet', () => {
+      expect(RIFT_ROLE_KEYS).toEqual(['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']);
+      expect(TIME_RANGE_DAYS).toEqual({ '7d': 7, '30d': 30, '90d': 90 });
+      expect(LOL_MACRO_DURATION_RANGES).toEqual([
+        { key: '0-10', label: '0–10 min', startSec: 0, endSec: 600 },
+        { key: '10-20', label: '10–20 min', startSec: 600, endSec: 1200 },
+        { key: '20-30', label: '20–30 min', startSec: 1200, endSec: 1800 },
+        { key: '30-40', label: '30–40 min', startSec: 1800, endSec: 2400 },
+        { key: '40+', label: '40+ min', startSec: 2400, endSec: null },
+      ]);
+
+      expect(Array.from(normalizePuuidSet(''))).toEqual([]);
+      expect(Array.from(normalizePuuidSet('puuid-a'))).toEqual(['puuid-a']);
+      const sourceSet = new Set(['puuid-a', 'puuid-b']);
+      const clonedSet = normalizePuuidSet(sourceSet);
+      expect(clonedSet).not.toBe(sourceSet);
+      expect(Array.from(clonedSet)).toEqual(['puuid-a', 'puuid-b']);
+    });
+
+    it('filters matches for 7d, 90d and explicit queue subsets', () => {
+      const now = 1_760_000_000_000;
+      const dayMs = 24 * 60 * 60 * 1000;
+      const makeTimed = (matchId: string, queueId: number, daysAgo: number): LolMatchSummary => ({
+        matchId,
+        platformId: 'LA2',
+        regionalCluster: 'americas',
+        queueId,
+        queueCategory: getQueueCategory(queueId),
+        gameMode: queueId === 450 ? 'ARAM' : 'CLASSIC',
+        gameType: 'MATCHED_GAME',
+        gameVersion: '16.23.1',
+        mapId: queueId === 450 ? 12 : 11,
+        gameCreation: now - daysAgo * dayMs,
+        gameStartTimestamp: now - daysAgo * dayMs,
+        gameEndTimestamp: now - daysAgo * dayMs + 1800_000,
+        gameDuration: 1800,
+        endOfGameResult: 'GameComplete',
+        participantPuuids: [],
+        teams: [],
+        participants: [],
+      });
+
+      const pool = [
+        makeTimed('m-2d-solo', 420, 2),
+        makeTimed('m-8d-aram', 450, 8),
+        makeTimed('m-45d-flex', 440, 45),
+        makeTimed('m-120d-normal', 400, 120),
+      ];
+
+      expect(filterMatchesGlobally(pool, [], '7d', now).map((m) => m.matchId)).toEqual(['m-2d-solo']);
+      expect(filterMatchesGlobally(pool, [], '90d', now).map((m) => m.matchId)).toEqual([
+        'm-2d-solo',
+        'm-8d-aram',
+        'm-45d-flex',
+      ]);
+      expect(
+        filterMatchesGlobally(pool, ['ranked_solo', 'aram'], '90d', now).map((m) => m.matchId)
+      ).toEqual(['m-2d-solo', 'm-8d-aram']);
     });
   });
 
@@ -2901,6 +2965,9 @@ describe('BG-PERF v2 LoL Performance Engine', () => {
         'puuid-santi-main',
         'puuid-santi-smurf',
       ]);
+      expect(resolveUserPrimaryAccount(accounts, null)).toBeNull();
+      expect(resolveUserPrimaryAccount(accounts, 'unknown-user')).toBeNull();
+      expect(Array.from(getUserPuuids(accounts, undefined))).toEqual([]);
 
       const groupPuuids = new Set(accounts.map((a) => a.puuid));
       const puuidToUserId = buildPuuidToUserIdMap(accounts);

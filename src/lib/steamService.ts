@@ -1,5 +1,6 @@
 import { PlayerSteamProfile, SteamOwnedGame } from '../types/domain';
 import { supabaseAnonKey, supabaseUrl } from './supabaseClient';
+import { fetchWithClientCache, readClientCache } from './clientCache';
 import {
   enrichAndSortSteamLibrary,
   inferGameMetadataAndVector,
@@ -191,6 +192,28 @@ export async function fetchSteamProfileLibrary(
  * Searches any PC/Console game globally via IGDB API v4 (when configured)
  * or Steam Store + SteamSpy live fallback, enriched with 32D metadata inference.
  */
+const STEAM_DISCOVERY_TTL_MS = 30 * 60 * 1000;
+const STEAM_DISCOVERY_STALE_TTL_MS = 6 * 60 * 60 * 1000;
+const STEAM_SEARCH_TTL_MS = 10 * 60 * 1000;
+
+function getDiscoveryCacheKey(igdbConfig?: IgdbCredentialsConfig): string {
+  const hasIgdb = Boolean(
+    igdbConfig?.igdbClientId?.trim() && igdbConfig?.igdbClientSecret?.trim()
+  );
+  return `steam:discovery:${hasIgdb ? 'igdb' : 'default'}`;
+}
+
+export function getCachedExternalDiscoveryGames(
+  igdbConfig?: IgdbCredentialsConfig
+): KnowledgeGameEntry[] {
+  const hit = readClientCache<KnowledgeGameEntry[]>(getDiscoveryCacheKey(igdbConfig), {
+    ttlMs: STEAM_DISCOVERY_TTL_MS,
+    staleTtlMs: STEAM_DISCOVERY_STALE_TTL_MS,
+    storage: 'local',
+  });
+  return hit?.data ?? [];
+}
+
 export async function searchSteamStoreGames(
   query: string,
   igdbConfig?: IgdbCredentialsConfig
@@ -198,6 +221,26 @@ export async function searchSteamStoreGames(
   const trimmed = query.trim();
   if (!trimmed) return [];
 
+  const hasIgdb = Boolean(
+    igdbConfig?.igdbClientId?.trim() && igdbConfig?.igdbClientSecret?.trim()
+  );
+  const cacheKey = `steam:search:${trimmed.toLowerCase()}:${hasIgdb ? 'igdb' : 'default'}`;
+
+  return fetchWithClientCache<SearchedSteamGame[]>(
+    cacheKey,
+    () => searchSteamStoreGamesUncached(trimmed, igdbConfig),
+    {
+      ttlMs: STEAM_SEARCH_TTL_MS,
+      storage: 'memory',
+      shouldCache: (items) => items.length > 0,
+    }
+  );
+}
+
+async function searchSteamStoreGamesUncached(
+  trimmed: string,
+  igdbConfig?: IgdbCredentialsConfig
+): Promise<SearchedSteamGame[]> {
   const endpoint = `${supabaseUrl}/functions/v1/steam-import`;
 
   try {
@@ -266,6 +309,21 @@ export async function searchSteamStoreGames(
  * to feed the Group Recommendation Discovery pool beyond static seed catalogs.
  */
 export async function fetchExternalDiscoveryGames(
+  igdbConfig?: IgdbCredentialsConfig
+): Promise<KnowledgeGameEntry[]> {
+  const cacheKey = getDiscoveryCacheKey(igdbConfig);
+  return fetchWithClientCache<KnowledgeGameEntry[]>(
+    cacheKey,
+    () => fetchExternalDiscoveryGamesUncached(igdbConfig),
+    {
+      ttlMs: STEAM_DISCOVERY_TTL_MS,
+      storage: 'local',
+      shouldCache: (items) => items.length > 0,
+    }
+  );
+}
+
+async function fetchExternalDiscoveryGamesUncached(
   igdbConfig?: IgdbCredentialsConfig
 ): Promise<KnowledgeGameEntry[]> {
   const endpoint = `${supabaseUrl}/functions/v1/steam-import`;

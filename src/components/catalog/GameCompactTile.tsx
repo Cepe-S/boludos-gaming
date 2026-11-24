@@ -75,7 +75,7 @@ export const GameCompactTile: React.FC<GameCompactTileProps> = ({
         draggable && 'cursor-grab active:cursor-grabbing',
         isPlayed
           ? 'ring-2 ring-success border-success bg-success/15 shadow-lg shadow-success/25 animate-tile-selected'
-          : 'border-border bg-card/55 backdrop-blur-sm hover:border-primary/45'
+          : 'border-border bg-card/92 hover:border-primary/45'
       )}
     >
       {/* Two-layer Steam 460x215 Cover Composition */}
@@ -269,7 +269,7 @@ export const GameCompactTile: React.FC<GameCompactTileProps> = ({
 
               {/* Floating +1/+10/+100/+500 Hover Menu */}
               <div className="absolute bottom-full right-0 pb-1 z-40 opacity-0 pointer-events-none group-hover/hours:opacity-100 group-hover/hours:pointer-events-auto transition-opacity duration-150">
-                <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/60 backdrop-blur-md p-1 shadow-xl backdrop-blur-md">
+                <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/95 p-1 shadow-xl">
                   {HOUR_DELTAS.map((delta) => (
                     <button
                       key={delta}

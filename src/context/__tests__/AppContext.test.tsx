@@ -1005,6 +1005,174 @@ describe('AppContext public contract & regression suite', () => {
       expect(getCtx().groups.map((g) => g.id)).toEqual([g1.id]);
       expect(getCtx().activeGroupId).toBe(g1.id);
     });
+
+    it('manages group admin roles, game idempotency, group session cleanup on delete, and group Discord webhook testing', async () => {
+      const memberB = makePlayer({ id: 'u2', displayName: 'Mati' });
+      const { getCtx } = mountApp({
+        seedStorage: {
+          [STORAGE_KEYS.PLAYERS]: [memberB],
+        },
+      });
+
+      // Unauthenticated invite join fails cleanly
+      const unauthJoin = getCtx().joinGroupByInviteCode('BG-TEST');
+      expect(unauthJoin.ok).toBe(false);
+      expect(unauthJoin.error).toBeTruthy();
+
+      act(() => {
+        getCtx().createAndLoginProfile({ displayName: 'Santi', discordUsername: 'santi' });
+      });
+
+      let g1!: GamingGroup;
+      let g2!: GamingGroup;
+      act(() => {
+        g1 = getCtx().createGroup({ name: 'Grupo Principal' });
+      });
+      act(() => {
+        g2 = getCtx().createGroup({ name: 'Grupo Secundario' });
+      });
+
+      // Add member and promote to admin, then demote, then remove as admin
+      act(() => {
+        getCtx().addMemberToGroup(g1.id, 'u2');
+      });
+      act(() => {
+        getCtx().updateGroup(g1.id, {
+          adminIds: [getCtx().currentUser.id, 'u2'],
+        });
+      });
+      expect(getCtx().groups.find((g) => g.id === g1.id)?.adminIds).toEqual([
+        getCtx().currentUser.id,
+        'u2',
+      ]);
+
+      // Demote admin via updateGroup
+      act(() => {
+        getCtx().updateGroup(g1.id, {
+          adminIds: [getCtx().currentUser.id],
+        });
+      });
+      expect(getCtx().groups.find((g) => g.id === g1.id)?.adminIds).toEqual([
+        getCtx().currentUser.id,
+      ]);
+
+      // Re-promote and verify removeMemberFromGroup strips from both memberIds and adminIds
+      act(() => {
+        getCtx().updateGroup(g1.id, {
+          adminIds: [getCtx().currentUser.id, 'u2'],
+        });
+      });
+      act(() => {
+        getCtx().removeMemberFromGroup(g1.id, 'u2');
+      });
+      const updatedG1 = getCtx().groups.find((g) => g.id === g1.id)!;
+      expect(updatedG1.memberIds).not.toContain('u2');
+      expect(updatedG1.adminIds).not.toContain('u2');
+
+      // addGameToGroup is idempotent and removeGameFromGroup is safe
+      const gameId = INITIAL_GAMES[0].id;
+      act(() => {
+        getCtx().addGameToGroup(g1.id, gameId);
+        getCtx().addGameToGroup(g1.id, gameId);
+      });
+      expect(
+        getCtx().groups.find((g) => g.id === g1.id)?.gameIds.filter((id) => id === gameId)
+      ).toHaveLength(1);
+
+      act(() => {
+        getCtx().removeGameFromGroup(g1.id, gameId);
+      });
+      act(() => {
+        getCtx().removeGameFromGroup(g1.id, 'non-existent-game');
+      });
+      expect(getCtx().groups.find((g) => g.id === g1.id)?.gameIds).toEqual([]);
+
+      // Group Discord webhook validation + successful dispatch + failure logging
+      let webhookRes!: { ok: boolean; error?: string };
+      await act(async () => {
+        webhookRes = await getCtx().testGroupDiscordWebhook('missing-group');
+      });
+      expect(webhookRes).toEqual({ ok: false, error: 'Grupo no encontrado' });
+
+      await act(async () => {
+        webhookRes = await getCtx().testGroupDiscordWebhook(g1.id);
+      });
+      expect(webhookRes.ok).toBe(false);
+      expect(webhookRes.error).toContain('Webhook');
+
+      const webhookUrl = 'https://discord.com/api/webhooks/123456/abcdef';
+      act(() => {
+        getCtx().updateGroup(g1.id, {
+          discordConfig: {
+            enabled: true,
+            webhookUrl,
+            channelName: 'grupo-principal',
+            guildName: 'Boludos Server',
+            mentionRoleId: '999888',
+            useEveryoneMention: true,
+          },
+        });
+      });
+
+      const logsBefore = getCtx().discordLogs.length;
+      await act(async () => {
+        webhookRes = await getCtx().testGroupDiscordWebhook(g1.id);
+      });
+      expect(webhookRes).toEqual({ ok: true });
+      expect(dispatchDiscordWebhookMock).toHaveBeenCalledTimes(1);
+      expect(dispatchDiscordWebhookMock.mock.calls[0][0]).toBe(webhookUrl);
+      expect(getCtx().discordLogs.length).toBe(logsBefore + 1);
+      expect(getCtx().discordLogs[0].groupId).toBe(g1.id);
+      expect(getCtx().discordLogs[0].deliveredToWebhook).toBe(true);
+
+      dispatchDiscordWebhookMock.mockResolvedValueOnce({ ok: false, error: 'HTTP 404' });
+      await act(async () => {
+        webhookRes = await getCtx().testGroupDiscordWebhook(g1.id);
+      });
+      expect(webhookRes).toEqual({ ok: false, error: 'HTTP 404' });
+      expect(getCtx().discordLogs[0].deliveredToWebhook).toBe(false);
+      expect(getCtx().discordLogs[0].webhookError).toBe('HTTP 404');
+
+      // Deleting a group also removes sessions scoped to that group while keeping others
+      let monotonicNow = Date.now();
+      const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => ++monotonicNow);
+      let sessG1!: GamingSession;
+      let sessG2!: GamingSession;
+      try {
+        act(() => {
+          sessG1 = getCtx().createSession({
+            title: 'Session G1',
+            date: '2026-11-24',
+            mode: 'random',
+            allowSplitLobbies: false,
+            availableFrom: '21:00',
+            availableUntil: '23:00',
+            precisionMinutes: 15,
+            groupId: g1.id,
+          });
+          sessG2 = getCtx().createSession({
+            title: 'Session G2',
+            date: '2026-11-24',
+            mode: 'random',
+            allowSplitLobbies: false,
+            availableFrom: '21:00',
+            availableUntil: '23:00',
+            precisionMinutes: 15,
+            groupId: g2.id,
+          });
+        });
+      } finally {
+        nowSpy.mockRestore();
+      }
+      expect(getCtx().sessions.map((s) => s.id)).toContain(sessG1.id);
+      expect(getCtx().sessions.map((s) => s.id)).toContain(sessG2.id);
+
+      act(() => {
+        getCtx().deleteGroup(g2.id);
+      });
+      expect(getCtx().sessions.map((s) => s.id)).toContain(sessG1.id);
+      expect(getCtx().sessions.map((s) => s.id)).not.toContain(sessG2.id);
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useLolRouteState } from '@/hooks/useLolRouteState';
 import { buildDemoLolDataset } from '@/lib/lolDemoData';
-import { DEFAULT_DDRAGON_VERSION, loadDdragonRunesAndSpells } from '@/lib/lolDdragon';
+import { DEFAULT_DDRAGON_VERSION, getCachedDdragonVersion, loadDdragonRunesAndSpells } from '@/lib/lolDdragon';
 import {
   DEFAULT_LOL_QUEUE_FILTERS,
   DEFAULT_LOL_TIME_RANGE,
@@ -22,7 +22,10 @@ import {
 } from '@/lib/lolPerformanceEngine';
 import {
   fetchGroupLolData,
+  getCachedGroupLolData,
+  getCachedRiotEdgeStatus,
   getRiotEdgeStatus,
+  invalidateGroupLolCache,
   linkAndSyncRiotAccount,
   saveServerRiotApiKey,
   setLocalRiotApiKey,
@@ -120,63 +123,98 @@ export const LeagueOfLegendsView: React.FC = () => {
     });
   }, []);
 
-  const [ddragonVersion, setDdragonVersion] = useState(DEFAULT_DDRAGON_VERSION);
-  const [hasServerRiotKey, setHasServerRiotKey] = useState<boolean | null>(null);
-  const [serverKeyUpdatedAt, setServerKeyUpdatedAt] = useState<string | null>(null);
+  const memberIdsKey = useMemo(
+    () => Array.from(new Set(groupMembers.map((m) => m.id))).sort().join(','),
+    [groupMembers]
+  );
+  const stableMemberIds = useMemo(
+    () => (memberIdsKey ? memberIdsKey.split(',') : []),
+    [memberIdsKey]
+  );
 
-  const [liveAccounts, setLiveAccounts] = useState<LolAccount[]>([]);
-  const [liveMatches, setLiveMatches] = useState<LolMatchSummary[]>([]);
-  const [isLoadingLive, setIsLoadingLive] = useState(true);
+  const initialLolCache = useMemo(
+    () => getCachedGroupLolData(stableMemberIds),
+    // Only read initial snapshot once per member set change
+    [stableMemberIds]
+  );
+  const initialEdgeStatus = useMemo(() => getCachedRiotEdgeStatus(), []);
+
+  const [ddragonVersion, setDdragonVersion] = useState<string>(() => getCachedDdragonVersion());
+  const [hasServerRiotKey, setHasServerRiotKey] = useState<boolean | null>(
+    () => initialEdgeStatus?.hasServerKey ?? null
+  );
+  const [serverKeyUpdatedAt, setServerKeyUpdatedAt] = useState<string | null>(
+    () => initialEdgeStatus?.updatedAt ?? null
+  );
+
+  const [liveAccounts, setLiveAccounts] = useState<LolAccount[]>(
+    () => initialLolCache?.accounts ?? []
+  );
+  const [liveMatches, setLiveMatches] = useState<LolMatchSummary[]>(
+    () => initialLolCache?.matches ?? []
+  );
+  const [isLoadingLive, setIsLoadingLive] = useState<boolean>(() => !initialLolCache);
   const [isSyncing, setIsSyncing] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
 
-  const [isPageReady, setIsPageReady] = useState(false);
+  const [isPageReady, setIsPageReady] = useState<boolean>(() => Boolean(initialLolCache));
   const [revealGen, setRevealGen] = useState(0);
 
-  const demoData = useMemo(() => buildDemoLolDataset(groupMembers), [groupMembers]);
+  // Only build heavy demo dataset when Demo Mode is explicitly enabled
+  const demoData = useMemo(
+    () => (isDemoMode ? buildDemoLolDataset(groupMembers) : null),
+    [isDemoMode, groupMembers]
+  );
 
-  const loadLiveData = useCallback(async () => {
-    const memberIds = groupMembers.map((m) => m.id);
-    if (memberIds.length === 0) {
-      setLiveAccounts([]);
-      setLiveMatches([]);
+  const loadLiveData = useCallback(
+    async (forceRefresh = false) => {
+      if (stableMemberIds.length === 0) {
+        setLiveAccounts([]);
+        setLiveMatches([]);
+        setIsLoadingLive(false);
+        return { accounts: [] as LolAccount[], matches: [] as LolMatchSummary[] };
+      }
+
+      const cached = !forceRefresh ? getCachedGroupLolData(stableMemberIds) : null;
+      if (cached) {
+        setLiveAccounts(cached.accounts);
+        setLiveMatches(cached.matches);
+        setIsLoadingLive(false);
+        if (cached.isFresh) {
+          return { accounts: cached.accounts, matches: cached.matches };
+        }
+      } else {
+        setIsLoadingLive(true);
+      }
+
+      const res = await fetchGroupLolData(stableMemberIds, { forceRefresh });
+      setLiveAccounts(res.accounts);
+      setLiveMatches(res.matches);
       setIsLoadingLive(false);
-      return { accounts: [] as LolAccount[], matches: [] as LolMatchSummary[] };
-    }
 
-    setIsLoadingLive(true);
-    const res = await fetchGroupLolData(memberIds);
-    setLiveAccounts(res.accounts);
-    setLiveMatches(res.matches);
-    setIsLoadingLive(false);
-
-    if (res.error) {
-      setFeedback({ type: 'error', message: res.error });
-    }
-    return { accounts: res.accounts, matches: res.matches };
-  }, [groupMembers]);
+      if (res.error) {
+        setFeedback({ type: 'error', message: res.error });
+      }
+      return { accounts: res.accounts, matches: res.matches };
+    },
+    [stableMemberIds]
+  );
 
   useEffect(() => {
     let cancelled = false;
 
-    const runFullBootPipeline = async () => {
-      setIsPageReady(false);
-
-      let resolvedVersion = ddragonVersion || DEFAULT_DDRAGON_VERSION;
-
-      const ddragonPromise = loadDdragonRunesAndSpells()
+    const runBootPipeline = async () => {
+      // Non-blocking background DDragon & Riot Edge status warm-up
+      void loadDdragonRunesAndSpells()
         .then((ver) => {
-          resolvedVersion = ver;
-          if (!cancelled) {
-            setDdragonVersion(ver);
-          }
+          if (!cancelled) setDdragonVersion(ver);
         })
         .catch(() => undefined);
 
-      const edgePromise = getRiotEdgeStatus()
+      void getRiotEdgeStatus()
         .then((status) => {
           if (!cancelled) {
             setHasServerRiotKey(status.hasServerKey);
@@ -189,81 +227,84 @@ export const LeagueOfLegendsView: React.FC = () => {
           }
         });
 
-      const dataPromise = (async () => {
-        if (isDemoMode) {
-          return {
-            accounts: demoData.accounts,
-            matches: demoData.matches,
-            members: demoData.members,
-          };
-        }
-        const live = await loadLiveData();
-        return {
-          accounts: live.accounts,
-          matches: live.matches,
-          members: groupMembers,
-        };
-      })();
+      if (isDemoMode) {
+        setIsPageReady(true);
+        setRevealGen((g) => g + 1);
+        return;
+      }
 
-      const [, , resolvedData] = await Promise.all([
-        ddragonPromise,
-        edgePromise,
-        dataPromise,
-      ]);
+      const cached = getCachedGroupLolData(stableMemberIds);
+      if (cached) {
+        setLiveAccounts(cached.accounts);
+        setLiveMatches(cached.matches);
+        setIsLoadingLive(false);
+        setIsPageReady(true);
+        if (cached.isFresh) return;
+      } else if (stableMemberIds.length > 0) {
+        setIsPageReady(false);
+      }
 
+      const live = await loadLiveData(false);
       if (cancelled) return;
 
+      // Warm up critical images asynchronously without blocking UI rendering
       const imageUrls = collectLolCriticalImageUrls({
-        accounts: resolvedData.accounts,
-        matches: resolvedData.matches,
-        members: resolvedData.members,
-        ddragonVersion: resolvedVersion,
+        accounts: live.accounts,
+        matches: live.matches,
+        members: groupMembers,
+        ddragonVersion: getCachedDdragonVersion() || DEFAULT_DDRAGON_VERSION,
       });
+      void preloadLolImages(imageUrls, 1100);
 
-      await preloadLolImages(imageUrls, 1100);
-
-      if (cancelled) return;
-
-      setRevealGen((g) => g + 1);
+      if (!cached) {
+        setRevealGen((g) => g + 1);
+      }
       setIsPageReady(true);
     };
 
-    void runFullBootPipeline();
+    void runBootPipeline();
 
     return () => {
       cancelled = true;
     };
-  }, [isDemoMode, loadLiveData, demoData, groupMembers]);
+    // Intentionally depend on stableMemberIds (sorted IDs string) so unrelated AppContext re-renders never flash loading
+  }, [isDemoMode, stableMemberIds, loadLiveData]);
 
   useEffect(() => {
     if (!supabase || isDemoMode) return;
     const client = supabase;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        invalidateGroupLolCache();
+        void loadLiveData(true);
+      }, 600);
+    };
     const channel = client
       .channel('lol-group-sync')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lol_accounts' },
-        () => {
-          void loadLiveData();
-        }
+        scheduleRefresh
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lol_matches' },
-        () => {
-          void loadLiveData();
-        }
+        scheduleRefresh
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       void client.removeChannel(channel);
     };
   }, [isDemoMode, loadLiveData]);
 
-  const activeMembers = isDemoMode ? demoData.members : groupMembers;
-  const activeAccounts = isDemoMode ? demoData.accounts : liveAccounts;
-  const activeMatches = isDemoMode ? demoData.matches : liveMatches;
+  const activeMembers = isDemoMode && demoData ? demoData.members : groupMembers;
+  const activeAccounts = isDemoMode && demoData ? demoData.accounts : liveAccounts;
+  const activeMatches = isDemoMode && demoData ? demoData.matches : liveMatches;
 
   useEffect(() => {
     if (isLoadingLive && !isDemoMode) return;
@@ -332,7 +373,7 @@ export const LeagueOfLegendsView: React.FC = () => {
 
   const personalStats = useMemo(
     () =>
-      !selectedAccount
+      viewMode !== 'personal' || !selectedAccount
         ? null
         : computePlayerAggregates(
             globallyFilteredMatches,
@@ -341,7 +382,7 @@ export const LeagueOfLegendsView: React.FC = () => {
             'all',
             puuidToUserId
           ).personal,
-    [globallyFilteredMatches, selectedAccount, selectedUserPuuids, groupPuuids, puuidToUserId]
+    [viewMode, globallyFilteredMatches, selectedAccount, selectedUserPuuids, groupPuuids, puuidToUserId]
   );
 
   const currentUserAccount = useMemo(
@@ -368,7 +409,7 @@ export const LeagueOfLegendsView: React.FC = () => {
 
   const personalInGroupStats = useMemo(
     () =>
-      !currentUserAccount
+      viewMode !== 'group' || !currentUserAccount
         ? null
         : computePlayerAggregates(
             globallyFilteredMatches,
@@ -377,12 +418,12 @@ export const LeagueOfLegendsView: React.FC = () => {
             'all',
             puuidToUserId
           ).inGroup,
-    [globallyFilteredMatches, currentUserAccount, currentUserPuuids, groupPuuids, puuidToUserId]
+    [viewMode, globallyFilteredMatches, currentUserAccount, currentUserPuuids, groupPuuids, puuidToUserId]
   );
 
   const personalRecords = useMemo(
     () =>
-      !selectedAccount
+      viewMode !== 'personal' || !selectedAccount
         ? []
         : computePersonalRecords({
             matches: globallyFilteredMatches,
@@ -392,64 +433,74 @@ export const LeagueOfLegendsView: React.FC = () => {
             avatarUrl: selectedMemberProfile.avatarUrl,
             queueFilter: 'all',
           }),
-    [globallyFilteredMatches, selectedAccount, selectedUserPuuids, selectedMemberProfile]
+    [viewMode, globallyFilteredMatches, selectedAccount, selectedUserPuuids, selectedMemberProfile]
   );
 
   const groupAggregateStats = useMemo(
     () =>
-      computeGroupAggregateStats({
-        matches: globallyFilteredMatches,
-        accounts: activeAccounts,
-        queueFilter: 'all',
-      }),
-    [globallyFilteredMatches, activeAccounts]
+      viewMode !== 'group'
+        ? null
+        : computeGroupAggregateStats({
+            matches: globallyFilteredMatches,
+            accounts: activeAccounts,
+            queueFilter: 'all',
+          }),
+    [viewMode, globallyFilteredMatches, activeAccounts]
   );
 
   const groupPicks = useMemo(
     () =>
-      computeGroupPicks({
-        matches: globallyFilteredMatches,
-        accounts: activeAccounts,
-        playerProfiles: activeMembers,
-        queueFilter: 'all',
-        minGames: 3,
-        tableLimit: 5,
-      }),
-    [globallyFilteredMatches, activeAccounts, activeMembers]
+      viewMode !== 'group'
+        ? null
+        : computeGroupPicks({
+            matches: globallyFilteredMatches,
+            accounts: activeAccounts,
+            playerProfiles: activeMembers,
+            queueFilter: 'all',
+            minGames: 3,
+            tableLimit: 5,
+          }),
+    [viewMode, globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
   const leaderboardEntries = useMemo(
     () =>
-      computeGroupLeaderboard({
-        matches: globallyFilteredMatches,
-        accounts: activeAccounts,
-        playerProfiles: activeMembers,
-        queueFilter: 'all',
-      }),
-    [globallyFilteredMatches, activeAccounts, activeMembers]
+      viewMode !== 'group'
+        ? []
+        : computeGroupLeaderboard({
+            matches: globallyFilteredMatches,
+            accounts: activeAccounts,
+            playerProfiles: activeMembers,
+            queueFilter: 'all',
+          }),
+    [viewMode, globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
   const roleLeaderboard = useMemo(
     () =>
-      computeGroupLeaderboardByRole({
-        matches: globallyFilteredMatches,
-        accounts: activeAccounts,
-        playerProfiles: activeMembers,
-        queueFilter: 'all',
-      }),
-    [globallyFilteredMatches, activeAccounts, activeMembers]
+      viewMode !== 'group'
+        ? null
+        : computeGroupLeaderboardByRole({
+            matches: globallyFilteredMatches,
+            accounts: activeAccounts,
+            playerProfiles: activeMembers,
+            queueFilter: 'all',
+          }),
+    [viewMode, globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
   const groupRecords = useMemo(
     () =>
-      computeGroupRecords({
-        matches: globallyFilteredMatches,
-        accounts: activeAccounts,
-        playerProfiles: activeMembers,
-        queueFilter: 'all',
-        scope: 'group',
-      }),
-    [globallyFilteredMatches, activeAccounts, activeMembers]
+      viewMode !== 'group'
+        ? []
+        : computeGroupRecords({
+            matches: globallyFilteredMatches,
+            accounts: activeAccounts,
+            playerProfiles: activeMembers,
+            queueFilter: 'all',
+            scope: 'group',
+          }),
+    [viewMode, globallyFilteredMatches, activeAccounts, activeMembers]
   );
 
   const championDetailStats = useMemo(() => {
@@ -503,7 +554,7 @@ export const LeagueOfLegendsView: React.FC = () => {
     try {
       const res = await linkAndSyncRiotAccount(params);
       if (res.ok) {
-        await loadLiveData();
+        await loadLiveData(true);
         setSelectedUserId(params.userId);
         const roleLabel = params.isPrimary === false ? 'secundaria' : 'principal';
         showTransientFeedback(
@@ -523,7 +574,7 @@ export const LeagueOfLegendsView: React.FC = () => {
     try {
       const res = await syncRiotPlayer({ userId });
       if (res.ok) {
-        await loadLiveData();
+        await loadLiveData(true);
         showTransientFeedback(
           'success',
           `Sincronizado (${res.fetchedMatches ?? 0} nuevas, ${res.cachedMatches ?? 0} en caché).`
@@ -543,7 +594,7 @@ export const LeagueOfLegendsView: React.FC = () => {
     try {
       const res = await syncRiotGroup({ userIds: ids });
       if (res.ok) {
-        await loadLiveData();
+        await loadLiveData(true);
         showTransientFeedback(
           'success',
           `Grupo sincronizado: ${res.syncedCount ?? activeAccounts.length} cuentas, ${res.fetchedMatches ?? 0} partidas nuevas.`
@@ -561,7 +612,7 @@ export const LeagueOfLegendsView: React.FC = () => {
     try {
       const res = await unlinkRiotAccount(userId, puuid);
       if (res.ok) {
-        await loadLiveData();
+        await loadLiveData(true);
         showTransientFeedback('success', 'Cuenta de Riot desvinculada.');
       } else {
         showTransientFeedback('error', res.error || 'No se pudo desvincular.');
@@ -576,7 +627,7 @@ export const LeagueOfLegendsView: React.FC = () => {
     try {
       const res = await setPrimaryRiotAccount(userId, puuid);
       if (res.ok) {
-        await loadLiveData();
+        await loadLiveData(true);
         showTransientFeedback('success', 'Cuenta principal actualizada.');
       } else {
         showTransientFeedback('error', res.error || 'No se pudo cambiar la cuenta principal.');
@@ -836,7 +887,7 @@ export const LeagueOfLegendsView: React.FC = () => {
             />
           </div>
         </div>
-      ) : (
+      ) : groupAggregateStats && groupPicks && roleLeaderboard ? (
         <div key={filterAnimKey} className="space-y-4">
           {/* Fila 2: Overview Grupal + Estadísticas Personales en Games del Grupo */}
           <div className="animate-lol-reveal" style={{ animationDelay: '65ms' }}>
@@ -969,7 +1020,7 @@ export const LeagueOfLegendsView: React.FC = () => {
             />
           </div>
         </div>
-      )}
+      ) : null}
 
       {championsModal.open &&
         viewMode === 'personal' &&
@@ -993,7 +1044,7 @@ export const LeagueOfLegendsView: React.FC = () => {
           />
         )}
 
-      {championsModal.open && viewMode === 'group' && (
+      {championsModal.open && viewMode === 'group' && groupPicks && (
         <LolChampionsModal
           mode="group"
           groupName={activeGroup?.name || 'Grupo'}

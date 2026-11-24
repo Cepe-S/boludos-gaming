@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { startTransition, useEffect } from 'react';
 import {
   ChatMessage,
   DiscordIntegrationConfig,
@@ -76,11 +76,11 @@ export function useSupabaseAuthSync({
     if (!isSupabaseConfigured() || !supabase) return;
 
     let isMounted = true;
+    let inFlight = false;
+    let pendingRefresh = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const hydrate = async () => {
-      const data = await fetchAllSupabaseData();
-      if (!data || !isMounted) return;
-
+    const applyHydratedState = (data: NonNullable<Awaited<ReturnType<typeof fetchAllSupabaseData>>>) => {
       // Update state with Supabase tables while preserving only an active local profile not yet flushed
       setPlayers((prev) => {
         if (data.players.length === 0 && prev.length === 0) {
@@ -145,14 +145,47 @@ export function useSupabaseAuthSync({
       if (data.discordConfig) setDiscordConfig(data.discordConfig);
     };
 
-    hydrate();
+    const hydrate = async (isRealtimeRefresh = false) => {
+      if (inFlight) {
+        pendingRefresh = true;
+        return;
+      }
+      inFlight = true;
+      try {
+        const data = await fetchAllSupabaseData();
+        if (!data || !isMounted) return;
+        if (isRealtimeRefresh) {
+          startTransition(() => applyHydratedState(data));
+        } else {
+          applyHydratedState(data);
+        }
+      } finally {
+        inFlight = false;
+        if (pendingRefresh && isMounted) {
+          pendingRefresh = false;
+          scheduleRealtimeHydrate();
+        }
+      }
+    };
+
+    const scheduleRealtimeHydrate = () => {
+      if (!isMounted) return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void hydrate(true);
+      }, 450);
+    };
+
+    void hydrate(false);
 
     const unsubscribe = subscribeToSupabaseRealtime(() => {
-      hydrate();
+      scheduleRealtimeHydrate();
     });
 
     return () => {
       isMounted = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
       unsubscribe();
     };
   }, [

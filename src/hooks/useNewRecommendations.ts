@@ -8,11 +8,18 @@ import {
   generateGroupGameRecommendations,
   normalizeGameName,
 } from '@/lib/tasteProfileEngine';
-import { fetchExternalDiscoveryGames } from '@/lib/steamService';
+import { fetchExternalDiscoveryGames, getCachedExternalDiscoveryGames } from '@/lib/steamService';
 
 const DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 let cachedDiscoveryGames: KnowledgeGameEntry[] = [];
 let cachedDiscoveryFetchedAt = 0;
+
+interface CachedRecResultEntry {
+  readyToPlay: GroupGameRecommendation[];
+  discovery: GroupGameRecommendation[];
+}
+const MAX_REC_RESULT_CACHE = 8;
+const recommendationResultCache = new Map<string, CachedRecResultEntry>();
 
 export interface UseNewRecommendationsOptions {
   targetPlayers: PlayerProfile[];
@@ -30,9 +37,15 @@ export function useNewRecommendations({
   includeReadyToPlay = true,
 }: UseNewRecommendationsOptions) {
   const { games, preferences, discordConfig, activeGroup, addGame } = useApp();
-  const [liveDiscoveryGames, setLiveDiscoveryGames] = useState<KnowledgeGameEntry[]>(
-    () => cachedDiscoveryGames
-  );
+  const [liveDiscoveryGames, setLiveDiscoveryGames] = useState<KnowledgeGameEntry[]>(() => {
+    if (cachedDiscoveryGames.length > 0) return cachedDiscoveryGames;
+    const persisted = getCachedExternalDiscoveryGames();
+    if (persisted.length > 0) {
+      cachedDiscoveryGames = persisted;
+      cachedDiscoveryFetchedAt = Date.now();
+    }
+    return persisted;
+  });
 
   useEffect(() => {
     const isCacheFresh =
@@ -100,9 +113,35 @@ export function useNewRecommendations({
 
   const recommendationVotes = activeGroup?.recommendationVotes;
 
-  const recommendationResult = useMemo(() => {
+  const recCacheKey = useMemo(() => {
+    if (!enabled || stableTargetPlayers.length === 0) return '';
+    const catalogKey = catalogGames.map((g) => g.id).sort().join(',');
+    const excludeKey = `${games.length}:${games.slice(-5).map((g) => g.id).join(',')}`;
+    const prefKey = `${preferences.length}:${preferences
+      .filter((p) => p.plays)
+      .map((p) => `${p.userId}:${p.gameId}:${p.rating}`)
+      .join(',')}`;
+    return `${targetPlayersKey}|${catalogKey}|${excludeKey}|${prefKey}|${liveDiscoveryGames.length}|${maxResults}|${includeReadyToPlay ? 1 : 0}`;
+  }, [
+    enabled,
+    stableTargetPlayers.length,
+    targetPlayersKey,
+    catalogGames,
+    games,
+    preferences,
+    liveDiscoveryGames.length,
+    maxResults,
+    includeReadyToPlay,
+  ]);
+
+  const baseRecommendationResult = useMemo(() => {
     if (!enabled || stableTargetPlayers.length === 0) {
       return { readyToPlay: [] as GroupGameRecommendation[], discovery: [] as GroupGameRecommendation[] };
+    }
+
+    const cached = recommendationResultCache.get(recCacheKey);
+    if (cached) {
+      return cached;
     }
 
     const result = generateGroupGameRecommendations({
@@ -121,11 +160,19 @@ export function useNewRecommendations({
       return true;
     });
 
-    return {
+    const computed: CachedRecResultEntry = {
       readyToPlay: includeReadyToPlay ? result.readyToPlay : [],
-      discovery: applyRecommendationFeedback(filteredDiscovery, recommendationVotes),
+      discovery: filteredDiscovery,
     };
+
+    if (recommendationResultCache.size >= MAX_REC_RESULT_CACHE) {
+      const oldestKey = recommendationResultCache.keys().next().value;
+      if (oldestKey !== undefined) recommendationResultCache.delete(oldestKey);
+    }
+    recommendationResultCache.set(recCacheKey, computed);
+    return computed;
   }, [
+    recCacheKey,
     enabled,
     stableTargetPlayers,
     catalogGames,
@@ -133,9 +180,19 @@ export function useNewRecommendations({
     liveDiscoveryGames,
     maxResults,
     excludeNames,
-    recommendationVotes,
     includeReadyToPlay,
   ]);
+
+  const recommendationResult = useMemo(
+    () => ({
+      readyToPlay: baseRecommendationResult.readyToPlay,
+      discovery: applyRecommendationFeedback(
+        baseRecommendationResult.discovery,
+        recommendationVotes
+      ),
+    }),
+    [baseRecommendationResult, recommendationVotes]
+  );
 
   const newRecommendations = recommendationResult.discovery;
   const readyToPlayRecommendations = recommendationResult.readyToPlay;

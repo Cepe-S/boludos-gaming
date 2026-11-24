@@ -5,6 +5,7 @@ import { getPlayerArchetypeBadge } from '@/lib/playerCategorizationEngine';
 import { PvjArchetypeIcon } from '@/components/PvjDimensionIcon';
 import { BrandWordmark } from '@/components/layout/BrandWordmark';
 import { AppTab, ROUTES, getPathForTab } from '@/lib/routes';
+import { prefetchRouteModule, prefetchTabRoute } from '@/lib/routePrefetch';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -56,7 +57,7 @@ function getKarmaBadgeVariant(score: number): 'success' | 'warning' | 'destructi
   return 'destructive';
 }
 
-export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
+export const AppSidebarContent: React.FC<AppSidebarContentProps> = React.memo(({
   activeTab,
   setActiveTab,
   onOpenDiscordModal,
@@ -264,6 +265,8 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
               <Link
                 key={item.id}
                 to={getPathForTab(item.id)}
+                onMouseEnter={() => prefetchTabRoute(item.id)}
+                onFocus={() => prefetchTabRoute(item.id)}
                 onClick={() => onItemNavigate?.()}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
@@ -293,6 +296,8 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
         <div className="space-y-1 pt-3 border-t border-border">
           <button
             type="button"
+            onMouseEnter={() => prefetchRouteModule('schedule')}
+            onFocus={() => prefetchRouteModule('schedule')}
             onClick={() => {
               setShowWeeklyScheduleModal(true);
               onItemNavigate?.();
@@ -305,6 +310,8 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
 
           <button
             type="button"
+            onMouseEnter={() => prefetchRouteModule('discord')}
+            onFocus={() => prefetchRouteModule('discord')}
             onClick={() => {
               onOpenDiscordModal();
               onItemNavigate?.();
@@ -325,6 +332,8 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
 
           <button
             type="button"
+            onMouseEnter={() => prefetchRouteModule('onboarding')}
+            onFocus={() => prefetchRouteModule('onboarding')}
             onClick={() => {
               setShowOnboardingModal(true);
               onItemNavigate?.();
@@ -457,4 +466,4 @@ export const AppSidebarContent: React.FC<AppSidebarContentProps> = ({
       </div>
     </div>
   );
-};
+});

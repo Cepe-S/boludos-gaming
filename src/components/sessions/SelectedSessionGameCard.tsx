@@ -101,7 +101,7 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
         </a>
 
         <div className="pointer-events-none absolute top-2 left-2 z-20">
-          <Badge variant="outline" className="text-[10px] bg-background/85 backdrop-blur-sm">
+          <Badge variant="outline" className="text-[10px] bg-background/92">
             {game.category}
           </Badge>
         </div>
@@ -125,7 +125,7 @@ export const SelectedSessionGameCard: React.FC<SelectedSessionGameCardProps> = (
 
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-75 group-hover/cover:opacity-100 group-hover/cover:text-foreground group-hover/cover:border-primary/60 transition-all"
+          className="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-background/92 border border-border text-muted-foreground opacity-75 group-hover/cover:opacity-100 group-hover/cover:text-foreground group-hover/cover:border-primary/60 transition-all"
         >
           <ExternalLink className="w-3 h-3" strokeWidth={1.75} />
         </span>

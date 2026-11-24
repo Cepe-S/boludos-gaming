@@ -316,7 +316,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
   } = useNewRecommendations({
     targetPlayers: sessionTargetPlayers,
     catalogGames: groupGames,
-    enabled: Boolean(activeSession),
+    enabled: Boolean(activeSession) && sessionSubTab === 'recommendations',
     maxResults: 30,
   });
 
@@ -659,7 +659,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onNavigateToGroups }
               </TabsTrigger>
               <TabsTrigger value="recommendations" className="gap-1.5 text-xs">
                 <Brain className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-                <span>Recomendaciones ({newRecommendations.length})</span>
+                <span>
+                  Recomendaciones
+                  {newRecommendations.length > 0 ? ` (${newRecommendations.length})` : ''}
+                </span>
               </TabsTrigger>
             </TabsList>
 

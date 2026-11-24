@@ -563,13 +563,13 @@ export const SessionRecommendationsView: React.FC<
           <div className="pointer-events-none absolute top-2 left-2 z-20 flex flex-wrap items-center gap-1.5 max-w-[78%]">
             <Badge
               variant="outline"
-              className="text-[10px] bg-background/85 backdrop-blur-sm"
+              className="text-[10px] bg-background/92"
             >
               {rec.category}
             </Badge>
             <Badge
               variant="outline"
-              className="text-[10px] bg-background/85 backdrop-blur-sm font-mono inline-flex items-center gap-1"
+              className="text-[10px] bg-background/92 font-mono inline-flex items-center gap-1"
             >
               <span>{rec.releaseYear ?? 2024}</span>
               <span>·</span>
@@ -594,7 +594,7 @@ export const SessionRecommendationsView: React.FC<
 
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-75 group-hover:opacity-100 group-hover:text-foreground group-hover:border-primary/60 transition-all"
+            className="pointer-events-none absolute bottom-2 right-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-background/92 border border-border text-muted-foreground opacity-75 group-hover:opacity-100 group-hover:text-foreground group-hover:border-primary/60 transition-all"
           >
             <ExternalLink className="w-3 h-3" strokeWidth={1.75} />
           </span>
@@ -606,7 +606,7 @@ export const SessionRecommendationsView: React.FC<
               variant={isChosenOrLocked ? 'emerald' : 'secondary'}
               title={isChosenOrLocked ? 'Seleccionado' : 'Elegir para jugar'}
               className={cn(
-                'absolute bottom-2 left-2 z-30 shadow-md backdrop-blur-sm',
+                'absolute bottom-2 left-2 z-30 shadow-md',
                 !isChosenOrLocked &&
                   'bg-background/85 hover:bg-background text-foreground border-border/90'
               )}
@@ -628,7 +628,7 @@ export const SessionRecommendationsView: React.FC<
               size="xs"
               variant="default"
               title={actionLabel}
-              className="absolute bottom-2 left-2 z-30 shadow-md backdrop-blur-sm bg-primary/95 hover:bg-primary border-primary/60"
+              className="absolute bottom-2 left-2 z-30 shadow-md bg-primary/95 hover:bg-primary border-primary/60"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();

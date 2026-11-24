@@ -1,7 +1,11 @@
 # Boludos Gaming — AGENTS.md
 
 ## Reglas de Navegación y Eficiencia
-1. **Serena MCP primero:** Priorizar las herramientas de símbolos de Serena MCP (`find_symbol`, `find_referencing_symbols`, `replace_symbol_body`) antes de leer archivos enteros.
+1. **Serena MCP primero (modo REPL):** Antes de leer o editar código `.ts`/`.tsx`, inicializar Serena con `call_mcp_tool("serena", "initial_instructions", {})` (y si no hay proyecto activo, `activate_project` con la ruta de este workspace y el `session` id) y operar vía `serena_repl`:
+   - **Simbólico antes que lectura completa:** usar `s.lsp.get_symbols_overview` → `s.lsp.find_symbol(..., include_body=True)` y `s.lsp.find_referencing_symbols` en lugar de `s.fs.read_file` o `read_file` nativo.
+   - **Edición y diagnóstico en Serena:** usar `s.edit.replace_symbol_body`, `s.edit.replace_content`, `s.lsp.rename_symbol` (evitar `edit_file` nativo en `.ts`/`.tsx`) y validar tipos con `s.lsp.get_diagnostics_for_file` / `s.lsp.get_diagnostics_for_symbol`.
+   - **Batching obligatorio:** agrupar múltiples consultas/ediciones en un solo script `serena_repl` por turno para minimizar round-trips de contexto.
+   - **Memorias del proyecto:** consultar `s.mem.list_memories()` / `s.mem.read_memory(...)` al arrancar tareas grandes.
 2. **Sin búsquedas por terminal:** Prohibido usar la terminal (`grep`, `find`, `ls -R` o equivalentes) para buscar en el código.
 3. **Respetar `.antigravityignore`:** No leer ni indexar dependencias, builds, lockfiles, cachés, SQL ni assets multimedia.
 4. **UI & Diseño:** Consultar `DESIGN.md` antes de tocar o crear componentes de UI.

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef } from 'react';
 import {
   ChatMessage,
   DiscordIntegrationConfig,
@@ -13,7 +13,7 @@ import {
 } from '../../types/domain';
 import { STORAGE_KEYS, saveToStorage } from './storageAndHelpers';
 
-type SyncBroadcastMessage =
+export type SyncBroadcastMessage =
   | { type: 'SYNC_PLAYERS'; payload: PlayerProfile[] }
   | { type: 'SYNC_GROUPS'; payload: GamingGroup[] }
   | { type: 'SYNC_SESSIONS'; payload: GamingSession[] }
@@ -24,16 +24,16 @@ type SyncBroadcastMessage =
   | { type: 'SYNC_PUSH_ALERTS'; payload: PushNotificationAlert[] }
   | {
       type: 'SYNC_ALL';
-      payload: {
-        players?: PlayerProfile[];
-        groups?: GamingGroup[];
-        sessions?: GamingSession[];
-        preferences?: UserGamePreference[];
-        sanctions?: SanctionRecord[];
-        chatMessages?: ChatMessage[];
-        discordLogs?: DiscordNotificationLog[];
-        games?: Game[];
-      };
+      payload: Partial<{
+        players: PlayerProfile[];
+        groups: GamingGroup[];
+        sessions: GamingSession[];
+        preferences: UserGamePreference[];
+        sanctions: SanctionRecord[];
+        chatMessages: ChatMessage[];
+        discordLogs: DiscordNotificationLog[];
+        games: Game[];
+      }>;
     };
 
 export interface UseLocalStorageAndTabSyncParams {
@@ -53,16 +53,20 @@ export interface UseLocalStorageAndTabSyncParams {
   discordLogs: DiscordNotificationLog[];
   pushAlerts: PushNotificationAlert[];
   syncChannel: BroadcastChannel | null;
-  setPlayers: React.Dispatch<React.SetStateAction<PlayerProfile[]>>;
-  setGroups: React.Dispatch<React.SetStateAction<GamingGroup[]>>;
-  setSessions: React.Dispatch<React.SetStateAction<GamingSession[]>>;
-  setPreferences: React.Dispatch<React.SetStateAction<UserGamePreference[]>>;
-  setSanctions: React.Dispatch<React.SetStateAction<SanctionRecord[]>>;
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  setDiscordLogs: React.Dispatch<React.SetStateAction<DiscordNotificationLog[]>>;
-  setPushAlerts: React.Dispatch<React.SetStateAction<PushNotificationAlert[]>>;
-  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
+  setPlayers: Dispatch<SetStateAction<PlayerProfile[]>>;
+  setGroups: Dispatch<SetStateAction<GamingGroup[]>>;
+  setSessions: Dispatch<SetStateAction<GamingSession[]>>;
+  setPreferences: Dispatch<SetStateAction<UserGamePreference[]>>;
+  setSanctions: Dispatch<SetStateAction<SanctionRecord[]>>;
+  setChatMessages: Dispatch<SetStateAction<ChatMessage[]>>;
+  setDiscordLogs: Dispatch<SetStateAction<DiscordNotificationLog[]>>;
+  setPushAlerts: Dispatch<SetStateAction<PushNotificationAlert[]>>;
+  setGames: Dispatch<SetStateAction<Game[]>>;
 }
+
+const IS_TEST_ENV =
+  typeof import.meta !== 'undefined' &&
+  Boolean((import.meta as { env?: { MODE?: string } }).env?.MODE === 'test');
 
 export function useLocalStorageAndTabSync({
   players,
@@ -91,37 +95,132 @@ export function useLocalStorageAndTabSync({
   setPushAlerts,
   setGames,
 }: UseLocalStorageAndTabSyncParams): void {
-  // Save changes to localStorage
+  const isInitialMountRef = useRef(true);
+  const pendingWritesRef = useRef<Map<string, unknown>>(new Map());
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPendingWrites = useRef(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    if (pendingWritesRef.current.size === 0) return;
+    const entries = Array.from(pendingWritesRef.current.entries());
+    pendingWritesRef.current.clear();
+    for (const [key, val] of entries) {
+      saveToStorage(key, val);
+    }
+  });
+
+  const scheduleHeavyWrite = (key: string, value: unknown) => {
+    if (IS_TEST_ENV) {
+      saveToStorage(key, value);
+      return;
+    }
+    pendingWritesRef.current.set(key, value);
+    if (flushTimerRef.current) return;
+
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        (
+          window as Window & {
+            requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+          }
+        ).requestIdleCallback(() => flushPendingWrites.current(), { timeout: 600 });
+      } else {
+        flushPendingWrites.current();
+      }
+    }, 220);
+  };
+
   useEffect(() => {
-    saveToStorage(STORAGE_KEYS.PLAYERS, players);
+    if (typeof window === 'undefined' || IS_TEST_ENV) return;
+    const onFlush = () => flushPendingWrites.current();
+    window.addEventListener('pagehide', onFlush);
+    window.addEventListener('beforeunload', onFlush);
+    return () => {
+      window.removeEventListener('pagehide', onFlush);
+      window.removeEventListener('beforeunload', onFlush);
+      flushPendingWrites.current();
+    };
+  }, []);
+
+  // Heavy slices: skip initial mount echo & defer JSON.stringify off the click critical path
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.PLAYERS, players);
   }, [players]);
 
   useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.GAMES, games);
+  }, [games]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.PREFERENCES, preferences);
+  }, [preferences]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.GROUPS, groups);
+  }, [groups]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.SESSIONS, sessions);
+  }, [sessions]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.SANCTIONS, sanctions);
+  }, [sanctions]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.CHAT_MESSAGES, chatMessages);
+  }, [chatMessages]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.DISCORD_CONFIG, discordConfig);
+  }, [discordConfig]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.DISCORD_LOGS, discordLogs);
+  }, [discordLogs]);
+
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    scheduleHeavyWrite(STORAGE_KEYS.PUSH_ALERTS, pushAlerts);
+  }, [pushAlerts]);
+
+  // Tiny scalar keys: always fast (<0.05ms), keep synchronous
+  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
     saveToStorage(STORAGE_KEYS.CURRENT_USER_ID, currentUserId);
   }, [currentUserId]);
 
   useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
     saveToStorage(STORAGE_KEYS.IS_AUTHENTICATED, isAuthenticated);
   }, [isAuthenticated]);
 
   useEffect(() => {
-    saveToStorage(STORAGE_KEYS.GAMES, games);
-  }, [games]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.PREFERENCES, preferences);
-  }, [preferences]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.GROUPS, groups);
-  }, [groups]);
-
-  useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
     saveToStorage(STORAGE_KEYS.ACTIVE_GROUP_ID, activeGroupIdState);
   }, [activeGroupIdState]);
 
   useEffect(() => {
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
+    saveToStorage(STORAGE_KEYS.ACTIVE_SESSION_ID, activeSessionId);
+  }, [activeSessionId]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (isInitialMountRef.current && !IS_TEST_ENV) return;
     if (pendingInviteCode) {
       saveToStorage(STORAGE_KEYS.PENDING_INVITE_CODE, pendingInviteCode);
     } else {
@@ -129,33 +228,10 @@ export function useLocalStorageAndTabSync({
     }
   }, [pendingInviteCode]);
 
+  // Mark initial mount complete after the first effect pass
   useEffect(() => {
-    saveToStorage(STORAGE_KEYS.SESSIONS, sessions);
-  }, [sessions]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.ACTIVE_SESSION_ID, activeSessionId);
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.SANCTIONS, sanctions);
-  }, [sanctions]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages);
-  }, [chatMessages]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.DISCORD_CONFIG, discordConfig);
-  }, [discordConfig]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.DISCORD_LOGS, discordLogs);
-  }, [discordLogs]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.PUSH_ALERTS, pushAlerts);
-  }, [pushAlerts]);
+    isInitialMountRef.current = false;
+  }, []);
 
   // Listen to BroadcastChannel messages for multi-tab sync
   useEffect(() => {

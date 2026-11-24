@@ -1,3 +1,5 @@
+import { readClientCache, writeClientCache } from './clientCache';
+
 export const DEFAULT_DDRAGON_VERSION = '15.22.1';
 
 export interface DdragonSpellMeta {
@@ -522,6 +524,16 @@ export function getGradeColorClasses(grade: string): string {
 // Live Data Dragon Cache & Loader
 // ---------------------------------------------------------------------------
 
+const DDRAGON_VERSION_TTL_MS = 24 * 60 * 60 * 1000;
+const DDRAGON_STATIC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DDRAGON_VERSION_CACHE_KEY = 'ddragon:latest-version';
+
+interface CachedDdragonStaticBundle {
+  styles: DdragonStyleMeta[];
+  runes: DdragonRuneMeta[];
+  spells: DdragonSpellMeta[];
+}
+
 let cachedLatestVersion: string | null = null;
 let versionFetchPromise: Promise<string> | null = null;
 
@@ -531,8 +543,45 @@ const liveStyleMap = new Map<number, DdragonStyleMeta>();
 const loadedVersions = new Set<string>();
 let staticFetchPromise: Promise<void> | null = null;
 
+function hydrateStaticMapsFromBundle(bundle: CachedDdragonStaticBundle, version: string): void {
+  for (const style of bundle.styles) liveStyleMap.set(style.id, style);
+  for (const rune of bundle.runes) liveRuneMap.set(rune.id, rune);
+  for (const spell of bundle.spells) liveSpellMap.set(spell.id, spell);
+  loadedVersions.add(version);
+}
+
+export function getCachedDdragonVersion(): string {
+  if (cachedLatestVersion) return cachedLatestVersion;
+  const hit = readClientCache<string>(DDRAGON_VERSION_CACHE_KEY, {
+    ttlMs: DDRAGON_VERSION_TTL_MS,
+    staleTtlMs: DDRAGON_STATIC_TTL_MS,
+    storage: 'local',
+  });
+  if (hit?.data) {
+    cachedLatestVersion = hit.data;
+    const staticHit = readClientCache<CachedDdragonStaticBundle>(`ddragon:static:${hit.data}`, {
+      ttlMs: DDRAGON_STATIC_TTL_MS,
+      storage: 'local',
+    });
+    if (staticHit?.data) {
+      hydrateStaticMapsFromBundle(staticHit.data, hit.data);
+    }
+    return hit.data;
+  }
+  return DEFAULT_DDRAGON_VERSION;
+}
+
 export async function fetchLatestDdragonVersion(): Promise<string> {
   if (cachedLatestVersion) return cachedLatestVersion;
+  const persisted = readClientCache<string>(DDRAGON_VERSION_CACHE_KEY, {
+    ttlMs: DDRAGON_VERSION_TTL_MS,
+    storage: 'local',
+  });
+  if (persisted?.isFresh && persisted.data) {
+    cachedLatestVersion = persisted.data;
+    return persisted.data;
+  }
+
   if (versionFetchPromise) return versionFetchPromise;
 
   versionFetchPromise = (async () => {
@@ -542,6 +591,7 @@ export async function fetchLatestDdragonVersion(): Promise<string> {
       const versions = (await res.json()) as unknown;
       if (Array.isArray(versions) && typeof versions[0] === 'string') {
         cachedLatestVersion = versions[0];
+        writeClientCache(DDRAGON_VERSION_CACHE_KEY, cachedLatestVersion, { storage: 'local' });
         return cachedLatestVersion;
       }
       return DEFAULT_DDRAGON_VERSION;
@@ -586,6 +636,16 @@ interface RawDdragonSummonerJson {
 export async function loadDdragonRunesAndSpells(preferredVersion?: string): Promise<string> {
   const version = preferredVersion || (await fetchLatestDdragonVersion());
   if (loadedVersions.has(version)) return version;
+
+  const staticKey = `ddragon:static:${version}`;
+  const persistedStatic = readClientCache<CachedDdragonStaticBundle>(staticKey, {
+    ttlMs: DDRAGON_STATIC_TTL_MS,
+    storage: 'local',
+  });
+  if (persistedStatic?.data) {
+    hydrateStaticMapsFromBundle(persistedStatic.data, version);
+    return version;
+  }
 
   if (!staticFetchPromise) {
     staticFetchPromise = (async () => {
@@ -652,6 +712,17 @@ export async function loadDdragonRunesAndSpells(preferredVersion?: string): Prom
       }
 
       loadedVersions.add(version);
+      if (liveStyleMap.size > 0 || liveSpellMap.size > 0) {
+        writeClientCache<CachedDdragonStaticBundle>(
+          staticKey,
+          {
+            styles: Array.from(liveStyleMap.values()),
+            runes: Array.from(liveRuneMap.values()),
+            spells: Array.from(liveSpellMap.values()),
+          },
+          { storage: 'local' }
+        );
+      }
     })().finally(() => {
       staticFetchPromise = null;
     });

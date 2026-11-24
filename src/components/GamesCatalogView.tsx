@@ -22,6 +22,7 @@ import { computePlayerPvj6dProfile } from '@/lib/playerCategorizationEngine';
 import {
   SearchedSteamGame,
   fetchExternalDiscoveryGames,
+  getCachedExternalDiscoveryGames,
   searchSteamStoreGames,
 } from '@/lib/steamService';
 import {
@@ -188,7 +189,7 @@ export function GamesCatalogView({
 
   // Unified selector & podium state
   const [discoveryGames, setDiscoveryGames] = useState<KnowledgeGameEntry[]>(
-    []
+    () => getCachedExternalDiscoveryGames()
   );
   const [isLoadingDiscovery, setIsLoadingDiscovery] = useState<boolean>(false);
   const [selectorTab, setSelectorTab] = useState<SelectorFilterTab>('all');

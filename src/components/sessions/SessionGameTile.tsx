@@ -203,7 +203,7 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
         {/* Top-left: Score & Rank/Status */}
         <div className="pointer-events-none absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
           {rank !== undefined && (
-            <span className="px-1.5 py-0.5 rounded bg-background/85 backdrop-blur-sm border border-border text-[10px] font-mono font-bold text-foreground">
+            <span className="px-1.5 py-0.5 rounded bg-background/92 border border-border text-[10px] font-mono font-bold text-foreground">
               #{rank}
             </span>
           )}
@@ -216,7 +216,7 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
             {score}%
           </span>
           {statusPill && (
-            <span className="px-1.5 py-0.5 rounded bg-background/85 backdrop-blur-sm border border-border text-[9px] font-medium text-muted-foreground">
+            <span className="px-1.5 py-0.5 rounded bg-background/92 border border-border text-[9px] font-medium text-muted-foreground">
               {statusPill}
             </span>
           )}
@@ -230,7 +230,7 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
                 type="button"
                 onClick={(e) => e.stopPropagation()}
                 aria-label={`Detalles de ${name}`}
-                className="w-6 h-6 rounded-full bg-background/85 backdrop-blur-sm border border-border text-muted-foreground hover:text-foreground hover:border-primary/60 flex items-center justify-center transition-colors cursor-pointer"
+                className="w-6 h-6 rounded-full bg-background/92 border border-border text-muted-foreground hover:text-foreground hover:border-primary/60 flex items-center justify-center transition-colors cursor-pointer"
               >
                 <Info className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
@@ -244,7 +244,7 @@ export const SessionGameTile: React.FC<SessionGameTileProps> = ({
         {/* Bottom-right: Subtle ExternalLink badge */}
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute bottom-1.5 right-1.5 z-20 inline-flex items-center justify-center w-5 h-5 rounded bg-background/85 backdrop-blur-sm border border-border text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+          className="pointer-events-none absolute bottom-1.5 right-1.5 z-20 inline-flex items-center justify-center w-5 h-5 rounded bg-background/92 border border-border text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
         >
           <ExternalLink className="w-3 h-3" strokeWidth={1.75} />
         </span>
