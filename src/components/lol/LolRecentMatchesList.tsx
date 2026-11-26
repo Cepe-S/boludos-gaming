@@ -305,10 +305,12 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
           selectPuuid: userPart.puuid,
         });
       } else {
+        if (match.participants.length === 0) continue;
         const groupCount = countGroupMembersInMatch(match, groupPuuids, puuidToUserId);
         if (groupCount < 2) continue;
 
         const resolved = resolveGroupMatchOutcome(match, groupPuuids);
+        if (resolved.groupParticipants.length === 0) continue;
         if (!matchesOutcomeFilter(resolved.outcome)) continue;
 
         const sortedGroupParticipants = [...resolved.groupParticipants].sort(
@@ -709,7 +711,7 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
                           )}
                         >
                           {teamRoster.map((p) => {
-                            const isUser = isPersonal && p.puuid === targetPuuid;
+                            const isUser = isPersonal && effectiveTargetPuuids.has(p.puuid);
                             const isGroup = !isPersonal && groupPuuids.has(p.puuid);
                             return (
                               <div
@@ -767,7 +769,7 @@ export const LolRecentMatchesList: React.FC<LolRecentMatchesListProps> = ({
         <ParticipantHoverPortal
           info={hoveredParticipant}
           isInspectedUser={
-            isPersonal && hoveredParticipant.participant.puuid === targetPuuid
+            isPersonal && effectiveTargetPuuids.has(hoveredParticipant.participant.puuid)
           }
           groupAccount={accountByPuuid.get(hoveredParticipant.participant.puuid)}
           ddragonVersion={ddragonVersion}

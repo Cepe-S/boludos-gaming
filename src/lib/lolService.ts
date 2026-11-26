@@ -41,7 +41,7 @@ export interface RiotEdgeStatusResult {
 }
 
 function getLolGroupCacheKey(memberIds: string[]): string {
-  return `lol:group:${Array.from(new Set(memberIds)).sort().join(',')}`;
+  return `lol:group:v2:${Array.from(new Set(memberIds)).sort().join(',')}`;
 }
 
 export function getCachedGroupLolData(
@@ -337,24 +337,42 @@ async function fetchGroupLolDataUncached(
   }
 
   const matchIds = rawMatches.map((m) => String(m.match_id));
+  const participantSelect =
+    'match_id, puuid, participant_id, team_id, riot_id_game_name, riot_id_tag_line, summoner_name, champion_id, champion_name, champ_level, team_position, individual_position, win, game_ended_in_surrender, game_ended_in_early_surrender, team_early_surrendered, outcome, enemy_surrendered, kills, deaths, assists, kda, cs, cs_per_min, gold_earned, damage_to_champions, damage_taken, damage_to_objectives, damage_to_turrets, vision_score, kill_participation, summoner1_id, summoner2_id, primary_rune_id, primary_style_id, sub_style_id, items, performance_score, performance_grade, performance_breakdown, match_rank, is_mvp, is_ace, highlights, total_time_spent_dead:raw_participant->>totalTimeSpentDead, enemy_missing_pings:raw_participant->>enemyMissingPings';
 
-  const { data: participantRows, error: partError } = await supabase
-    .from('lol_match_participants')
-    .select(
-      'match_id, puuid, participant_id, team_id, riot_id_game_name, riot_id_tag_line, summoner_name, champion_id, champion_name, champ_level, team_position, individual_position, win, game_ended_in_surrender, game_ended_in_early_surrender, team_early_surrendered, outcome, enemy_surrendered, kills, deaths, assists, kda, cs, cs_per_min, gold_earned, damage_to_champions, damage_taken, damage_to_objectives, damage_to_turrets, vision_score, kill_participation, summoner1_id, summoner2_id, primary_rune_id, primary_style_id, sub_style_id, items, performance_score, performance_grade, performance_breakdown, match_rank, is_mvp, is_ace, highlights, total_time_spent_dead:raw_participant->>totalTimeSpentDead, enemy_missing_pings:raw_participant->>enemyMissingPings'
+  // Fetch participants in parallel chunks of 40 match_ids so each request stays well below
+  // Supabase PostgREST's 1,000-row response cap even for 18-player Arena/Cherry matches.
+  const PARTICIPANT_MATCH_CHUNK_SIZE = 40;
+  const matchIdChunks: string[][] = [];
+  for (let i = 0; i < matchIds.length; i += PARTICIPANT_MATCH_CHUNK_SIZE) {
+    matchIdChunks.push(matchIds.slice(i, i + PARTICIPANT_MATCH_CHUNK_SIZE));
+  }
+
+  const chunkResults = await Promise.all(
+    matchIdChunks.map((chunk) =>
+      supabase!
+        .from('lol_match_participants')
+        .select(participantSelect)
+        .in('match_id', chunk)
     )
-    .in('match_id', matchIds);
+  );
 
-  if (partError) {
-    return {
-      accounts,
-      matches: [],
-      error: partError.message,
-    };
+  const participantRows: Array<Record<string, unknown>> = [];
+  for (const chunkRes of chunkResults) {
+    if (chunkRes.error) {
+      return {
+        accounts,
+        matches: [],
+        error: chunkRes.error.message,
+      };
+    }
+    if (chunkRes.data) {
+      participantRows.push(...(chunkRes.data as Array<Record<string, unknown>>));
+    }
   }
 
   const participantsByMatch = new Map<string, LolMatchParticipantSummary[]>();
-  for (const row of (participantRows || []) as Array<Record<string, unknown>>) {
+  for (const row of participantRows) {
     const mapped = mapParticipantRow(row);
     const list = participantsByMatch.get(mapped.matchId) || [];
     list.push(mapped);
